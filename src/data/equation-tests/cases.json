@@ -1,0 +1,310 @@
+[
+  {
+    "id": "valid-01-water",
+    "description": "Образование воды",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 2, "formula": "H2" },
+        { "coefficient": 1, "formula": "O2" }
+      ],
+      "products": [
+        { "coefficient": 2, "formula": "H2O" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "valid-02-ammonia",
+    "description": "Синтез аммиака",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "N2" },
+        { "coefficient": 3, "formula": "H2" }
+      ],
+      "products": [
+        { "coefficient": 2, "formula": "NH3" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "valid-03-sodium-chloride",
+    "description": "Образование хлорида натрия",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 2, "formula": "Na" },
+        { "coefficient": 1, "formula": "Cl2" }
+      ],
+      "products": [
+        { "coefficient": 2, "formula": "NaCl" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "valid-04-calcium-carbonate",
+    "description": "Разложение карбоната кальция",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "CaCO3" }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "CaO" },
+        { "coefficient": 1, "formula": "CO2" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "valid-05-potassium-chlorate",
+    "description": "Разложение хлората калия",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 2, "formula": "KClO3" }
+      ],
+      "products": [
+        { "coefficient": 2, "formula": "KCl" },
+        { "coefficient": 3, "formula": "O2" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "valid-06-neutralization",
+    "description": "Нейтрализация серной кислоты",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "H2SO4" },
+        { "coefficient": 2, "formula": "NaOH" }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "Na2SO4" },
+        { "coefficient": 2, "formula": "H2O" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "valid-07-silver-chloride",
+    "description": "Ионное образование хлорида серебра",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "Ag", "charge": 1 },
+        { "coefficient": 1, "formula": "Cl", "charge": -1 }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "AgCl", "charge": 0 }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "valid-08-iron-hydroxide",
+    "description": "Образование гидроксида железа",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "Fe", "charge": 3 },
+        { "coefficient": 3, "formula": "OH", "charge": -1 }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "Fe(OH)3", "charge": 0 }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "valid-09-ammonium-hydroxide",
+    "description": "Равновесие ионов аммония и гидроксида",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "NH4", "charge": 1 },
+        { "coefficient": 1, "formula": "OH", "charge": -1 }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "NH3", "charge": 0 },
+        { "coefficient": 1, "formula": "H2O", "charge": 0 }
+      ],
+      "arrow": "<->"
+    }
+  },
+  {
+    "id": "valid-10-water-dissociation",
+    "description": "Диссоциация воды",
+    "expectedValid": true,
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "H2O", "charge": 0 }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "H", "charge": 1 },
+        { "coefficient": 1, "formula": "OH", "charge": -1 }
+      ],
+      "arrow": "<->"
+    }
+  },
+  {
+    "id": "invalid-01-empty-side",
+    "description": "Пустая левая часть",
+    "expectedValid": false,
+    "expectedIssue": "empty-side",
+    "answer": {
+      "reactants": [],
+      "products": [
+        { "coefficient": 1, "formula": "H2O" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "invalid-02-zero-coefficient",
+    "description": "Нулевой коэффициент",
+    "expectedValid": false,
+    "expectedIssue": "invalid-coefficient",
+    "answer": {
+      "reactants": [
+        { "coefficient": 0, "formula": "H2" },
+        { "coefficient": 1, "formula": "O2" }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "H2O" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "invalid-03-fractional-coefficient",
+    "description": "Дробный коэффициент",
+    "expectedValid": false,
+    "expectedIssue": "invalid-coefficient",
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "H2" },
+        { "coefficient": 0.5, "formula": "O2" }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "H2O" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "invalid-04-coefficient-inside-formula",
+    "description": "Коэффициент записан внутри формулы",
+    "expectedValid": false,
+    "expectedIssue": "invalid-formula",
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "2H2" },
+        { "coefficient": 1, "formula": "O2" }
+      ],
+      "products": [
+        { "coefficient": 2, "formula": "H2O" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "invalid-05-unsupported-arrow",
+    "description": "Неподдерживаемая стрелка",
+    "expectedValid": false,
+    "expectedIssue": "unsupported-arrow",
+    "answer": {
+      "reactants": [
+        { "coefficient": 2, "formula": "H2" },
+        { "coefficient": 1, "formula": "O2" }
+      ],
+      "products": [
+        { "coefficient": 2, "formula": "H2O" }
+      ],
+      "arrow": "=>"
+    }
+  },
+  {
+    "id": "invalid-06-unbalanced-atoms",
+    "description": "Не совпадает число атомов",
+    "expectedValid": false,
+    "expectedIssue": "unbalanced-atoms",
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "H2" },
+        { "coefficient": 1, "formula": "O2" }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "H2O" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "invalid-07-unbalanced-charge",
+    "description": "Не совпадает суммарный заряд",
+    "expectedValid": false,
+    "expectedIssue": "unbalanced-charge",
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "Ag", "charge": 1 },
+        { "coefficient": 1, "formula": "Cl", "charge": -1 }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "AgCl", "charge": 1 }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "invalid-08-non-minimal",
+    "description": "Коэффициенты не сокращены",
+    "expectedValid": false,
+    "expectedIssue": "non-minimal-coefficients",
+    "answer": {
+      "reactants": [
+        { "coefficient": 4, "formula": "H2" },
+        { "coefficient": 2, "formula": "O2" }
+      ],
+      "products": [
+        { "coefficient": 4, "formula": "H2O" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "invalid-09-unclosed-parenthesis",
+    "description": "Незакрытая скобка",
+    "expectedValid": false,
+    "expectedIssue": "invalid-formula",
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "Fe(OH3" }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "FeO3H3" }
+      ],
+      "arrow": "->"
+    }
+  },
+  {
+    "id": "invalid-10-zero-index",
+    "description": "Нулевой индекс элемента",
+    "expectedValid": false,
+    "expectedIssue": "invalid-formula",
+    "answer": {
+      "reactants": [
+        { "coefficient": 1, "formula": "H0" },
+        { "coefficient": 1, "formula": "O2" }
+      ],
+      "products": [
+        { "coefficient": 1, "formula": "H2O" }
+      ],
+      "arrow": "->"
+    }
+  }
+]

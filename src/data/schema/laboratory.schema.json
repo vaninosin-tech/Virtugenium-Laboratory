@@ -1,0 +1,300 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://virtugenium.local/schemas/laboratory.schema.json",
+  "title": "Virtugenium Laboratory Data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "items", "experiments"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/definitions/reagent" },
+          { "$ref": "#/definitions/glassware" },
+          { "$ref": "#/definitions/equipment" },
+          { "$ref": "#/definitions/safetyItem" }
+        ]
+      }
+    },
+    "experiments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/experiment"
+      }
+    }
+  },
+  "definitions": {
+    "entityId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "matterState": {
+      "enum": ["solid", "liquid", "gas", "aqueous"]
+    },
+    "actionType": {
+      "enum": [
+        "take-item",
+        "place-item",
+        "pour",
+        "mix",
+        "heat",
+        "wait",
+        "submit-equation"
+      ]
+    },
+    "reagent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "name",
+        "description",
+        "assetId",
+        "formula",
+        "state",
+        "color",
+        "transparent",
+        "hazardIds"
+      ],
+      "properties": {
+        "id": { "$ref": "#/definitions/entityId" },
+        "category": { "const": "reagent" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "assetId": { "$ref": "#/definitions/entityId" },
+        "formula": { "type": "string", "minLength": 1 },
+        "state": { "$ref": "#/definitions/matterState" },
+        "color": { "type": "string", "minLength": 1 },
+        "transparent": { "type": "boolean" },
+        "hazardIds": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/entityId" }
+        }
+      }
+    },
+    "glassware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "name",
+        "description",
+        "assetId",
+        "kind",
+        "capacityMl"
+      ],
+      "properties": {
+        "id": { "$ref": "#/definitions/entityId" },
+        "category": { "const": "glassware" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "assetId": { "$ref": "#/definitions/entityId" },
+        "kind": {
+          "enum": ["test-tube", "beaker", "flask", "reagent-bottle"]
+        },
+        "capacityMl": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "equipment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "name",
+        "description",
+        "assetId",
+        "kind",
+        "attachmentPointIds"
+      ],
+      "properties": {
+        "id": { "$ref": "#/definitions/entityId" },
+        "category": { "const": "equipment" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "assetId": { "$ref": "#/definitions/entityId" },
+        "kind": {
+          "enum": ["burner", "stand", "holder", "tongs", "basket"]
+        },
+        "attachmentPointIds": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/entityId" }
+        }
+      }
+    },
+    "safetyItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "name",
+        "description",
+        "assetId",
+        "kind"
+      ],
+      "properties": {
+        "id": { "$ref": "#/definitions/entityId" },
+        "category": { "const": "safety" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "assetId": { "$ref": "#/definitions/entityId" },
+        "kind": {
+          "enum": [
+            "goggles",
+            "gloves",
+            "lab-coat",
+            "fire-extinguisher",
+            "sand"
+          ]
+        }
+      }
+    },
+    "scoreRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "points", "reason"],
+      "properties": {
+        "id": { "$ref": "#/definitions/entityId" },
+        "points": { "type": "integer" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "stepRequirement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "itemId"],
+          "properties": {
+            "type": { "const": "item-selected" },
+            "itemId": { "$ref": "#/definitions/entityId" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "itemId", "targetId"],
+          "properties": {
+            "type": { "const": "item-placed" },
+            "itemId": { "$ref": "#/definitions/entityId" },
+            "targetId": { "$ref": "#/definitions/entityId" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "actionType"],
+          "properties": {
+            "type": { "const": "action-completed" },
+            "actionType": { "$ref": "#/definitions/actionType" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "equationId"],
+          "properties": {
+            "type": { "const": "equation-correct" },
+            "equationId": { "$ref": "#/definitions/entityId" }
+          }
+        }
+      ]
+    },
+    "experimentStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "instruction",
+        "allowedActions",
+        "requirements",
+        "successScoreRules",
+        "errorScoreRules"
+      ],
+      "properties": {
+        "id": { "$ref": "#/definitions/entityId" },
+        "title": { "type": "string", "minLength": 1 },
+        "instruction": { "type": "string", "minLength": 1 },
+        "allowedActions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/actionType" }
+        },
+        "requirements": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/stepRequirement" }
+        },
+        "successScoreRules": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/scoreRule" }
+        },
+        "errorScoreRules": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/scoreRule" }
+        }
+      }
+    },
+    "chemicalEquation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "molecular"],
+      "properties": {
+        "id": { "$ref": "#/definitions/entityId" },
+        "molecular": { "type": "string", "minLength": 1 },
+        "completeIonic": { "type": "string", "minLength": 1 },
+        "netIonic": { "type": "string", "minLength": 1 }
+      }
+    },
+    "experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "description",
+        "requiredItemIds",
+        "steps",
+        "equations",
+        "maximumScore"
+      ],
+      "properties": {
+        "id": { "$ref": "#/definitions/entityId" },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "requiredItemIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/entityId" }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/experimentStep" }
+        },
+        "equations": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/chemicalEquation" }
+        },
+        "maximumScore": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
