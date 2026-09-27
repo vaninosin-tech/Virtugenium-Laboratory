@@ -47,10 +47,11 @@ const HEAT_DOLLY_DISTANCE = 0.32;
 const HEAT_DOLLY_DAMPING = 6;
 /**
  * Camera-to-tube distance in the close-up. The tube is 15 cm tall; at the
- * inspection FOV this puts it at roughly half the screen height, with the
- * flame below, the gas above the mouth and the heating swing (±3.5 cm) in frame.
+ * inspection FOV this fills most of the screen height — bubbles, copper and
+ * gas are centimetres and millimetres across and read as specks any further
+ * out — with the flame below and a few centimetres of gas above the mouth.
  */
-const TUBE_CLOSE_UP_DISTANCE = 0.36;
+const TUBE_CLOSE_UP_DISTANCE = 0.26;
 const YAW_SENSITIVITY = 0.0028;
 const PITCH_SENSITIVITY = 0.0022;
 /**

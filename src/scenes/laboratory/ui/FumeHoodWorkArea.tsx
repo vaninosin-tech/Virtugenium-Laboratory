@@ -52,13 +52,21 @@ const BOTTLES_LOCAL: Position3 = [0.34, WORKTOP_Y, 0.02];
 const BOTTLE_SPACING_X = 0.13;
 
 /**
+ * A dead-on quarter turn put the rod exactly behind the tube: the metal
+ * showed through the liquid and the whole column read as a steel rod. This
+ * much off the camera axis moves the rod beside the tube while the tube
+ * still faces the camera.
+ */
+const STAND_TURN_ASIDE = 0.5;
+
+/**
  * The stand's ring arm points along the model's +X, i.e. sideways across
  * the hood, so the clamped tube hid beside the rod. A quarter turn points
  * the arm at the sash — at the camera — with the tube in front of the rod,
  * and turns the heating sweep (the tube's local Z) into left-right motion on
  * screen, the same axis as the knob's track.
  */
-const STAND_ROTATION_Y = -Math.PI / 2;
+const STAND_ROTATION_Y = -Math.PI / 2 + STAND_TURN_ASIDE;
 
 /**
  * Heating tilts the tube instead of sliding it: the tube stays clamped in the

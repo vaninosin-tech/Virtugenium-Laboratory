@@ -3,7 +3,9 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { DepthOfFieldEffect, MaskFunction } from "postprocessing";
 import { Vector3 } from "three";
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
+import { useHeatingStore } from "../lib/useHeatingStore";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
+import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
 
 class InspectionBlurEffect extends DepthOfFieldEffect {
@@ -41,12 +43,18 @@ export function InspectionDepthOfField() {
     // read the tube grid clearly, so it skips the cinematic DoF entirely
     // instead of chasing a focus distance that would only work for one
     // specific tilt/scale.
-    effect.active =
-      inspection.inspectedId !== null &&
-      inspection.kind !== "holder" &&
-      useRuntimeQualityStore.getState().quality !== "LOW";
+    const inspectingJar = inspection.inspectedId !== null && inspection.kind !== "holder";
+    // The tube close-up (looking at it, or heating it) gets the same
+    // treatment: the bottles right in front of the camera and the hood's
+    // walls go soft, the reaction stays sharp.
+    const tubeCloseUp =
+      TUBE_FOCUS.valid && (useTubeCloseUpStore.getState().viewing || useHeatingStore.getState().active);
+    effect.active = (inspectingJar || tubeCloseUp) && useRuntimeQualityStore.getState().quality !== "LOW";
     effect.blendMode.opacity.value = effect.active ? 1 : 0;
-    if (effect.active) effect.target!.fromArray(inspection.stagePosition);
+    if (effect.active) {
+      if (inspectingJar) effect.target!.fromArray(inspection.stagePosition);
+      else effect.target!.copy(TUBE_FOCUS.point);
+    }
   });
   useEffect(() => {
     cancelDeferredDispose(effect);

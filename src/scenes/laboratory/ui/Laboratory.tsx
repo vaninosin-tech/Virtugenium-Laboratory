@@ -17,6 +17,8 @@ import { HeatingControls } from "./HeatingControls";
 import { InspectionControls } from "./InspectionControls";
 import { LabNoticeOverlay } from "./LabNoticeOverlay";
 import { TubeCloseUpControls } from "./TubeCloseUpControls";
+import { useHeatingStore } from "../lib/useHeatingStore";
+import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { SandboxPanel } from "../sandbox/SandboxPanel";
 import { setupSandbox, teardownSandbox } from "../sandbox/setupSandbox";
 import { LabRoom } from "./LabRoom";
@@ -480,6 +482,9 @@ export function Laboratory() {
   const requestCabinetReturn = useSceneInteractionStore((state) => state.requestCabinetReturn);
   const tablePosition = useFurniturePositionStore((state) => state.getOverride("table").position);
   const bunsenStandOnWorkbench = useBunsenStandStorageStore((state) => state.onWorkbench);
+  const tubeViewing = useTubeCloseUpStore((state) => state.viewing);
+  const heatingActive = useHeatingStore((state) => state.active);
+  const tubeCloseUp = tubeViewing || heatingActive;
   const gameCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const resumeMouseLook = useCallback(() => {
@@ -652,7 +657,10 @@ export function Laboratory() {
       <TubeCloseUpControls />
       <LabNoticeOverlay />
       <SandboxPanel />
-      <InspectionControls onBack={returnToOverview} />
+      {/* The tube close-up has its own way out («Отойти» / «Отойти от
+          штатива»), and these buttons sat right over the bottom of the tube,
+          where the copper and the precipitate are. */}
+      {tubeCloseUp ? null : <InspectionControls onBack={returnToOverview} />}
       <ReagentInspectionOverlay />
 
       {showZonePanel ? (
