@@ -20,6 +20,7 @@ import { LabNoticeOverlay } from "./LabNoticeOverlay";
 import { TubeCloseUpControls } from "./TubeCloseUpControls";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
+import { SceneStepAutoAdvance } from "../../../features/tablet/lib/SceneStepAutoAdvance";
 import { SandboxPanel } from "../sandbox/SandboxPanel";
 import { setupSandbox, teardownSandbox } from "../sandbox/setupSandbox";
 import { LabRoom } from "./LabRoom";
@@ -659,6 +660,7 @@ export function Laboratory() {
       <TubeCloseUpControls />
       <LabNoticeOverlay />
       <SandboxPanel />
+      <SceneStepAutoAdvance />
       {/* The tube close-up has its own way out («Отойти» / «Отойти от
           штатива»), and these buttons sat right over the bottom of the tube,
           where the copper and the precipitate are. */}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getStageSceneRequirement,
+  isSceneCompletedStep,
   type SceneSnapshot,
 } from "./stageSceneConfig";
 
@@ -13,6 +14,8 @@ const snapshot = (overrides: Partial<SceneSnapshot> = {}): SceneSnapshot => ({
   fumeHoodReagentIds: [],
   fumeHoodTubeContents: [],
   standInFumeHood: false,
+  clampedHoodTubeContents: null,
+  heatingDone: false,
   ...overrides,
 });
 
@@ -122,8 +125,30 @@ describe("step-1-transfer", () => {
   });
 });
 
+describe("step-1-experiment", () => {
+  const requirement = getStageSceneRequirement("step-1-experiment")!;
+
+  it("needs copper and acid in the clamped tube and the heating finished", () => {
+    expect(requirement.isMet(snapshot({ clampedHoodTubeContents: ["cu", "hno3"], heatingDone: true }))).toBe(true);
+  });
+
+  it("rejects heating finished on copper alone", () => {
+    expect(requirement.isMet(snapshot({ clampedHoodTubeContents: ["cu"], heatingDone: true }))).toBe(false);
+  });
+
+  it("rejects the mixture before the heating is done", () => {
+    expect(requirement.isMet(snapshot({ clampedHoodTubeContents: ["cu", "hno3"], heatingDone: false }))).toBe(false);
+  });
+
+  it("rejects when no tube is clamped in the hood", () => {
+    expect(requirement.isMet(snapshot({ clampedHoodTubeContents: null, heatingDone: true }))).toBe(false);
+  });
+});
+
 it("leaves steps without a scene condition to the tablet alone", () => {
   expect(getStageSceneRequirement("step-1-ppe")).toBeNull();
   expect(getStageSceneRequirement("step-1-equation")).toBeNull();
   expect(getStageSceneRequirement(null)).toBeNull();
+  expect(isSceneCompletedStep("step-1-identify")).toBe(false);
+  expect(isSceneCompletedStep("step-1-experiment")).toBe(true);
 });

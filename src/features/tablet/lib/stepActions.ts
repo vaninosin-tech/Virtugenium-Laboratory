@@ -13,19 +13,28 @@ import { getNextStepId } from "./experimentRuntime";
  * All state changes are applied in a single zustand update so the Stages UI
  * does not flash intermediate frames (e.g. "Этап выполнен" before focus moves).
  */
-export const advanceStep = (experiment: Experiment, step: ExperimentStep): void => {
+/** `score-1-heat` → `error-1-heat`: the data names a success and its matching mistake alike. */
+export const pairedErrorRuleId = (successRuleId: string): string => successRuleId.replace(/^score-/, "error-");
+
+export const advanceStep =(experiment: Experiment, step: ExperimentStep): void => {
   const now = new Date().toISOString();
   const nextStepId = getNextStepId(experiment, step.id);
 
   useLaboratoryStore.setState((state) => {
+    const charged = new Set(state.scoreEvents.map((event) => event.ruleId));
     const scoreEvents = [
       ...state.scoreEvents,
-      ...step.successScoreRules.map((rule) => ({
-        ruleId: rule.id,
-        points: rule.points,
-        stepId: step.id,
-        createdAt: now,
-      })),
+      ...step.successScoreRules
+        // A success rule is not paid for the same operation the player was
+        // already charged for — `score-1-heat` after `error-1-heat` (a cracked
+        // tube) would net the mistake +0 instead of costing points.
+        .filter((rule) => !charged.has(pairedErrorRuleId(rule.id)))
+        .map((rule) => ({
+          ruleId: rule.id,
+          points: rule.points,
+          stepId: step.id,
+          createdAt: now,
+        })),
     ];
     const completedStepIds = state.completedStepIds.includes(step.id)
       ? state.completedStepIds

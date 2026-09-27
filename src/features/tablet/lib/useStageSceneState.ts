@@ -1,6 +1,7 @@
 import type { EntityId } from "../../../entities/laboratory";
 import { useBunsenStandStorageStore } from "../../../scenes/laboratory/lib/useBunsenStandStorageStore";
 import { useFumeHoodControlsStore } from "../../../scenes/laboratory/lib/useFumeHoodControlsStore";
+import { useHeatingStore } from "../../../scenes/laboratory/lib/useHeatingStore";
 import { useReagentStorageStore } from "../../../scenes/laboratory/lib/useReagentStorageStore";
 import { useSceneInteractionStore } from "../../../scenes/laboratory/lib/useSceneInteractionStore";
 import { useTestTubeStorageStore } from "../../../scenes/laboratory/lib/useTestTubeStorageStore";
@@ -22,8 +23,13 @@ export function useSceneSnapshot(): SceneSnapshot {
   const fumeHoodItems = useReagentStorageStore((state) => state.fumeHoodItems);
   const fumeHoodTubes = useTestTubeStorageStore((state) => state.fumeHoodTestTubes);
   const standInFumeHood = useBunsenStandStorageStore((state) => state.onFumeHood);
+  const heatingDone = useHeatingStore((state) => state.phase === "done");
+  const clampedHoodTube =
+    standInFumeHood && attachedTubeSlotIndex !== null ? fumeHoodTubes[attachedTubeSlotIndex] : undefined;
 
   return {
+    clampedHoodTubeContents: clampedHoodTube?.contents ?? null,
+    heatingDone,
     workbenchTubes,
     attachedTubeSlotIndex,
     fumeHoodFanOn,

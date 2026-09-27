@@ -18,6 +18,7 @@ import {
   type StageRequiredKind,
 } from "../lib/stageRequiredConfig";
 import { usePhysicalCollectionState } from "../lib/usePhysicalCollectionState";
+import { isSceneCompletedStep } from "../lib/stageSceneConfig";
 import { useStageSceneState } from "../lib/useStageSceneState";
 import { ComposerTextField, type ComposerFieldHandle } from "./ComposerTextField";
 import { SubstanceNameKeyboard } from "./SubstanceNameKeyboard";
@@ -306,6 +307,9 @@ export function StageDetailPanel({
           <button type="button" style={splitDetailCtaButtonStyle} onClick={onOpenEquation}>
             Перейти к уравнению и признаку
           </button>
+        ) : isCurrent && isSceneCompletedStep(step.id) ? (
+          // Done in the lab, closed by the lab (`SceneStepAutoAdvance`).
+          <span style={{ ...mutedTextStyle, margin: 0 }}>Этап засчитается сам, когда вы выполните его в лаборатории</span>
         ) : isCurrent ? (
           <button
             type="button"

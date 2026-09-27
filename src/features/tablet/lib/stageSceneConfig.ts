@@ -22,6 +22,10 @@ export interface SceneSnapshot {
   /** Contents of each tube carried into the hood, one array per tube. */
   readonly fumeHoodTubeContents: readonly (readonly string[])[];
   readonly standInFumeHood: boolean;
+  /** Contents of the tube clamped in the stand inside the hood, in pouring order; null when there is none. */
+  readonly clampedHoodTubeContents: readonly string[] | null;
+  /** The heating mini-game ran to the end: preheated, then the contents heated. */
+  readonly heatingDone: boolean;
 }
 
 export interface StageSceneRequirement {
@@ -50,7 +54,25 @@ export const STAGE_SCENE_REQUIREMENTS: Partial<Record<EntityId, StageSceneRequir
       snapshot.fumeHoodTubeContents.some((tube) => tube.includes("cu")) &&
       snapshot.fumeHoodReagentIds.includes("hno3"),
   },
+  "step-1-experiment": {
+    label: "Прилейте азотную кислоту к меди в пробирке на штативе, прогрейте пробирку и нагрейте содержимое.",
+    // The order (copper first) is enforced at the pour itself (`mixingRules`),
+    // so a tube holding both got them in the right order or was charged for it.
+    isMet: (snapshot) =>
+      snapshot.heatingDone &&
+      (snapshot.clampedHoodTubeContents?.includes("cu") ?? false) &&
+      (snapshot.clampedHoodTubeContents?.includes("hno3") ?? false),
+  },
 };
+
+/**
+ * Steps the scene completes on its own the moment their condition holds:
+ * everything with a scene condition. The tablet's «Выполнить шаг» stays only
+ * where the action really is on the tablet — identifying the substances and
+ * writing the equations.
+ */
+export const isSceneCompletedStep = (stepId: EntityId | null): boolean =>
+  stepId !== null && STAGE_SCENE_REQUIREMENTS[stepId] !== undefined;
 
 export function getStageSceneRequirement(
   stepId: EntityId | null,
