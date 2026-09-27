@@ -62,14 +62,14 @@ export function LabTestTubeInstance({
     return clone;
   }, [scene]);
 
-  const crackUniforms = useRef<THREE.IUniform<number>[]>([]);
+  const crackUniforms = useRef<THREE.IUniform<THREE.Vector2>[]>([]);
   useEffect(() => {
     const dispose = prepareTestTube(instance);
     // Only the clamped tube reads heating state; cache its newly owned glass.
     if (inStand) instance.traverse((object) => {
       if (object instanceof THREE.Mesh && object.name.startsWith("Tube_Glass")) {
         const material = object.material as THREE.Material;
-        if (material.userData.cracked) crackUniforms.current.push(material.userData.cracked);
+        if (material.userData.crackSpot) crackUniforms.current.push(material.userData.crackSpot);
       }
     });
     return () => { crackUniforms.current = []; dispose(); };
@@ -92,7 +92,7 @@ export function LabTestTubeInstance({
     const configs = resolveTubeContents(contents);
     const binding = fillTestTubeContents(instance, configs);
     const kind = reactionKindFor(contents ?? []);
-    visuals.current = kind || inStand ? createTubeReactionVisuals(instance, kind) : null;
+    visuals.current = configs.length || inStand ? createTubeReactionVisuals(instance, kind) : null;
     return () => {
       visuals.current?.dispose();
       visuals.current = null;
@@ -104,22 +104,28 @@ export function LabTestTubeInstance({
   const parentWorldScale = useMemo(() => new THREE.Vector3(), []);
   useFrame(({ clock }) => {
     const tuning = useTubeVisualTuningStore.getState();
-    const chemistry =
-      (chemistryId && useTubeReactionStore.getState().chemistryById[chemistryId]) || ROOM_TEMPERATURE_CHEMISTRY;
-    const progress = import.meta.env.DEV && inStand && tuning.enabled ? tuning.progress : chemistry.progress;
-    // `chemistry.rate` / `.temperature` and `crackSpot` are the contract for
-    // the next visuals pass (docs/codex/04) — not drawn yet.
-    visuals.current?.update(progress, clock.elapsedTime, useRuntimeQualityStore.getState().quality,
-      performance.now() / 1000 - splashStart.current);
-    if (inStand) {
-      for (const uniform of crackUniforms.current) uniform.value = crackSpot ? 1 : 0;
-    }
-    if (worldScale === undefined) return;
     const group = groupRef.current;
     const parent = group?.parent;
-    if (!group || !parent) return;
-    parent.getWorldScale(parentWorldScale);
-    group.scale.setScalar(worldScale / parentWorldScale.x);
+    if (group && parent) {
+      if (worldScale !== undefined) {
+        parent.getWorldScale(parentWorldScale);
+        group.scale.setScalar(worldScale / parentWorldScale.x);
+      }
+      const correction = import.meta.env.DEV && inStand && tuning.tiltDegrees !== null
+        ? THREE.MathUtils.degToRad(THREE.MathUtils.clamp(tuning.tiltDegrees, -20, 20)) - parent.rotation.x : 0;
+      group.rotation.x = correction;
+      group.position.set(position[0], position[1] * Math.cos(correction) - position[2] * Math.sin(correction),
+        position[1] * Math.sin(correction) + position[2] * Math.cos(correction));
+      group.updateWorldMatrix(true, true);
+    }
+    const chemistry =
+      (chemistryId && useTubeReactionStore.getState().chemistryById[chemistryId]) || ROOM_TEMPERATURE_CHEMISTRY;
+    const visualChemistry = import.meta.env.DEV && inStand && tuning.enabled ? tuning : chemistry;
+    visuals.current?.update(visualChemistry, clock.elapsedTime, useRuntimeQualityStore.getState().quality,
+      performance.now() / 1000 - splashStart.current);
+    if (inStand) {
+      for (const uniform of crackUniforms.current) uniform.value.set(crackSpot?.side ?? 0, crackSpot?.height ?? -1);
+    }
   });
 
   return (
