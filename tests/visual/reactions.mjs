@@ -25,6 +25,7 @@ const cases = {
 const selectedCases = process.env.VISUAL_CASE ? process.env.VISUAL_CASE.split(",") : Object.keys(cases);
 const qualities = process.env.VISUAL_QUALITY ? process.env.VISUAL_QUALITY.split(",") : ["HIGH", "LOW"];
 const quick = process.env.VISUAL_QUICK === "1";
+const precipitates = process.env.VISUAL_PRECIP === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -52,7 +53,7 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if ((name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (precipitates || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
@@ -333,6 +334,19 @@ try {
     await warmupShaders(quality);
     for (const kind of selectedCases) {
       const prefix = `${kind}-${quality}`;
+      if (precipitates) {
+        if (kind !== "silver-chloride" && kind !== "barium-sulfate") continue;
+        await prepare(kind, quality);
+        for (const progress of [0.05, 0.3, 0.6, 1]) {
+          await page.evaluate(progress => window.__tubeVisualTuningStore.setState({
+            enabled: true, progress, rate: 0, temperature: 0, tiltDegrees: 0,
+          }), progress);
+          await settle(500);
+          await shot(`${prefix}-p${String(progress).replace(".", "p")}`, `${prefix}-precipitate`);
+        }
+        await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+        continue;
+      }
       const mixedAt = await prepare(kind, quality);
       if (kind !== "copper-nitric") {
         await series(`${prefix}-kinetics`, mixedAt, quick ? [0, 1, 3, 6] : times);
@@ -378,6 +392,7 @@ try {
       await series(`copper-early-cooling-${quality}-cool`, await stopHeat(), [0, 1, 3, 6, 12, 30, 40]);
     }
 
+    if (precipitates) continue;
     if (process.env.VISUAL_FPS === "1") await measureFps();
     if (quick) continue;
     // Controlled fixtures are explicitly labeled separately from LIVE runs.

@@ -328,7 +328,8 @@ describe("tube reaction rendering contract", () => {
     const bariumTop = particleBounds(barium.get<THREE.InstancedMesh>("TubePrecipitate")).max.y;
     expect(silverTop).toBeGreaterThan(0.055 * 0.2);
     expect(silverTop).toBeLessThan(0.055 * 0.28);
-    expect(silverTop).toBeGreaterThan(bariumTop * 3);
+    expect(silverTop).toBeGreaterThan(bariumTop * 2);
+    expect(bariumTop).toBeGreaterThan(0.055 * 0.08);
     expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
   });
 

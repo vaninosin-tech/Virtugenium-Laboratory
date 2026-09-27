@@ -12,8 +12,8 @@ export const TUBE_VISUALS = {
   gasBuildSeconds: 4,
   gasDecaySeconds: 18,
   particleCounts: { LOW: 24, MEDIUM: 36, HIGH: 54, ULTRA: 72 },
-  curdLayerHeight: 0.24,
-  crystalLayerHeight: 0.065,
+  curdLayerHeight: 0.21,
+  crystalLayerHeight: 0.11,
   settlingStart: 0.18,
   settlingEnd: 0.94,
 };
@@ -84,7 +84,7 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const geometry = new THREE.IcosahedronGeometry(1, 1);
   const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1, envMapIntensity: 0.15 });
   white.onBeforeCompile = (shader) => {
-    shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 0.9 : 0.7 };
+    shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 1.04 : 0.96 };
     shader.uniforms.uSedimentBottom = { value: box.min.y };
     shader.uniforms.uSedimentRadius = { value: radius * 0.98 };
     shader.uniforms.uSedimentCenter = { value: center };
@@ -102,7 +102,7 @@ if (vSedimentPoint.y < uSedimentBottom || length(bowlPoint) > uSedimentRadius) d
     // The nearby burner saturates even non-emissive white. Bound the diffuse
     // response before bloom and keep normal-based relief instead of hot spots.
     shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
-float relief = 0.7 + 0.3 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
+float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
 outgoingLight = vec3(uSedimentWhite) * relief;
 #include <opaque_fragment>`);
   };
@@ -325,7 +325,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const precipitate = kind === "silver-chloride" || kind === "barium-sulfate";
       const curds = kind === "silver-chloride";
       const onset = THREE.MathUtils.smoothstep(p, 0, 0.08);
-      const settled = THREE.MathUtils.smoothstep(p, TUBE_VISUALS.settlingStart, TUBE_VISUALS.settlingEnd);
+      const settled = precipitate ? THREE.MathUtils.smoothstep(p,
+        curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
       volume.material = p > 0 && liquid ? liquid : baseline;
       cap.material = volume.material;
       const activeLiquid = p > 0 && liquid ? liquid : base instanceof TubeLiquidMaterial ? base : null;
@@ -346,8 +347,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         liquid.uniforms.uQualityNoise.value = quality === "LOW" ? 0 : 1;
       }
       bed.visible = precipitate && settled > 0;
-      // AgCl's shallow core only fills gaps; the lobed flocs form its surface.
-      sedimentLevel.value = box.min.y + size.y * settled * (curds ? 0.08 : TUBE_VISUALS.crystalLayerHeight);
+      // A continuous matte core stays legible beneath the sparse instanced grains.
+      sedimentLevel.value = box.min.y + size.y * settled * (curds ? 0.155 : TUBE_VISUALS.crystalLayerHeight);
       flakes.visible = precipitate && p > 0;
       flakes.count = count;
       bubbles.visible = kind === "copper-nitric" && (rate > 0.005 || temperature > 0.6);
@@ -406,8 +407,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         const radial = radius * 0.64 * Math.sqrt(random(i + 93));
         const x = center.x + Math.cos(angle) * radial;
         const z = center.z + Math.sin(angle) * radial;
-        const grain = radius * (curds ? (0.32 + random(i + 31) * 0.12) * (0.45 + settled * 0.55) : 0.045);
-        const floor = box.min.y + size.y * (curds ? 0.045 + random(i + 14) * (TUBE_VISUALS.curdLayerHeight - 0.09) : 0.02);
+        const grain = radius * (curds ? (0.34 + random(i + 31) * 0.13) * (0.45 + settled * 0.55) : 0.06);
+        const floor = box.min.y + size.y * (curds ? 0.10 + random(i + 14) * (TUBE_VISUALS.curdLayerHeight - 0.13) : 0.07 + random(i + 14) * 0.025);
         const drift = Math.sin(time * 0.75 + i * 2.4) * radius * 0.07 * (1 - settled);
         const ingress = curds ? THREE.MathUtils.smoothstep(p * 9, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
         if (flakes.visible) place(flakes, i, x + drift - gravity.x * radius * settled * 0.6, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), floor - gravity.z * z, settled), z - gravity.z * radius * settled * 0.6,

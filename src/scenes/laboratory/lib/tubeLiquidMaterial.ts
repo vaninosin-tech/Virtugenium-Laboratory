@@ -67,11 +67,18 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   localMix = smoothstep(h - 0.22, h + 0.22, front) * min(1.0, p * 3.0);
   localMix = mix(localMix, 1.0, smoothstep(0.7, 1.0, p));
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
-  float ingress = smoothstep(1.0 - h - 0.18, 1.0 - h + 0.18, p * 8.0 + stream * 0.09);
-  float settlingFront = 1.0 - smoothstep(1.05 - p, 1.25 - p, h);
-  cloud *= ingress * settlingFront * (0.6 + 0.7 * n);
+  // The initial milk fills the tube. Later, flocs clear the supernatant
+  // from the top down, with only soft turbulence at the boundary.
+  float clearing = smoothstep(0.32, 0.82, p);
+  float clearFront = smoothstep(1.0 - clearing - 0.08, 1.0 - clearing + 0.08, h);
+  cloud *= 1.0 - clearFront;
+  cloud *= 0.90 + 0.16 * n;
 } else if (uReactionKind > 2.5 && uReactionKind < 3.5) {
-  cloud *= 0.72 + 0.45 * n;
+  // Fine BaSO4 stays evenly milky longer; its clearing front descends slowly.
+  float clearing = smoothstep(0.42, 0.98, p);
+  float clearFront = smoothstep(1.0 - clearing - 0.055, 1.0 - clearing + 0.055, h);
+  cloud *= 1.0 - clearFront;
+  cloud *= 0.97 + 0.06 * n;
 } else if (uReactionKind > 3.5) {
   // Sulfite enters at the top; retain violet below the moving mixing front.
   localMix = smoothstep(1.0 - h - 0.18, 1.0 - h + 0.18,
@@ -88,7 +95,7 @@ float meniscus = (1.0 - smoothstep(0.00015, 0.0007, abs(surfaceDistance))) * (1.
 float capRim = smoothstep(0.43, 0.50, length(radial)) * vCap;
 float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + max(meniscus, capRim) * uMeniscusAlpha;
 waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
-diffuseColor.a = clamp(mix(waterAlpha, uOpacity, scatter) + cloud * 0.85, 0.0, 0.96);`)
+diffuseColor.a = clamp(mix(waterAlpha, uOpacity, scatter) + cloud * 1.25, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
 vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
@@ -96,9 +103,9 @@ vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge
 float relief = 0.7 + 0.2 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
 vec3 coloredLight = tubeColor * (0.5 + relief * 0.3) * mix(1.0, 0.68, waterEdge) + boundedSpecular * 0.2;
 coloredLight += vec3(0.08, 0.13, 0.15) * (n - 0.5) * smoothstep(0.6, 0.95, uTemperature);
-outgoingLight = mix(mix(clearLight, coloredLight, scatter), vec3(relief * 0.78), cloud);
+outgoingLight = mix(mix(clearLight, coloredLight, scatter), vec3(0.91 + 0.07 * relief), clamp(cloud, 0.0, 1.0));
 #include <opaque_fragment>`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-gravity-fronts-v3"; }
+  customProgramCacheKey() { return "tube-liquid-gravity-fronts-v4"; }
 }
