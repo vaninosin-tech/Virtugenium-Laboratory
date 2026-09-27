@@ -26,7 +26,15 @@ export interface SceneSnapshot {
   readonly clampedHoodTubeContents: readonly string[] | null;
   /** The heating mini-game ran to the end: preheated, then the contents heated. */
   readonly heatingDone: boolean;
+  /** The clamped hood tube's reaction has gone far enough to be seen (`REACTION_SEEN`). */
+  readonly clampedReactionSeen: boolean;
 }
+
+/**
+ * How far a reaction must have run for its signs to have been seen — the
+ * precipitate formed, the colour gone — before the step counts as done.
+ */
+export const REACTION_SEEN = 0.6;
 
 export interface StageSceneRequirement {
   /** Shown to the player as the condition still standing between them and the step. */
@@ -38,6 +46,56 @@ const tubeAt = (
   snapshot: SceneSnapshot,
   index: number | null,
 ): StoredTestTube | undefined => (index === null ? undefined : snapshot.workbenchTubes[index]);
+
+interface SolutionExperiment {
+  /** The working solution that goes into the clamped tube first. */
+  readonly base: string;
+  /** Genitive, for «пробирку с раствором …». */
+  readonly baseName: string;
+  /** Everything else the experiment pours into it. */
+  readonly added: readonly string[];
+  readonly addedNames: string;
+}
+
+const hasAll = (contents: readonly string[] | null, ids: readonly string[]) =>
+  contents !== null && ids.every((id) => contents.includes(id));
+
+/**
+ * Experiments 2–4 share one shape: a working tube with the base solution in
+ * the stand, everything carried to where the experiment is done, the rest
+ * poured in and the reaction watched. «Рабочая зона» is the fume hood — the
+ * only place in the lab where pouring into the clamped tube and the reaction
+ * itself exist — but unlike experiment 1 nothing toxic comes off, so the
+ * extraction is not required. The order of pouring is judged at the pour
+ * (`mixingRules`).
+ */
+function solutionExperimentSteps(
+  experiment: number,
+  { base, baseName, added, addedNames }: SolutionExperiment,
+): Record<EntityId, StageSceneRequirement> {
+  return {
+    [`step-${experiment}-setup`]: {
+      label: `Налейте в пробирку раствор ${baseName} и закрепите её в штативе.`,
+      isMet: (snapshot) => tubeAt(snapshot, snapshot.attachedTubeSlotIndex)?.contents.includes(base) ?? false,
+    },
+    [`step-${experiment}-transfer`]: {
+      label: `У вытяжного шкафа нажмите «Перенести» и перенесите туда штатив с пробиркой и ${addedNames}.`,
+      isMet: (snapshot) =>
+        snapshot.standInFumeHood &&
+        (snapshot.clampedHoodTubeContents?.includes(base) ?? false) &&
+        added.every(
+          (id) =>
+            snapshot.fumeHoodReagentIds.includes(id) ||
+            snapshot.fumeHoodTubeContents.some((tube) => tube.includes(id)),
+        ),
+    },
+    [`step-${experiment}-experiment`]: {
+      label: `Прилейте ${addedNames} к раствору ${baseName} в пробирке на штативе и понаблюдайте за реакцией.`,
+      isMet: (snapshot) =>
+        hasAll(snapshot.clampedHoodTubeContents, [base, ...added]) && snapshot.clampedReactionSeen,
+    },
+  };
+}
 
 export const STAGE_SCENE_REQUIREMENTS: Partial<Record<EntityId, StageSceneRequirement>> = {
   "step-1-setup": {
@@ -63,6 +121,24 @@ export const STAGE_SCENE_REQUIREMENTS: Partial<Record<EntityId, StageSceneRequir
       (snapshot.clampedHoodTubeContents?.includes("cu") ?? false) &&
       (snapshot.clampedHoodTubeContents?.includes("hno3") ?? false),
   },
+  ...solutionExperimentSteps(2, {
+    base: "agno3",
+    baseName: "нитрата серебра",
+    added: ["nacl"],
+    addedNames: "раствор хлорида натрия",
+  }),
+  ...solutionExperimentSteps(3, {
+    base: "bacl2",
+    baseName: "хлорида бария",
+    added: ["k2so4"],
+    addedNames: "раствор сульфата калия",
+  }),
+  ...solutionExperimentSteps(4, {
+    base: "na2so3",
+    baseName: "сульфита натрия",
+    added: ["h2so4", "kmno4"],
+    addedNames: "серную кислоту и раствор перманганата калия",
+  }),
 };
 
 /**

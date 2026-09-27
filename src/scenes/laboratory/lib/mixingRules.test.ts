@@ -34,23 +34,23 @@ describe("judgeMix", () => {
     expect(judgeMix(EXP2, ["nacl"], ["agno3"]).kind).toBe("ok");
   });
 
-  it("experiment 4: permanganate and acid in any order, sulfite last", () => {
-    expect(judgeMix(EXP4, ["kmno4"], ["h2so4"]).kind).toBe("ok");
-    expect(judgeMix(EXP4, ["h2so4"], ["kmno4"]).kind).toBe("ok");
-    expect(judgeMix(EXP4, ["kmno4", "h2so4"], ["na2so3"]).kind).toBe("ok");
+  it("experiment 4, as its instruction says: sulfite and acid in any order, permanganate last", () => {
+    expect(judgeMix(EXP4, ["na2so3"], ["h2so4"]).kind).toBe("ok");
+    expect(judgeMix(EXP4, ["h2so4"], ["na2so3"]).kind).toBe("ok");
+    expect(judgeMix(EXP4, ["na2so3", "h2so4"], ["kmno4"]).kind).toBe("ok");
   });
 
-  it("experiment 4: sulfite before the acid is wrong, and has no rule to charge", () => {
-    expect(judgeMix(EXP4, ["kmno4"], ["na2so3"])).toEqual({
+  it("experiment 4: permanganate before the acid is wrong, and has no rule to charge", () => {
+    expect(judgeMix(EXP4, ["na2so3"], ["kmno4"])).toEqual({
       kind: "wrong-order",
-      reagentId: "na2so3",
+      reagentId: "kmno4",
       ruleId: undefined,
     });
-    expect(judgeMix(EXP4, ["na2so3"], ["kmno4"]).kind).toBe("wrong-order");
+    expect(judgeMix(EXP4, ["kmno4"], ["na2so3"]).kind).toBe("wrong-order");
   });
 
   it("judges a poured tube's contents one by one, in their order", () => {
-    expect(judgeMix(EXP4, ["kmno4"], ["h2so4", "na2so3"]).kind).toBe("ok");
-    expect(judgeMix(EXP4, ["kmno4"], ["na2so3", "h2so4"]).kind).toBe("wrong-order");
+    expect(judgeMix(EXP4, ["na2so3"], ["h2so4", "kmno4"]).kind).toBe("ok");
+    expect(judgeMix(EXP4, ["na2so3"], ["kmno4", "h2so4"]).kind).toBe("wrong-order");
   });
 });

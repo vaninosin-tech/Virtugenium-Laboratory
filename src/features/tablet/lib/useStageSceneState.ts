@@ -5,7 +5,9 @@ import { useHeatingStore } from "../../../scenes/laboratory/lib/useHeatingStore"
 import { useReagentStorageStore } from "../../../scenes/laboratory/lib/useReagentStorageStore";
 import { useSceneInteractionStore } from "../../../scenes/laboratory/lib/useSceneInteractionStore";
 import { useTestTubeStorageStore } from "../../../scenes/laboratory/lib/useTestTubeStorageStore";
+import { useTubeReactionStore } from "../../../scenes/laboratory/lib/tubeReactions";
 import {
+  REACTION_SEEN,
   getStageSceneRequirement,
   type SceneSnapshot,
   type StageSceneState,
@@ -27,9 +29,18 @@ export function useSceneSnapshot(): SceneSnapshot {
   const clampedHoodTube =
     standInFumeHood && attachedTubeSlotIndex !== null ? fumeHoodTubes[attachedTubeSlotIndex] : undefined;
 
+  // A boolean selector, so the per-frame chemistry only re-renders the
+  // tablet when the threshold is actually crossed.
+  const clampedReactionSeen = useTubeReactionStore(
+    (state) =>
+      clampedHoodTube !== undefined &&
+      (state.chemistryById[clampedHoodTube.instanceId]?.progress ?? 0) >= REACTION_SEEN,
+  );
+
   return {
     clampedHoodTubeContents: clampedHoodTube?.contents ?? null,
     heatingDone,
+    clampedReactionSeen,
     workbenchTubes,
     attachedTubeSlotIndex,
     fumeHoodFanOn,

@@ -6,7 +6,7 @@ interface MixingRule {
    * What goes into the reaction tube, in stages: everything in a stage must
    * be in the tube before anything from a later stage, while the order WITHIN
    * a stage is free. Experiment 4 is why this is not a flat list — the
-   * permanganate and the acid may meet in either order, the sulfite only
+   * sulfite and the acid may meet in either order, the permanganate only
    * after both (without the acid the reduction stops at brown MnO₂ instead
    * of the decolorisation the experiment asks about).
    */
@@ -29,8 +29,12 @@ export const MIXING_RULES: Readonly<Record<EntityId, MixingRule>> = {
   "experiment-barium-chloride-potassium-sulfate": {
     stages: [["bacl2", "k2so4"]],
   },
+  // The step's own instruction: acidify the sulfite, THEN add the
+  // permanganate — its violet vanishing as it goes in is the sign. (The first
+  // version had it the other way round and refused a player doing exactly
+  // what the instruction says.)
   "experiment-redox-permanganate-sulfite": {
-    stages: [["kmno4", "h2so4"], ["na2so3"]],
+    stages: [["na2so3", "h2so4"], ["kmno4"]],
   },
 };
 

@@ -16,6 +16,7 @@ const snapshot = (overrides: Partial<SceneSnapshot> = {}): SceneSnapshot => ({
   standInFumeHood: false,
   clampedHoodTubeContents: null,
   heatingDone: false,
+  clampedReactionSeen: false,
   ...overrides,
 });
 
@@ -142,6 +143,36 @@ describe("step-1-experiment", () => {
 
   it("rejects when no tube is clamped in the hood", () => {
     expect(requirement.isMet(snapshot({ clampedHoodTubeContents: null, heatingDone: true }))).toBe(false);
+  });
+});
+
+describe("experiments 2–4", () => {
+  it("setup: the base solution clamped in the stand", () => {
+    const setup = getStageSceneRequirement("step-4-setup")!;
+    const bench = (contents: string[]) =>
+      snapshot({ workbenchTubes: [{ instanceId: "t", contents }], attachedTubeSlotIndex: 0 });
+    expect(setup.isMet(bench(["na2so3"]))).toBe(true);
+    expect(setup.isMet(bench(["kmno4"]))).toBe(false);
+  });
+
+  it("transfer: stand with the base tube in the hood and the rest there as a bottle or a tube, fan not needed", () => {
+    const transfer = getStageSceneRequirement("step-4-transfer")!;
+    const hood: Partial<SceneSnapshot> = {
+      standInFumeHood: true,
+      clampedHoodTubeContents: ["na2so3"],
+      fumeHoodTubeContents: [["na2so3"], ["kmno4"]],
+      fumeHoodReagentIds: ["h2so4"],
+    };
+    expect(transfer.isMet(snapshot(hood))).toBe(true);
+    expect(transfer.isMet(snapshot({ ...hood, fumeHoodReagentIds: [] }))).toBe(false);
+    expect(transfer.isMet(snapshot({ ...hood, standInFumeHood: false }))).toBe(false);
+  });
+
+  it("experiment: everything in the clamped tube and the reaction seen", () => {
+    const experiment = getStageSceneRequirement("step-2-experiment")!;
+    expect(experiment.isMet(snapshot({ clampedHoodTubeContents: ["agno3", "nacl"], clampedReactionSeen: true }))).toBe(true);
+    expect(experiment.isMet(snapshot({ clampedHoodTubeContents: ["agno3", "nacl"], clampedReactionSeen: false }))).toBe(false);
+    expect(experiment.isMet(snapshot({ clampedHoodTubeContents: ["agno3"], clampedReactionSeen: true }))).toBe(false);
   });
 });
 
