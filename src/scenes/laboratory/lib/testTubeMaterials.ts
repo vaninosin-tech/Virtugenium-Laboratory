@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { deferDispose } from "./deferredDispose";
 
 /** Thin clear glass needs a readable silhouette even against a pale shelf. */
 function createTestTubeGlass(geometry: THREE.BufferGeometry) {
@@ -10,15 +11,21 @@ function createTestTubeGlass(geometry: THREE.BufferGeometry) {
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     envMapIntensity: 0.8,
   });
+  material.userData.cracked = { value: 0 };
   material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTubeCracked = material.userData.cracked;
     shader.uniforms.uTubeBottom = { value: bounds.min.y };
     shader.uniforms.uTubeHeight = { value: Math.max(bounds.max.y - bounds.min.y, 0.001) };
     shader.vertexShader = `uniform float uTubeBottom;
 uniform float uTubeHeight;
 varying float vTubeHeight;
+varying vec3 vTubePosition;
 ${shader.vertexShader}`.replace("#include <begin_vertex>", `#include <begin_vertex>
+vTubePosition = position;
 vTubeHeight = (position.y - uTubeBottom) / uTubeHeight;`);
-    shader.fragmentShader = `varying float vTubeHeight;
+    shader.fragmentShader = `uniform float uTubeCracked;
+varying vec3 vTubePosition;
+varying float vTubeHeight;
 ${shader.fragmentShader}`.replace("#include <opaque_fragment>", `
 // Keep the face see-through; concentrate contrast at grazing angles and
 // at the thicker rolled lip/rounded base. This is surface colour, not emission.
@@ -30,9 +37,21 @@ diffuseColor.a = clamp(0.10 + 0.66 * tubeEdge + 0.24 * tubeThickness, 0.10, 0.86
 vec3 tubeTint = mix(vec3(0.78, 0.88, 0.92), vec3(0.13, 0.24, 0.29),
   clamp(tubeEdge * 0.85 + tubeThickness * 0.35, 0.0, 1.0));
 outgoingLight = totalDiffuse * tubeTint + totalSpecular / max(diffuseColor.a, 0.10);
+// Wrap the path around the wall so it survives changes in viewing angle.
+float angle = atan(vTubePosition.z, vTubePosition.x);
+float jag = abs(fract(angle * 2.2 + 0.5) - 0.5);
+float path = vTubeHeight - (0.29 + 0.15 * jag + 0.025 * sin(angle * 13.0));
+float lineWidth = max(fwidth(path), 0.0018);
+float mainCrack = 1.0 - smoothstep(lineWidth, lineWidth * 2.5, abs(path));
+float branchPath = angle - 0.8 - (vTubeHeight - 0.35) * 5.0 - 0.06 * sin(vTubeHeight * 100.0);
+float branch = (1.0 - smoothstep(0.015, 0.04, abs(branchPath))) *
+  smoothstep(0.3, 0.35, vTubeHeight) * (1.0 - smoothstep(0.52, 0.56, vTubeHeight));
+float crack = max(mainCrack, branch) * uTubeCracked;
+outgoingLight = mix(outgoingLight, vec3(0.07, 0.13, 0.16), crack);
+diffuseColor.a = max(diffuseColor.a, crack * 0.95);
 #include <opaque_fragment>`);
   };
-  material.customProgramCacheKey = () => "test-tube-clear-contour-v1";
+  material.customProgramCacheKey = () => "test-tube-clear-contour-crack-v2";
   return material;
 }
 
@@ -53,5 +72,5 @@ export function prepareTestTube(scene: THREE.Object3D) {
     object.receiveShadow = false;
     materials.push(glass);
   });
-  return () => materials.forEach((material) => material.dispose());
+  return () => materials.forEach((material) => deferDispose(material, () => material.dispose()));
 }

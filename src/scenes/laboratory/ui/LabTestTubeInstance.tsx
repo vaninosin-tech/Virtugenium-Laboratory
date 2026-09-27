@@ -6,6 +6,12 @@ import * as THREE from "three";
 import type { Position3 } from "../lib/layout";
 import { fillTestTubeContents, resolveTubeContents } from "../lib/testTubeContents";
 import { prepareTestTube } from "../lib/testTubeMaterials";
+import { createTubeReactionVisuals } from "../lib/tubeReactionVisuals";
+import { reactionKindFor } from "../lib/tubeReactions";
+import { useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
+import { useTubeVisualTuningStore } from "../lib/useTubeVisualTuningStore";
+import { useLabNoticeStore } from "../lib/useLabNoticeStore";
+import { useHeatingStore } from "../lib/useHeatingStore";
 
 const MODEL_PATH = "/assets/models/LabTestTube.glb";
 
@@ -25,6 +31,8 @@ export function LabTestTubeInstance({
   scale = 1,
   worldScale,
   contents,
+  reactionProgress = 0,
+  inStand = false,
 }: {
   readonly position?: Position3;
   readonly rotationY?: number;
@@ -36,11 +44,11 @@ export function LabTestTubeInstance({
   readonly contents?: readonly string[];
   /**
    * 0..1, how far the contents' reaction has gone (`useTubeReactionStore`);
-   * which reaction it is comes from `reactionKindFor(contents)`. Not drawn
-   * yet — the reaction visuals are `docs/codex/01-reaction-visuals.md`. May
+   * which reaction it is comes from `reactionKindFor(contents)`. May
    * change every frame, so it must never rebuild the contents binding.
    */
   readonly reactionProgress?: number;
+  readonly inStand?: boolean;
 }) {
   const { scene } = useGLTF(MODEL_PATH);
 
@@ -51,20 +59,49 @@ export function LabTestTubeInstance({
 
   useEffect(() => prepareTestTube(instance), [instance]);
 
+  const visuals = useRef<ReturnType<typeof createTubeReactionVisuals>>(null);
+  const splashStart = useRef(-Infinity);
+  useEffect(() => {
+    if (!inStand) return;
+    return useLabNoticeStore.subscribe((state, previous) => {
+      const notice = state.notice;
+      if (notice && notice.id !== previous.notice?.id && notice.tone === "error" &&
+          notice.text.startsWith("Ошибка: нарушен порядок смешивания")) {
+        splashStart.current = performance.now() / 1000;
+      }
+    });
+  }, [inStand]);
+
   useEffect(() => {
     const configs = resolveTubeContents(contents);
-    if (configs.length === 0) return;
     const binding = fillTestTubeContents(instance, configs);
-    return () => binding.dispose();
-  }, [instance, contents]);
+    const kind = reactionKindFor(contents ?? []);
+    visuals.current = kind || inStand ? createTubeReactionVisuals(instance, kind) : null;
+    return () => {
+      visuals.current?.dispose();
+      visuals.current = null;
+      binding.dispose();
+    };
+  }, [instance, contents, inStand]);
 
   const groupRef = useRef<THREE.Group>(null);
-  useFrame(() => {
+  const parentWorldScale = useMemo(() => new THREE.Vector3(), []);
+  useFrame(({ clock }) => {
+    const tuning = useTubeVisualTuningStore.getState();
+    const progress = import.meta.env.DEV && inStand && tuning.enabled ? tuning.progress : reactionProgress;
+    visuals.current?.update(progress, clock.elapsedTime, useRuntimeQualityStore.getState().quality,
+      performance.now() / 1000 - splashStart.current);
+    const cracked = inStand && useHeatingStore.getState().phase === "cracked";
+    instance.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.name.startsWith("Tube_Glass")) {
+        const material = object.material as THREE.Material;
+        if (material.userData.cracked) material.userData.cracked.value = cracked ? 1 : 0;
+      }
+    });
     if (worldScale === undefined) return;
     const group = groupRef.current;
     const parent = group?.parent;
     if (!group || !parent) return;
-    const parentWorldScale = new THREE.Vector3();
     parent.getWorldScale(parentWorldScale);
     group.scale.setScalar(worldScale / parentWorldScale.x);
   });

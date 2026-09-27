@@ -1,5 +1,6 @@
 import { useReagentShaderTuningStore, type ShaderTuning } from "../../lib/useReagentShaderTuningStore";
 import { useRuntimeQualityStore, type QualityMode } from "../../lib/useRuntimeQualityStore";
+import { useTubeVisualTuningStore } from "../../lib/useTubeVisualTuningStore";
 
 const controls: { key: keyof ShaderTuning; label: string; max: number; min?: number }[] = [
   { key: "transparency", label: "Glass transparency", max: 1 },
@@ -17,11 +18,18 @@ const controls: { key: keyof ShaderTuning; label: string; max: number; min?: num
 ];
 
 export function ReagentShaderPanel() {
+  const tube = useTubeVisualTuningStore();
   const { enabled, values, setEnabled, setValue, reset } = useReagentShaderTuningStore();
   const qualityMode = useRuntimeQualityStore((state) => state.mode);
   const setQualityMode = useRuntimeQualityStore((state) => state.setMode);
   if (!import.meta.env.DEV) return null;
   return <div style={{ display: "grid", gap: 7, maxHeight: "65vh", overflowY: "auto" }}>
+    <label><input type="checkbox" checked={tube.enabled} onChange={(e) => tube.setEnabled(e.target.checked)} /> Tube reaction override</label>
+    <label>Tube reaction progress: {tube.progress.toFixed(2)}
+      <input aria-label="Tube reaction progress" type="range" min={0} max={1} step={0.01}
+        disabled={!tube.enabled} value={tube.progress} onChange={(e) => tube.setProgress(Number(e.target.value))} />
+    </label>
+    <small>Stand tube only. Preview does not change the game progress.</small>
     <label>Quality <select value={qualityMode} onChange={(e) => setQualityMode(e.target.value as QualityMode)}>
       {(["AUTO", "LOW", "MEDIUM", "HIGH", "ULTRA"] as QualityMode[]).map((value) => <option key={value}>{value}</option>)}
     </select></label>

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { deferDispose } from "./deferredDispose";
 
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
 
@@ -221,15 +222,14 @@ export function fillTestTubeContents(
     dispose: () => {
       if (disposed) return;
       disposed = true;
-      ownedMaterials.forEach((material) => material.dispose());
+      ownedMaterials.forEach((material) => deferDispose(material, () => material.dispose()));
       addedObjects.forEach((object) => {
         object.parent?.remove(object);
-        object.traverse((child) => {
+        deferDispose(object, () => object.traverse((child) => {
           if (!(child instanceof THREE.Mesh)) return;
           child.geometry.dispose();
-          if (Array.isArray(child.material)) child.material.forEach((material) => material.dispose());
-          else child.material.dispose();
-        });
+          // Copper's material is shared; only per-fill geometry is owned.
+        }));
       });
     },
   };

@@ -276,7 +276,9 @@ export function FumeHoodWorkArea() {
                 TUBE_RING_LOCAL_OFFSET[2] - sweep * SWEEP_AMPLITUDE_Z,
               ]}
               contents={hoodTubes[clampedIndex].contents}
+              key={hoodTubes[clampedIndex].instanceId}
               reactionProgress={reactionProgressById[hoodTubes[clampedIndex].instanceId] ?? 0}
+              inStand
             />
           )}
         </group>
