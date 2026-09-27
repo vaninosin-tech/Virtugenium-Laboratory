@@ -38,7 +38,7 @@ export function SandboxPanel() {
     <div style={panelStyle}>
       <strong style={titleStyle}>Песочница (временный режим)</strong>
       <span style={hintStyle}>
-        Клик по склянке — налить в пробирку в штативе. Клик по штативу — нагреть.
+        Клик по склянке — налить в пробирку в штативе. Клик по пробирке — рассмотреть. Клик по штативу — нагреть.
       </span>
 
       <span>

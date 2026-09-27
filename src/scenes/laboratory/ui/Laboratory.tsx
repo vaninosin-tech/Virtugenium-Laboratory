@@ -16,6 +16,7 @@ import { FumeHoodWorkArea } from "./FumeHoodWorkArea";
 import { HeatingControls } from "./HeatingControls";
 import { InspectionControls } from "./InspectionControls";
 import { LabNoticeOverlay } from "./LabNoticeOverlay";
+import { TubeCloseUpControls } from "./TubeCloseUpControls";
 import { SandboxPanel } from "../sandbox/SandboxPanel";
 import { setupSandbox, teardownSandbox } from "../sandbox/setupSandbox";
 import { LabRoom } from "./LabRoom";
@@ -648,6 +649,7 @@ export function Laboratory() {
       <DevExperimentShortcut />
       <PPEStatusOverlay />
       <HeatingControls />
+      <TubeCloseUpControls />
       <LabNoticeOverlay />
       <SandboxPanel />
       <InspectionControls onBack={returnToOverview} />

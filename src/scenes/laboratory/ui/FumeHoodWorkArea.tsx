@@ -1,6 +1,6 @@
 import { useGLTF } from "@react-three/drei";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
@@ -17,6 +17,7 @@ import { useBurnerStore } from "../lib/useBurnerStore";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { useLabNoticeStore } from "../lib/useLabNoticeStore";
+import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { MIX_REACTION_SECONDS, reactionTriggerFor, useTubeReactionStore } from "../lib/tubeReactions";
 import {
@@ -150,6 +151,29 @@ function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefin
 }
 
 /**
+ * Height above the tube's base that the close-up camera aims at: a little
+ * below the middle of the 15 cm tube, so the flame under it stays in frame.
+ */
+const TUBE_FOCUS_HEIGHT = 0.055;
+
+/** Publishes the clamped tube's rest position for `CameraRig`'s close-up — see `TUBE_FOCUS`. */
+function TubeFocusAnchor({ position }: { readonly position: Position3 }) {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    if (!ref.current) return;
+    ref.current.getWorldPosition(TUBE_FOCUS.point);
+    TUBE_FOCUS.valid = true;
+  });
+  useEffect(
+    () => () => {
+      TUBE_FOCUS.valid = false;
+    },
+    [],
+  );
+  return <group ref={ref} position={position} />;
+}
+
+/**
  * TEMP sandbox: all nine bottles along the back wall — see
  * `sandbox/setupSandbox.ts`. Split around the stand (hood-local X 0.04..0.25)
  * rather than one even row: a bottle standing behind the stand puts its
@@ -266,6 +290,31 @@ export function FumeHoodWorkArea() {
           <HeatingRuntime />
           <TubeReactionRuntime tube={clampedIndex === null ? undefined : hoodTubes[clampedIndex]} />
           {clampedIndex !== null && hoodTubes[clampedIndex] && (
+            <TubeFocusAnchor
+              position={[
+                TUBE_RING_LOCAL_OFFSET[0],
+                TUBE_RING_LOCAL_OFFSET[1] - TUBE_RING_INSERT_DEPTH + TUBE_FOCUS_HEIGHT,
+                TUBE_RING_LOCAL_OFFSET[2],
+              ]}
+            />
+          )}
+          {clampedIndex !== null && hoodTubes[clampedIndex] && (
+            <group
+              onClick={(event: ThreeEvent<MouseEvent>) => {
+                // The tube stands in front of the stand's rod, so this must
+                // not fall through to the stand's own click (heating).
+                event.stopPropagation();
+                if (!useHeatingStore.getState().active) useTubeCloseUpStore.getState().setViewing(true);
+              }}
+              onPointerOver={(event: ThreeEvent<PointerEvent>) => {
+                event.stopPropagation();
+                document.body.style.cursor = "zoom-in";
+              }}
+              onPointerOut={(event: ThreeEvent<PointerEvent>) => {
+                event.stopPropagation();
+                document.body.style.cursor = "auto";
+              }}
+            >
             <LabTestTubeInstance
               position={[
                 TUBE_RING_LOCAL_OFFSET[0],
@@ -280,6 +329,7 @@ export function FumeHoodWorkArea() {
               reactionProgress={reactionProgressById[hoodTubes[clampedIndex].instanceId] ?? 0}
               inStand
             />
+            </group>
           )}
         </group>
       )}

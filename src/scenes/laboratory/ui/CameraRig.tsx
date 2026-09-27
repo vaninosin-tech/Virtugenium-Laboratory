@@ -27,6 +27,7 @@ import { useDevMenuStore, type DevMenuCategory } from "../lib/useDevMenuStore";
 import { useFumeHoodControlsStore } from "../lib/useFumeHoodControlsStore";
 import { useFurniturePositionStore, type FurnitureId } from "../lib/useFurniturePositionStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
+import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useHotspotObjectsStore } from "../lib/useHotspotObjectsStore";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { useReagentPickablesStore, type ReagentPickableId } from "../lib/useReagentPickablesStore";
@@ -41,9 +42,15 @@ import { isInsideTrayReturnZone } from "../lib/trayReturnZone";
 
 const POSITION_DAMPING = 0.28;
 
-/** How far the camera leans in along its own view ray for the heating mini-game, and how briskly. */
+/** Fallback lean-in along the view ray, for when no tube focus is published. */
 const HEAT_DOLLY_DISTANCE = 0.32;
 const HEAT_DOLLY_DAMPING = 6;
+/**
+ * Camera-to-tube distance in the close-up. The tube is 15 cm tall; at the
+ * inspection FOV this puts it at roughly half the screen height, with the
+ * flame and the heating sweep (±3.5 cm) still in frame.
+ */
+const TUBE_CLOSE_UP_DISTANCE = 0.3;
 const YAW_SENSITIVITY = 0.0028;
 const PITCH_SENSITIVITY = 0.0022;
 /**
@@ -279,7 +286,11 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
    */
   const heatBasePosition = useRef<THREE.Vector3 | null>(null);
   const heatForward = useRef(new THREE.Vector3());
+  const heatBaseQuaternion = useRef(new THREE.Quaternion());
   const heatDolly = useRef(0);
+  const closeUpPosition = useRef(new THREE.Vector3());
+  const closeUpMatrix = useRef(new THREE.Matrix4());
+  const closeUpQuaternion = useRef(new THREE.Quaternion());
   /** Always cast through the screen center (NDC 0,0) — the crosshair never moves, Pointer Lock moves the camera's own look direction instead. */
   const hoverRaycaster = useRef(new THREE.Raycaster());
   /**
@@ -1484,25 +1495,37 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
     }
 
     if (state.cabinetPhase === "inspecting") {
-      // Settled — hold position/orientation exactly, apart from the heating
-      // mini-game's lean-in, which is an offset off this held pose.
-      const heating = useHeatingStore.getState().active;
-      if (heating && !heatBasePosition.current) {
+      // Settled — hold position/orientation exactly, apart from the tube
+      // close-up (heating, or the player looking at the tube), which blends
+      // off this held pose and back onto it.
+      const closeUp = useHeatingStore.getState().active || useTubeCloseUpStore.getState().viewing;
+      if (closeUp && !heatBasePosition.current) {
         heatBasePosition.current = camera.position.clone();
+        heatBaseQuaternion.current.copy(camera.quaternion);
         camera.getWorldDirection(heatForward.current);
       }
       if (heatBasePosition.current) {
-        heatDolly.current = THREE.MathUtils.damp(
-          heatDolly.current,
-          heating ? 1 : 0,
-          HEAT_DOLLY_DAMPING,
-          delta,
-        );
-        camera.position
-          .copy(heatBasePosition.current)
-          .addScaledVector(heatForward.current, HEAT_DOLLY_DISTANCE * heatDolly.current);
-        if (!heating && heatDolly.current < 0.001) {
-          camera.position.copy(heatBasePosition.current);
+        heatDolly.current = THREE.MathUtils.damp(heatDolly.current, closeUp ? 1 : 0, HEAT_DOLLY_DAMPING, delta);
+        const base = heatBasePosition.current;
+        if (TUBE_FOCUS.valid) {
+          // Approach the tube along the line it is seen on, and turn to
+          // face it — the stand is off-centre in the hood, so a straight
+          // dolly along the view ray would leave it at the screen's edge.
+          closeUpPosition.current
+            .subVectors(base, TUBE_FOCUS.point)
+            .normalize()
+            .multiplyScalar(TUBE_CLOSE_UP_DISTANCE)
+            .add(TUBE_FOCUS.point);
+          closeUpMatrix.current.lookAt(closeUpPosition.current, TUBE_FOCUS.point, camera.up);
+          closeUpQuaternion.current.setFromRotationMatrix(closeUpMatrix.current);
+          camera.position.lerpVectors(base, closeUpPosition.current, heatDolly.current);
+          camera.quaternion.slerpQuaternions(heatBaseQuaternion.current, closeUpQuaternion.current, heatDolly.current);
+        } else {
+          camera.position.copy(base).addScaledVector(heatForward.current, HEAT_DOLLY_DISTANCE * heatDolly.current);
+        }
+        if (!closeUp && heatDolly.current < 0.001) {
+          camera.position.copy(base);
+          camera.quaternion.copy(heatBaseQuaternion.current);
           heatBasePosition.current = null;
           heatDolly.current = 0;
         }
@@ -1518,6 +1541,7 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
       heatDolly.current = 0;
       if (useHeatingStore.getState().active) useHeatingStore.getState().exit();
     }
+    if (useTubeCloseUpStore.getState().viewing) useTubeCloseUpStore.getState().setViewing(false);
 
     // cabinetPhase === "room": normal free-look at a fixed CAMERA_TARGETS viewpoint.
     const target = resolveCameraTarget(activeTargetId);

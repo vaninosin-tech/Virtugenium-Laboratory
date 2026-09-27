@@ -131,6 +131,13 @@ export function stepCopperGranuleDrop(granules: THREE.Group, elapsedMs: number):
   return stillAnimating;
 }
 
+const hsl = { h: 0, s: 0, l: 0 };
+/** How much a liquid tints the tube: saturation weighted by opacity. */
+function colourStrength(config: ReagentContainerConfig): number {
+  new THREE.Color(config.contentsColor).getHSL(hsl);
+  return hsl.s * (config.contentsOpacity ?? 1);
+}
+
 export interface TestTubeContentsBinding {
   dispose: () => void;
   /** The copper granule stack just created, if this fill was solid Cu — `null` for every other reagent/contents kind. Callers that want the drop-in animation (`stepCopperGranuleDrop`) drive it themselves per frame using this reference. */
@@ -166,8 +173,15 @@ export function fillTestTubeContents(
   const otherSolid = configs.find(
     (config) => config.contentsKind === "solid" && config.id !== "cu",
   );
+  // One volume mesh, one colour: show the most strongly coloured liquid, not
+  // the last one poured. Colourless acid added to permanganate must leave the
+  // tube violet — "last wins" turned it clear. Ties (all colourless) still
+  // fall to the last poured.
   const liquids = configs.filter((config) => config.contentsKind !== "solid");
-  const liquid = liquids[liquids.length - 1];
+  const liquid = liquids.reduce<ReagentContainerConfig | undefined>(
+    (best, candidate) => (!best || colourStrength(candidate) >= colourStrength(best) ? candidate : best),
+    undefined,
+  );
 
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh) || !object.name.startsWith("ContentsVolume")) return;
