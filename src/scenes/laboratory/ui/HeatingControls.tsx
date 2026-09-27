@@ -177,11 +177,11 @@ export function HeatingControls() {
 
 const panelStyle = (cracked: boolean): CSSProperties => ({
   position: "absolute",
-  left: "50%",
-  // At the very bottom: in the tube close-up the tube's bottom and the flame
-  // sit in the lower third of the screen, and this panel used to cover them.
-  bottom: 12,
-  transform: "translateX(-50%)",
+  // Bottom-right, off the tube: the close-up centres the tube and puts its
+  // bottom — the copper, the flame — low on screen, which a bottom-centre
+  // panel covered exactly while the player was meant to be watching it.
+  right: 24,
+  bottom: 64,
   zIndex: 11,
   display: "flex",
   flexDirection: "column",
