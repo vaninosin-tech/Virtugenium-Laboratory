@@ -15,11 +15,11 @@ import {
 } from "../lib/useBunsenStandStorageStore";
 import { useBurnerStore } from "../lib/useBurnerStore";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
-import { useHeatingStore } from "../lib/useHeatingStore";
+import { FLAME_HALF_WIDTH, crackSpotForZone, useHeatingStore } from "../lib/useHeatingStore";
 import { useLabNoticeStore } from "../lib/useLabNoticeStore";
 import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
-import { MIX_REACTION_SECONDS, reactionTriggerFor, useTubeReactionStore } from "../lib/tubeReactions";
+import { ROOM_TEMPERATURE_CHEMISTRY, advanceChemistry, useTubeReactionStore } from "../lib/tubeReactions";
 import {
   computeTubeSlotLocalOffset,
   useTestTubeStorageStore,
@@ -169,25 +169,27 @@ function HeatingRuntime() {
 }
 
 /**
- * Advances the clamped tube's reaction: mix-triggered ones run on their own
- * once the last reagent is in, copper and nitric acid only as far as the
- * contents have been heated.
+ * Runs the clamped tube's chemistry — see `advanceChemistry`. The contents
+ * are in the flame whenever the burner is lit and the tube hangs over it:
+ * that is a fact about where the tube is, not about the heating panel being
+ * open, so a tube left over the flame keeps heating after «Отойти от штатива».
+ * `started` keeps an untouched stand (knob at rest, never grabbed) cold.
  */
 function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefined }) {
   useFrame((_, delta) => {
     if (!tube) return;
+    const heating = useHeatingStore.getState();
+    const inFlame =
+      useBurnerStore.getState().lit &&
+      heating.started &&
+      heating.phase !== "cracked" &&
+      Math.abs(heating.sweep) < FLAME_HALF_WIDTH;
     const reactions = useTubeReactionStore.getState();
-    const trigger = reactionTriggerFor(tube.contents);
-    if (trigger === null) {
-      reactions.clear(tube.instanceId);
-      return;
-    }
-    const current = reactions.progressById[tube.instanceId] ?? 0;
-    const next =
-      trigger === "mix"
-        ? current + Math.min(delta, 0.1) / MIX_REACTION_SECONDS
-        : Math.max(current, useHeatingStore.getState().heatProgress);
-    if (next !== current) reactions.setProgress(tube.instanceId, next);
+    const current = reactions.chemistryById[tube.instanceId] ?? ROOM_TEMPERATURE_CHEMISTRY;
+    reactions.setChemistry(
+      tube.instanceId,
+      advanceChemistry(tube.contents, current, Math.min(delta, 0.1), inFlame),
+    );
   });
 
   return null;
@@ -212,10 +214,11 @@ function ClampTiltGroup({ children }: { readonly children: ReactNode }) {
 }
 
 /**
- * Height above the tube's base that the close-up camera aims at: a little
- * below the middle of the 15 cm tube, so the flame under it stays in frame.
+ * Height above the tube's base that the close-up camera aims at: the middle
+ * of the 15 cm tube. Lower cut off the gas leaving the mouth — the one sign
+ * experiment 1 hinges on — at the top of the frame.
  */
-const TUBE_FOCUS_HEIGHT = 0.055;
+const TUBE_FOCUS_HEIGHT = 0.08;
 
 /** Publishes the clamped tube's rest position for `CameraRig`'s close-up — see `TUBE_FOCUS`. */
 function TubeFocusAnchor({ position }: { readonly position: Position3 }) {
@@ -269,7 +272,7 @@ export function FumeHoodWorkArea() {
   const burnerLit = useBurnerStore((state) => state.lit);
   const hasHolder = useLaboratoryStore((state) => state.inventoryItemIds.includes(HOLDER_ITEM_ID));
   const sandbox = useLaboratoryStore((state) => state.mode === "sandbox");
-  const reactionProgressById = useTubeReactionStore((state) => state.progressById);
+  const crackZone = useHeatingStore((state) => (state.phase === "cracked" ? state.crackZone : null));
 
   const clampedIndex = standInHood ? attachedTubeSlotIndex : null;
   const hasContent = hoodTubes.length > 0 || hoodItems.length > 0 || standInHood;
@@ -380,7 +383,8 @@ export function FumeHoodWorkArea() {
               position={[0, -TUBE_RING_INSERT_DEPTH, 0]}
               contents={hoodTubes[clampedIndex].contents}
               key={hoodTubes[clampedIndex].instanceId}
-              reactionProgress={reactionProgressById[hoodTubes[clampedIndex].instanceId] ?? 0}
+              chemistryId={hoodTubes[clampedIndex].instanceId}
+              crackSpot={crackZone === null ? null : crackSpotForZone(crackZone)}
               inStand
             />
             </ClampTiltGroup>

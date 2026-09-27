@@ -24,15 +24,17 @@ export function SandboxPanel() {
   const sandbox = useLaboratoryStore((state) => state.mode === "sandbox");
   const hoodTubes = useTestTubeStorageStore((state) => state.fumeHoodTestTubes);
   const clampedIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
-  const progressById = useTubeReactionStore((state) => state.progressById);
+  const chemistryById = useTubeReactionStore((state) => state.chemistryById);
 
   if (!sandbox) return null;
 
   const tube = clampedIndex === null ? undefined : hoodTubes[clampedIndex];
   const contents = tube?.contents ?? [];
   const kind = reactionKindFor(contents);
-  const progress = tube ? (progressById[tube.instanceId] ?? 0) : 0;
-  const waitingForHeat = reactionTriggerFor(contents) === "heat" && progress === 0;
+  const chemistry = tube ? chemistryById[tube.instanceId] : undefined;
+  const progress = chemistry?.progress ?? 0;
+  const temperature = chemistry?.temperature ?? 0;
+  const slowCold = reactionTriggerFor(contents) === "heat" && temperature < 0.2 && progress < 1;
 
   return (
     <div style={panelStyle}>
@@ -49,9 +51,11 @@ export function SandboxPanel() {
       </span>
       {kind ? (
         <span style={hintStyle}>
-          {waitingForHeat ? "Реакция идёт при нагревании" : `Прогресс реакции: ${Math.round(progress * 100)}%`}
+          Прогресс реакции: {Math.round(progress * 100)}%
+          {slowCold ? " — на холоду идёт очень медленно, нагрейте" : ""}
         </span>
       ) : null}
+      <span style={hintStyle}>Температура содержимого: {Math.round(20 + temperature * 80)} °C</span>
 
       <div style={rowStyle}>
         <button type="button" style={buttonStyle} onClick={replaceSandboxTube}>

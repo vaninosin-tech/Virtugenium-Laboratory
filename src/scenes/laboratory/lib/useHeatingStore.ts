@@ -68,6 +68,8 @@ interface HeatingState {
   /** 0..1 progress of heating the contents, only advances once preheated. */
   readonly heatProgress: number;
   readonly phase: HeatingPhase;
+  /** The zone that was hottest when the glass cracked — where the crack starts. Null until a crack. */
+  readonly crackZone: number | null;
   /** `random` is injectable so tests can pick the oval's starting side. */
   enter: (random?: () => number) => void;
   exit: () => void;
@@ -94,6 +96,26 @@ export const zoneCentre = (index: number): number => {
   return -span + (2 * span * (index + 0.5)) / HEAT_ZONE_COUNT;
 };
 
+/**
+ * Where on the tube a crack in `zone` starts. The zones are the knob
+ * positions the flame was under; with the tube tilting in its clamp
+ * (`FumeHoodWorkArea`), a knob off to one side swings the bottom that way and
+ * puts the flame on the bottom's opposite flank, a little higher up — so the
+ * crack sits on that flank, higher the further out the zone is.
+ *
+ * `side` is signed along the tube's own local Z (the tilt direction), -1..1;
+ * `height` is 0..1 along the tube from its tip.
+ */
+export interface CrackSpot {
+  readonly side: number;
+  readonly height: number;
+}
+
+export const crackSpotForZone = (zone: number): CrackSpot => {
+  const u = zoneCentre(zone) / (1 - FLAME_HALF_WIDTH);
+  return { side: u, height: 0.06 + 0.2 * Math.abs(u) };
+};
+
 /** Spread between the hottest and coldest zone — the quantity that cracks the glass. */
 export const heatSpread = (zones: readonly number[]): number =>
   zones.length === 0 ? 0 : Math.max(...zones) - Math.min(...zones);
@@ -110,6 +132,7 @@ const freshPreheat = (random: () => number) => {
     started: false,
     heatProgress: 0,
     phase: "preheat" as HeatingPhase,
+    crackZone: null,
   };
 };
 
@@ -122,6 +145,7 @@ const INITIAL = {
   started: false,
   heatProgress: 0,
   phase: "preheat" as HeatingPhase,
+  crackZone: null as number | null,
 };
 
 export const useHeatingStore = create<HeatingState>((set, get) => ({
@@ -173,7 +197,8 @@ export const useHeatingStore = create<HeatingState>((set, get) => ({
       });
 
       if (heatSpread(zones) >= CRACK_SPREAD) {
-        return { zones, target, targetDirection, phase: "cracked" };
+        const crackZone = zones.indexOf(Math.max(...zones));
+        return { zones, target, targetDirection, phase: "cracked", crackZone };
       }
       // A hair under 1: frame-by-frame integration of four exact passes lands
       // a few thousandths short, and the player must not need a fifth.

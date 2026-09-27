@@ -7,11 +7,11 @@ import type { Position3 } from "../lib/layout";
 import { fillTestTubeContents, resolveTubeContents } from "../lib/testTubeContents";
 import { prepareTestTube } from "../lib/testTubeMaterials";
 import { createTubeReactionVisuals } from "../lib/tubeReactionVisuals";
-import { reactionKindFor } from "../lib/tubeReactions";
+import { ROOM_TEMPERATURE_CHEMISTRY, reactionKindFor, useTubeReactionStore } from "../lib/tubeReactions";
 import { useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
 import { useTubeVisualTuningStore } from "../lib/useTubeVisualTuningStore";
 import { useLabNoticeStore } from "../lib/useLabNoticeStore";
-import { useHeatingStore } from "../lib/useHeatingStore";
+import type { CrackSpot } from "../lib/useHeatingStore";
 
 const MODEL_PATH = "/assets/models/LabTestTube.glb";
 
@@ -31,7 +31,8 @@ export function LabTestTubeInstance({
   scale = 1,
   worldScale,
   contents,
-  reactionProgress = 0,
+  chemistryId,
+  crackSpot = null,
   inStand = false,
 }: {
   readonly position?: Position3;
@@ -43,11 +44,15 @@ export function LabTestTubeInstance({
   /** Reagent ids in the tube, in pouring order. Omitted for the decorative/empty copies. */
   readonly contents?: readonly string[];
   /**
-   * 0..1, how far the contents' reaction has gone (`useTubeReactionStore`);
-   * which reaction it is comes from `reactionKindFor(contents)`. May
-   * change every frame, so it must never rebuild the contents binding.
+   * Key into `useTubeReactionStore` for this tube's chemistry — progress,
+   * rate and temperature (`TubeChemistry`). Read every frame inside
+   * `useFrame` rather than passed as values: they change every frame, and as
+   * props they would re-render the whole fume hood with them. Which reaction
+   * it is comes from `reactionKindFor(contents)`.
    */
-  readonly reactionProgress?: number;
+  readonly chemistryId?: string;
+  /** Where the glass cracked (`crackSpotForZone`), or null while intact. */
+  readonly crackSpot?: CrackSpot | null;
   readonly inStand?: boolean;
 }) {
   const { scene } = useGLTF(MODEL_PATH);
@@ -99,12 +104,15 @@ export function LabTestTubeInstance({
   const parentWorldScale = useMemo(() => new THREE.Vector3(), []);
   useFrame(({ clock }) => {
     const tuning = useTubeVisualTuningStore.getState();
-    const progress = import.meta.env.DEV && inStand && tuning.enabled ? tuning.progress : reactionProgress;
+    const chemistry =
+      (chemistryId && useTubeReactionStore.getState().chemistryById[chemistryId]) || ROOM_TEMPERATURE_CHEMISTRY;
+    const progress = import.meta.env.DEV && inStand && tuning.enabled ? tuning.progress : chemistry.progress;
+    // `chemistry.rate` / `.temperature` and `crackSpot` are the contract for
+    // the next visuals pass (docs/codex/04) — not drawn yet.
     visuals.current?.update(progress, clock.elapsedTime, useRuntimeQualityStore.getState().quality,
       performance.now() / 1000 - splashStart.current);
     if (inStand) {
-      const cracked = useHeatingStore.getState().phase === "cracked";
-      for (const uniform of crackUniforms.current) uniform.value = cracked ? 1 : 0;
+      for (const uniform of crackUniforms.current) uniform.value = crackSpot ? 1 : 0;
     }
     if (worldScale === undefined) return;
     const group = groupRef.current;

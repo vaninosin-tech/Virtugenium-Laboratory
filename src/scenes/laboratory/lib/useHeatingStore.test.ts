@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   CRACK_SPREAD,
   HEAT_SECONDS,
+  HEAT_ZONE_COUNT,
+  crackSpotForZone,
   PASS_SECONDS,
   heatSpread,
   useHeatingStore,
@@ -69,6 +71,18 @@ describe("preheating", () => {
     state().setSweep(0);
     run(3, false);
     expect(state().phase).toBe("cracked");
+  });
+
+  it("remembers where the glass was hottest when it cracked", () => {
+    state().grab();
+    state().setSweep(0.6);
+    run(3, false);
+    expect(state().phase).toBe("cracked");
+    const zone = state().crackZone!;
+    expect(state().zones[zone]).toBe(Math.max(...state().zones));
+    const spot = crackSpotForZone(zone);
+    expect(spot.side).toBeGreaterThan(0.5);
+    expect(spot.height).toBeGreaterThan(crackSpotForZone(HEAT_ZONE_COUNT / 2).height);
   });
 
   it("an unlit burner heats nothing", () => {
