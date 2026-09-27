@@ -7,8 +7,8 @@ import type { RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
   copperColor: "#007fce",
-  gasColor: "#71391d",
-  gasOpacity: 0.7,
+  gasColor: "#8b4513",
+  gasOpacity: 0.68,
   gasBuildSeconds: 4,
   gasDecaySeconds: 18,
   particleCounts: { LOW: 24, MEDIUM: 36, HIGH: 54, ULTRA: 72 },
@@ -158,14 +158,15 @@ uniform float uLip; uniform float uHeight;
 varying vec2 vP; varying float vGasHeight;
 void main() {
   if (vGasHeight < uLip - 0.0005) discard;
-  vec2 flow = vP * 3.5 + vec2(uTime * 0.16, -uTime * 0.29);
-  float n = sin(flow.x * 2.3 + sin(flow.y * 1.7)) * sin(flow.y * 2.1 - sin(flow.x * 1.9));
-  n += 0.45 * sin(flow.x * 5.1 - flow.y * 3.2 + uTime * 0.37);
-  vec2 p = vP + 0.13 * vec2(sin(vP.y * 5.0 + uTime * 0.8), cos(vP.x * 6.0 - uTime * 0.5));
-  float edge = 1.0 - smoothstep(0.35, 1.0, length(p) + n * 0.08);
-  float wisps = smoothstep(-0.8, 0.85, n) * 0.8 + 0.2;
-  float fade = 1.0 - smoothstep(uLip + uHeight * 0.3, uLip + uHeight, vGasHeight);
-  gl_FragColor = vec4(uColor, uOpacity * edge * edge * wisps * fade);
+  float rise = clamp((vP.y + 1.0) * 0.5, 0.0, 1.0);
+  float flow = sin(rise * 9.0 - uTime * 0.75) * 0.06
+    + sin(rise * 16.0 + uTime * 0.37) * 0.025;
+  float width = mix(0.23, 0.83, smoothstep(0.0, 0.85, rise));
+  float edge = 1.0 - smoothstep(width * 0.5, width, abs(vP.x - flow));
+  float bottom = smoothstep(0.0, 0.08, rise);
+  float top = 1.0 - smoothstep(0.55, 1.0, rise);
+  float cloud = 0.87 + 0.13 * sin(rise * 12.0 - uTime * 0.6 + vP.x * 4.0);
+  gl_FragColor = vec4(uColor, uOpacity * edge * bottom * top * cloud);
   #include <colorspace_fragment>
 }`,
   });
@@ -173,12 +174,12 @@ void main() {
   headGeometry.translate(center.x, (lip.y + box.min.y) / 2, center.z);
   const headMaterial = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.FrontSide, toneMapped: false,
-    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uTime: { value: 0 },
+    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
       uLip: { value: lip.y }, uRadius: { value: radius }, uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) } },
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 void main() { vP = position; vN = normalize(normalMatrix * normal);
 vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uTime;
+    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uTime; uniform float uDetail;
 uniform float uLip; uniform float uRadius; uniform vec3 uColor;
 varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 float gasNoise(vec3 p) {
@@ -195,12 +196,12 @@ if (aboveWater < 0.0004) discard;
 float h = clamp(aboveWater / max(uLip - uLevel, 0.005), 0.0, 1.0);
 vec3 q = vec3(vP.x / uRadius * 2.4, vP.y / uRadius * 0.9 - uTime * 0.18,
   vP.z / uRadius * 2.4 + sin(vP.y / uRadius * 0.55 + uTime * 0.24) * 0.35);
-float cloud = gasNoise(q) * 0.7 + gasNoise(q * 2.1 + vec3(4.7, 0.0, 1.9)) * 0.3;
-float density = smoothstep(0.37, 0.7, cloud) * (0.22 + 0.78 * smoothstep(0.0, 0.65, h));
-float base = 0.1 + 0.84 * density;
-float opticalDepth = pow(abs(dot(normalize(vN), normalize(vEye))), 0.5);
-float lipFade = 1.0 - 0.4 * smoothstep(uLip - 0.008, uLip, vP.y);
-gl_FragColor = vec4(uColor, (1.0 - exp(-uDensity * 2.0)) * opticalDepth * base * lipFade);
+float cloud = gasNoise(q) * 0.7 + gasNoise(q * 1.8 + vec3(4.7, 0.0, 1.9)) * 0.3;
+float variation = mix(1.0, 0.7 + 0.6 * cloud, uDetail);
+float heightDensity = mix(0.48, 1.0, smoothstep(0.0, 0.85, h));
+float opticalDepth = mix(0.55, 1.0, pow(abs(dot(normalize(vN), normalize(vEye))), 0.5));
+float lipFade = 1.0 - 0.15 * smoothstep(uLip - 0.008, uLip, vP.y);
+gl_FragColor = vec4(uColor, (1.0 - exp(-uDensity * 2.5 * heightDensity * variation)) * opticalDepth * lipFade);
 #include <colorspace_fragment>
 }`,
   });
@@ -353,11 +354,12 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       bubbles.count = Math.max(1, Math.floor(count * (rate * 0.75 + Math.max(0, temperature - 0.6) * 0.3)));
       gas.visible = gasDensity > 0.008;
       headspace.visible = gas.visible;
-      gas.count = Math.max(8, Math.floor(count / 5));
+      gas.count = 1;
       gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * gasDensity;
       gasMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDensity.value = gasDensity;
       headMaterial.uniforms.uTime.value = time;
+      headMaterial.uniforms.uDetail.value = quality === "LOW" ? 0 : 1;
       condensate.visible = kind === "copper-nitric" && temperature > 0.6;
       condensate.count = Math.floor(count / 3);
       dropletMaterial.opacity = 0.15 + temperature * 0.25;
@@ -436,10 +438,9 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           place(bubbles, i, bubblePoint.x, bubblePoint.y, bubblePoint.z, bubbleSize, bubbleSize * (bubbleSize > radius * 0.1 ? 0.82 : 1), bubbleSize);
         }
         if (gas.visible && i < gas.count) {
-          const rise = i === 0 ? 0 : (time * 0.13 + i / gas.count) % 1;
-          const r = radius * (0.65 + rise * 1.2);
-          place(gas, i, lip.x + gravity.x * rise * radius * 5 + Math.sin(time * 0.65 + i) * radius * rise,
-            lip.y + radius * 0.12 + gravity.y * rise * radius * 5, lip.z + gravity.z * rise * radius * 5, r, r * 1.2, r);
+          place(gas, i, lip.x + gravity.x * radius * 2.4,
+            lip.y + gravity.y * radius * 2.4, lip.z + gravity.z * radius * 2.4,
+            radius * 2.4, radius * 2.4, radius * 2.4);
         }
         if (condensate.visible && i < condensate.count) {
           place(condensate, i, Math.cos(angle) * radius * 0.99,

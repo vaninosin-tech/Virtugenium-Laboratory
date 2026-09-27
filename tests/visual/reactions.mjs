@@ -52,8 +52,9 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (name.includes("-HIGH-") && (name.endsWith("-3s") || name.endsWith("-6s")
-    || name.endsWith("-12s") || name.endsWith("-0") || name.endsWith("-before") || name.endsWith("-peak"))) {
+  if ((name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+    || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
+    || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
       format: "png", fromSurface: true, captureBeyondViewport: false,
       clip: { ...tubeCrop, scale: 1 },
@@ -350,6 +351,11 @@ try {
           progress: 0.45, rate: 0.9, temperature: 1, tiltDegrees: 0 }));
         await settle(5000);
         await shot(`${prefix}-peak`, `${prefix}-fixture`);
+        const coolingAt = await page.evaluate(() => {
+          window.__tubeVisualTuningStore.setState({ rate: 0, temperature: 0 });
+          return window.__reactionCapture.event("fixture: gas cooling at fixed progress");
+        });
+        await series(`${prefix}-cooling`, coolingAt, [0, 10, 20]);
         await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false,
           progress: 0, rate: 0, temperature: 0, tiltDegrees: null }));
         continue;

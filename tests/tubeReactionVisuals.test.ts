@@ -167,8 +167,9 @@ describe("tube reaction rendering contract", () => {
     expect(headUniforms.uUp.value.equals(liquid(f).uniforms.uUp.value)).toBe(true);
     const matrix = new THREE.Matrix4();
     plume.getMatrixAt(0, matrix);
-    expect(matrix.elements[13]).toBeGreaterThanOrEqual(0.15);
-    expect(matrix.elements[13]).toBeLessThan(0.153);
+    expect(plume.count).toBe(1);
+    const plumeBottom = matrix.elements[13] - Math.hypot(matrix.elements[4], matrix.elements[5], matrix.elements[6]);
+    expect(plumeBottom).toBeCloseTo(0.15, 4);
     f.advance(1, chemistry(1, 0), quality);
     expect(density(f)).toBeLessThan(accumulated);
     expect(density(f)).toBeGreaterThan(accumulated * 0.8);
