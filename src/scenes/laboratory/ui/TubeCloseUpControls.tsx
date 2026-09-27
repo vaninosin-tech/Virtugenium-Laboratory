@@ -25,11 +25,9 @@ export function TubeCloseUpControls() {
 
 const panelStyle: CSSProperties = {
   position: "absolute",
-  left: "50%",
-  // Top, not bottom: the zone's own navigation buttons own the bottom edge,
-  // and the flame under the tube sits low in the close-up frame.
+  right: 20,
+  // The mouth and its gas occupy the upper centre in the close-up.
   top: 70,
-  transform: "translateX(-50%)",
   zIndex: 11,
   display: "flex",
   alignItems: "center",

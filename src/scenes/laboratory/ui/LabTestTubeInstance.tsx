@@ -57,7 +57,18 @@ export function LabTestTubeInstance({
     return clone;
   }, [scene]);
 
-  useEffect(() => prepareTestTube(instance), [instance]);
+  const crackUniforms = useRef<THREE.IUniform<number>[]>([]);
+  useEffect(() => {
+    const dispose = prepareTestTube(instance);
+    // Only the clamped tube reads heating state; cache its newly owned glass.
+    if (inStand) instance.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.name.startsWith("Tube_Glass")) {
+        const material = object.material as THREE.Material;
+        if (material.userData.cracked) crackUniforms.current.push(material.userData.cracked);
+      }
+    });
+    return () => { crackUniforms.current = []; dispose(); };
+  }, [instance, inStand]);
 
   const visuals = useRef<ReturnType<typeof createTubeReactionVisuals>>(null);
   const splashStart = useRef(-Infinity);
@@ -91,13 +102,10 @@ export function LabTestTubeInstance({
     const progress = import.meta.env.DEV && inStand && tuning.enabled ? tuning.progress : reactionProgress;
     visuals.current?.update(progress, clock.elapsedTime, useRuntimeQualityStore.getState().quality,
       performance.now() / 1000 - splashStart.current);
-    const cracked = inStand && useHeatingStore.getState().phase === "cracked";
-    instance.traverse((object) => {
-      if (object instanceof THREE.Mesh && object.name.startsWith("Tube_Glass")) {
-        const material = object.material as THREE.Material;
-        if (material.userData.cracked) material.userData.cracked.value = cracked ? 1 : 0;
-      }
-    });
+    if (inStand) {
+      const cracked = useHeatingStore.getState().phase === "cracked";
+      for (const uniform of crackUniforms.current) uniform.value = cracked ? 1 : 0;
+    }
     if (worldScale === undefined) return;
     const group = groupRef.current;
     const parent = group?.parent;

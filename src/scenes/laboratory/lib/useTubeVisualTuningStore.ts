@@ -12,3 +12,7 @@ export const useTubeVisualTuningStore = create<{
   setEnabled: (enabled) => set({ enabled }),
   setProgress: (progress) => set({ progress: Math.max(0, Math.min(1, progress)) }),
 }));
+
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  (window as unknown as { __tubeVisualTuningStore?: unknown }).__tubeVisualTuningStore = useTubeVisualTuningStore;
+}

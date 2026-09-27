@@ -69,7 +69,22 @@ describe("tube reaction rendering contract", () => {
       expect(f.get("TubeNO2").visible).toBe(false);
       expect(f.get("TubeNOBubbles").visible).toBe(false);
     }
-    expect(silver.get("TubeSediment").scale.y).toBeGreaterThan(barium.get("TubeSediment").scale.y * 3);
+    const height = (f: ReturnType<typeof fixture>) => {
+      const pool = f.get("TubePrecipitate") as THREE.InstancedMesh;
+      pool.geometry.computeBoundingBox();
+      const box = new THREE.Box3();
+      const matrix = new THREE.Matrix4();
+      for (let i = 0; i < pool.count; i++) {
+        pool.getMatrixAt(i, matrix);
+        box.union(pool.geometry.boundingBox!.clone().applyMatrix4(matrix));
+      }
+      return box.max.y;
+    };
+    expect(height(silver)).toBeGreaterThan(0.055 * 0.2);
+    expect(height(silver)).toBeLessThan(0.055 * 0.28);
+    expect(height(silver)).toBeGreaterThan(height(barium) * 3);
+    expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissiveIntensity).toBe(1);
+    expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
     silver.cleanup(); barium.cleanup();
   });
 
@@ -80,6 +95,18 @@ describe("tube reaction rendering contract", () => {
     expect(liquid.uniforms.uReactionColor.value.getHexString()).toBe("ffffff");
     expect(liquid.uniforms.uOpacity.value).toBeCloseTo(0.14);
     for (const o of f.root.getObjectByName("TubeReactionVisuals")!.children) expect(o.visible).toBe(false);
+    f.cleanup();
+  });
+
+  it("preserves the physical response at the start of permanganate reduction", () => {
+    const f = fixture("permanganate-redox");
+    f.visuals.update(0.0001, 0, "HIGH", Infinity);
+    const liquid = f.volume.material as LiquidMaterial;
+    expect(liquid.side).toBe(f.baseline.side);
+    expect(liquid.depthWrite).toBe(f.baseline.depthWrite);
+    expect(liquid.roughness).toBe(f.baseline.roughness);
+    expect(liquid.ior).toBe(f.baseline.ior);
+    expect(liquid.uniforms.uOpacity.value).toBeCloseTo(f.baseline.opacity, 3);
     f.cleanup();
   });
 

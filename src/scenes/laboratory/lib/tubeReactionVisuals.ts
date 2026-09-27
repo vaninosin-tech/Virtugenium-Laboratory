@@ -6,9 +6,12 @@ import type { ReactionKind } from "./tubeReactions";
 import type { RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
-  copperColor: "#219de8",
-  gasColor: "#98401c",
-  particleCounts: { LOW: 12, MEDIUM: 28, HIGH: 48, ULTRA: 72 },
+  copperColor: "#007fce",
+  gasColor: "#863016",
+  gasOpacity: 0.56,
+  particleCounts: { LOW: 24, MEDIUM: 36, HIGH: 54, ULTRA: 72 },
+  curdLayerHeight: 0.24,
+  crystalLayerHeight: 0.045,
   settlingStart: 0.18,
   settlingEnd: 0.94,
 };
@@ -44,6 +47,23 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   if (liquid) {
     liquid.uniforms.uMixingStrength.value = 0;
     liquid.uniforms.uTopHighlight.value = 0.04;
+    if (kind === "permanganate-redox") {
+      // Match the pre-reaction physical response, including both walls and
+      // depth writing. Switching to the bottle shader diluted the first frame.
+      liquid.side = physical.side;
+      liquid.depthWrite = physical.depthWrite;
+      liquid.roughness = physical.roughness;
+      liquid.ior = physical.ior;
+      liquid.onBeforeCompile = (shader) => {
+        Object.assign(shader.uniforms, liquid.uniforms);
+        shader.fragmentShader = `uniform vec3 uBaseColor; uniform vec3 uReactionColor;
+uniform float uReactionProgress; uniform float uOpacity;
+${shader.fragmentShader}`.replace("#include <color_fragment>", `#include <color_fragment>
+diffuseColor.rgb = mix(uBaseColor, uReactionColor, uReactionProgress);
+diffuseColor.a = uOpacity;`);
+      };
+      liquid.customProgramCacheKey = () => "tube-liquid-continuous-permanganate-v1";
+    }
   }
   const group = new THREE.Group();
   group.name = "TubeReactionVisuals";
@@ -52,14 +72,32 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   group.scale.copy(volume.scale);
   volume.parent?.add(group);
   const geometry = new THREE.IcosahedronGeometry(1, 1);
-  const white = new THREE.MeshStandardMaterial({ color: "#ffffff", roughness: 0.94, emissive: "#ffffff", emissiveIntensity: 0.12 });
+  const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1, envMapIntensity: 0.15 });
+  white.onBeforeCompile = (shader) => {
+    // The nearby burner saturates even non-emissive white. Bound the diffuse
+    // response before bloom and keep normal-based relief instead of hot spots.
+    shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
+float relief = 0.7 + 0.3 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
+outgoingLight = min(totalDiffuse, vec3(0.65)) * relief;
+#include <opaque_fragment>`);
+  };
+  // Lobed, asymmetric flocs cast their own small shading variations. They do
+  // not depend on bloom or emission to distinguish curds from fine crystals.
+  const curdGeometry = new THREE.IcosahedronGeometry(1, 2);
+  const vertices = curdGeometry.getAttribute("position");
+  for (let i = 0; i < vertices.count; i++) {
+    const x = vertices.getX(i), y = vertices.getY(i), z = vertices.getZ(i);
+    const lump = 0.8 + 0.18 * Math.sin(x * 11 + y * 7) * Math.cos(z * 12 - y * 5) + 0.12 * Math.sin(z * 7 + x * 5);
+    vertices.setXYZ(i, x * lump, y * lump * 0.75, z * lump);
+  }
+  curdGeometry.computeVertexNormals();
   const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e5f4ff", transparent: true, opacity: 0.48, roughness: 0.08, metalness: 0.12, depthWrite: false });
-  const gasMaterial = new THREE.MeshBasicMaterial({ color: TUBE_VISUALS.gasColor, transparent: true, opacity: 0.12, depthWrite: false });
+  const gasMaterial = new THREE.MeshBasicMaterial({ color: TUBE_VISUALS.gasColor, transparent: true, opacity: TUBE_VISUALS.gasOpacity, depthWrite: false, toneMapped: false });
   gasMaterial.onBeforeCompile = (shader) => {
     shader.vertexShader = `varying vec3 vGasNormal; varying vec3 vGasView;\n${shader.vertexShader}`
-      .replace("#include <project_vertex>", "#include <project_vertex>\nvGasNormal = normalize(normalMatrix * normal); vGasView = -mvPosition.xyz;");
+      .replace("#include <project_vertex>", "#include <project_vertex>\nvGasNormal = normalize(normalMatrix * mat3(instanceMatrix) * normal); vGasView = -mvPosition.xyz;");
     shader.fragmentShader = `varying vec3 vGasNormal; varying vec3 vGasView;\n${shader.fragmentShader}`
-      .replace("#include <opaque_fragment>", "diffuseColor.a *= pow(abs(dot(normalize(vGasNormal), normalize(vGasView))), 2.0);\n#include <opaque_fragment>");
+      .replace("#include <opaque_fragment>", "diffuseColor.a *= smoothstep(0.0, 0.8, abs(dot(normalize(vGasNormal), normalize(vGasView))));\n#include <opaque_fragment>");
   };
   const makePool = (material: THREE.Material) => {
     const mesh = new THREE.InstancedMesh(geometry, material, 72);
@@ -71,6 +109,7 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
     return mesh;
   };
   const flakes = makePool(white);
+  if (kind === "silver-chloride") flakes.geometry = curdGeometry;
   flakes.name = "TubePrecipitate";
   const bubbles = makePool(bubbleMaterial);
   bubbles.name = "TubeNOBubbles";
@@ -107,20 +146,21 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
         liquid.uniforms.uTime.value = time;
         liquid.uniforms.uReactionProgress.value = precipitate ? onset : p;
         liquid.uniforms.uCloudiness.value = precipitate ? onset * (1 - settled) : 0;
-        liquid.uniforms.uOpacity.value = precipitate ? THREE.MathUtils.lerp(physical.opacity, 0.95, onset * (1 - settled))
-          : kind === "permanganate-redox" ? THREE.MathUtils.lerp(0.94, 0.14, p) : THREE.MathUtils.lerp(physical.opacity, 0.8, p);
+        liquid.uniforms.uOpacity.value = precipitate ? THREE.MathUtils.lerp(0.12, 0.95, onset * (1 - settled))
+          : kind === "permanganate-redox" ? THREE.MathUtils.lerp(physical.opacity, 0.14, p) : THREE.MathUtils.lerp(physical.opacity, 1, p);
         liquid.uniforms.uQualityNoise.value = quality === "LOW" ? 0 : 1;
       }
       bed.visible = precipitate && p > 0;
-      bed.scale.y = Math.max(0.0001, settled * (curds ? 0.16 : 0.045));
+      // AgCl's shallow core only fills gaps; the lobed flocs form its surface.
+      bed.scale.y = Math.max(0.0001, settled * (curds ? 0.08 : TUBE_VISUALS.crystalLayerHeight));
       bed.position.y = box.min.y * (1 - bed.scale.y);
       flakes.visible = precipitate && p > 0;
       flakes.count = count;
       bubbles.visible = kind === "copper-nitric" && p > 0;
       bubbles.count = Math.max(4, Math.floor(count / 3));
       gas.visible = bubbles.visible;
-      gas.count = Math.max(4, Math.floor(count / 6));
-      gasMaterial.opacity = 0.2 * onset;
+      gas.count = Math.max(8, Math.floor(count / 5));
+      gasMaterial.opacity = TUBE_VISUALS.gasOpacity * onset * (0.45 + 0.55 * p);
       splash.visible = splashAge >= 0 && splashAge < 1;
       splash.count = Math.max(6, Math.floor(count / 2));
       for (let i = 0; i < count; i++) {
@@ -128,17 +168,20 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
         const radial = radius * 0.64 * Math.sqrt(random(i + 93));
         const x = center.x + Math.cos(angle) * radial;
         const z = center.z + Math.sin(angle) * radial;
-        const grain = radius * (curds ? 0.19 + random(i + 31) * 0.1 : 0.055);
-        const floor = box.min.y + size.y * (curds ? 0.05 + random(i + 14) * 0.1 : 0.02);
-        place(flakes, i, x, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), floor, settled), z, grain * onset, grain * onset * 0.65, grain * onset);
+        const grain = radius * (curds ? 0.32 + random(i + 31) * 0.12 : 0.045);
+        const floor = box.min.y + size.y * (curds ? 0.045 + random(i + 14) * (TUBE_VISUALS.curdLayerHeight - 0.09) : 0.02);
+        const drift = Math.sin(time * 0.75 + i * 2.4) * radius * 0.07 * (1 - settled);
+        place(flakes, i, x + drift, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), floor, settled), z,
+          grain * onset, grain * onset * (curds ? 1.5 : 0.65), grain * onset);
         if (i < bubbles.count) {
           const rise = (time * 0.48 + random(i + 42)) % 1;
           place(bubbles, i, x * 0.7, box.min.y + size.y * (0.12 + rise * 0.87), z * 0.7, radius * (0.07 + rise * 0.06) * onset);
         }
         if (i < gas.count) {
-          const rise = (time * 0.35 + i / gas.count) % 1;
-          const r = radius * (0.75 + rise * 1.6);
-          place(gas, i, lip.x + Math.sin(time + i) * radius * rise, lip.y + r * 1.5 + rise * size.y * 0.9, lip.z, r, r * 1.4, r);
+          const rise = (time * 0.12 + i / gas.count) % 1;
+          const r = radius * (0.7 + rise * 0.4);
+          place(gas, i, lip.x + Math.sin(time * 0.65 + i) * radius * rise,
+            lip.y + r * 1.05 + rise * size.y * 0.06, lip.z, r, r * 0.85, r);
         }
         if (splash.visible && i < splash.count) {
           const age = Math.max(0, splashAge);
@@ -156,6 +199,7 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
       group.removeFromParent();
       deferDispose(group, () => {
         geometry.dispose();
+        curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose();
         for (const mesh of [flakes, bubbles, gas, splash]) mesh.dispose();
       });
