@@ -8,6 +8,9 @@ import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
 
+const JAR_FOCUS_RANGE = 0.7;
+const TUBE_FOCUS_RANGE = 0.1;
+
 class InspectionBlurEffect extends DepthOfFieldEffect {
   active = false;
   private warmed = false;
@@ -25,7 +28,7 @@ class InspectionBlurEffect extends DepthOfFieldEffect {
 export function InspectionDepthOfField() {
   const camera = useThree(state => state.camera);
   const effect = useMemo(() => {
-    const blur = new InspectionBlurEffect(camera, { focusRange: 0.7, bokehScale: 3 });
+    const blur = new InspectionBlurEffect(camera, { focusRange: JAR_FOCUS_RANGE, bokehScale: 3 });
     blur.target = new Vector3();
     blur.maskFunction = MaskFunction.MULTIPLY_RGB_SET_ALPHA;
     blur.blendMode.opacity.value = 0;
@@ -54,6 +57,10 @@ export function InspectionDepthOfField() {
     if (effect.active) {
       if (inspectingJar) effect.target!.fromArray(inspection.stagePosition);
       else effect.target!.copy(TUBE_FOCUS.point);
+      // World units. The jar's 0.7 m band swallowed the bottles standing
+      // 10–20 cm in front of the tube, so nothing looked blurred; the tube
+      // itself is only a couple of centimetres deep.
+      effect.cocMaterial.focusRange = inspectingJar ? JAR_FOCUS_RANGE : TUBE_FOCUS_RANGE;
     }
   });
   useEffect(() => {
