@@ -41,6 +41,14 @@ uniform float uClearAlpha; uniform float uEdgeAlpha; uniform float uMeniscusAlph
 uniform vec3 uUp; uniform float uLevel; uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
 uniform float uReactionKind; uniform float uRate; uniform float uTemperature; uniform float uTime;
 varying vec3 vTubePoint; varying float vCap;
+float tubeNoise(vec3 p) {
+  vec3 i = floor(p), f = smoothstep(0.0, 1.0, fract(p));
+  float n = dot(i, vec3(1.0, 57.0, 113.0));
+  vec4 a = fract(sin(vec4(n, n + 1.0, n + 57.0, n + 58.0)) * 43758.5453);
+  vec4 b = fract(sin(vec4(n + 113.0, n + 114.0, n + 170.0, n + 171.0)) * 43758.5453);
+  return mix(mix(mix(a.x, a.y, f.x), mix(a.z, a.w, f.x), f.y),
+    mix(mix(b.x, b.y, f.x), mix(b.z, b.w, f.x), f.y), f.z);
+}
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
 float surfaceDistance = dot(uUp, vTubePoint) - uLevel;
 if (vCap < 0.5 && surfaceDistance > 0.0004) discard;`)
@@ -48,7 +56,9 @@ if (vCap < 0.5 && surfaceDistance > 0.0004) discard;`)
 float h = clamp((vTubePoint.y - uBoundsMin.y) / uBoundsSize.y, 0.0, 1.0);
 vec2 radial = (vTubePoint.xz - uBoundsMin.xz - uBoundsSize.xz * 0.5) / uBoundsSize.xz;
 float p = uReactionProgress;
-float stream = sin(radial.x * 16.0 + sin(h * 10.0 - uTime * (0.7 + uTemperature)) + radial.y * 9.0);
+float n = tubeNoise(vec3(radial * 10.0, h * 6.0 - uTime * (0.14 + uTemperature * 0.24)));
+float stream = sin(radial.x * 16.0 + sin(h * 10.0 - uTime * (0.7 + uTemperature)) + radial.y * 9.0)
+  + (n - 0.5) * 0.8;
 float localMix = p;
 float cloud = uCloudiness;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
@@ -59,7 +69,9 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   float ingress = smoothstep(1.0 - h - 0.18, 1.0 - h + 0.18, p * 8.0 + stream * 0.09);
   float settlingFront = 1.0 - smoothstep(1.05 - p, 1.25 - p, h);
-  cloud *= ingress * settlingFront;
+  cloud *= ingress * settlingFront * (0.6 + 0.7 * n);
+} else if (uReactionKind > 2.5 && uReactionKind < 3.5) {
+  cloud *= 0.72 + 0.45 * n;
 } else if (uReactionKind > 3.5) {
   // Sulfite enters at the top; retain violet below the moving mixing front.
   localMix = smoothstep(1.0 - h - 0.18, 1.0 - h + 0.18,
@@ -75,6 +87,7 @@ float waterEdge = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition)
 float meniscus = (1.0 - smoothstep(0.00015, 0.0007, abs(surfaceDistance))) * (1.0 - vCap);
 float capRim = smoothstep(0.43, 0.50, length(radial)) * vCap;
 float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + max(meniscus, capRim) * uMeniscusAlpha;
+waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
 diffuseColor.a = clamp(mix(waterAlpha, uOpacity, scatter) + cloud * 0.85, 0.0, 0.96);`)
         .replace("#include <opaque_fragment>", `
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
@@ -82,9 +95,10 @@ vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge
 // Neutral scattering keeps a white precipitate white next to the warm burner.
 float relief = 0.7 + 0.2 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
 vec3 coloredLight = tubeColor * (0.5 + relief * 0.3) * mix(1.0, 0.68, waterEdge) + boundedSpecular * 0.2;
+coloredLight += vec3(0.08, 0.13, 0.15) * (n - 0.5) * smoothstep(0.6, 0.95, uTemperature);
 outgoingLight = mix(mix(clearLight, coloredLight, scatter), vec3(relief * 0.78), cloud);
 #include <opaque_fragment>`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-gravity-fronts-v2"; }
+  customProgramCacheKey() { return "tube-liquid-gravity-fronts-v3"; }
 }

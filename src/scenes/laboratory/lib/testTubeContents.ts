@@ -51,9 +51,9 @@ function easeOutCubic(t: number): number {
  * Cu should look in a tube. Deliberately NOT `createCopperPile` (the jar's
  * 56-fragment, raycast-settled heap): that algorithm is tuned for a wide,
  * squat jar cavity, and a tube only ever needs a believable handful of
- * pieces in a narrow column, not a physically-settled pile. Geometry is a
- * jittered icosahedron per granule — cheap, and irregular enough not to
- * read as a perfect sphere.
+ * pieces in a narrow column, not a physically-settled pile. A softly
+ * irregular sphere keeps the silhouette rounded and the copper specular
+ * response continuous at close range.
  */
 export function createTubeCopperGranules(cavityGeometry: THREE.BufferGeometry): THREE.Group {
   cavityGeometry.computeBoundingBox();
@@ -77,14 +77,16 @@ export function createTubeCopperGranules(cavityGeometry: THREE.BufferGeometry): 
   let dropIndex = 0;
   for (const relativeSize of relativeSizes) {
     const unit = radius * 1.15 * relativeSize;
-    const geometry = new THREE.IcosahedronGeometry(unit, 0);
+    const geometry = new THREE.SphereGeometry(unit, 20, 14);
     const position = geometry.getAttribute("position");
     for (let i = 0; i < position.count; i++) {
-      const jitter = 1 + (random() - 0.5) * 0.18;
-      position.setXYZ(i, position.getX(i) * jitter, position.getY(i) * jitter, position.getZ(i) * jitter);
+      const x = position.getX(i), yPos = position.getY(i), z = position.getZ(i);
+      const jitter = 1 + 0.055 * Math.sin(x / unit * 5 + z / unit * 3)
+        * Math.cos(yPos / unit * 4 - x / unit * 2);
+      position.setXYZ(i, x * jitter, yPos * jitter * 0.82, z * jitter);
     }
     geometry.computeVertexNormals();
-    const mesh = new THREE.Mesh(geometry, COPPER_GRANULE_MATERIAL);
+    const mesh = new THREE.Mesh(geometry, COPPER_GRANULE_MATERIAL.clone());
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     const offsetX = (random() - 0.5) * radius * 0.3;
@@ -238,7 +240,7 @@ export function fillTestTubeContents(
         deferDispose(object, () => object.traverse((child) => {
           if (!(child instanceof THREE.Mesh)) return;
           child.geometry.dispose();
-          // Copper's material is shared; only per-fill geometry is owned.
+          child.material.dispose();
         }));
       });
     },

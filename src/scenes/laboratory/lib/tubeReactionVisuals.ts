@@ -7,8 +7,8 @@ import type { RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
   copperColor: "#007fce",
-  gasColor: "#8b4d24",
-  gasOpacity: 0.55,
+  gasColor: "#71391d",
+  gasOpacity: 0.7,
   gasBuildSeconds: 4,
   gasDecaySeconds: 18,
   particleCounts: { LOW: 24, MEDIUM: 36, HIGH: 54, ULTRA: 72 },
@@ -116,7 +116,7 @@ outgoingLight = vec3(uSedimentWhite) * relief;
     vertices.setXYZ(i, x * lump, y * lump * 0.75, z * lump);
   }
   curdGeometry.computeVertexNormals();
-  const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e5f4ff", transparent: true, opacity: 0.48, roughness: 0.08, metalness: 0.12, depthWrite: false });
+  const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#d5ecf1", transparent: true, opacity: 0.55, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
   const up = { value: new THREE.Vector3(0, 1, 0) };
   const level = { value: box.max.y };
   bubbleMaterial.onBeforeCompile = shader => {
@@ -128,14 +128,17 @@ vBubblePoint = (instanceMatrix * vec4(transformed, 1.0)).xyz;
       .replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
 if (length(vBubblePoint.xz) > uTubeRadius || dot(uWaterUp, vBubblePoint) > uWaterLevel) discard;`)
       .replace("#include <opaque_fragment>", `
-float edge = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 1.8);
-diffuseColor.a = 0.06 + edge * 0.65;
-outgoingLight = vec3(0.45, 0.58, 0.62) + totalSpecular / (vec3(1.0) + totalSpecular) * 0.3;
+float edge = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.6);
+diffuseColor.a = 0.02 + edge * 0.95;
+outgoingLight = vec3(0.12, 0.21, 0.23) + edge * vec3(0.87, 0.95, 0.97) + totalSpecular / (vec3(1.0) + totalSpecular) * 0.35;
 #include <opaque_fragment>`);
   };
   const dropletMaterial = new THREE.MeshBasicMaterial({ color: "#b9d0d4", transparent: true, opacity: 0.3, depthWrite: false });
   const splashMaterial = dropletMaterial.clone();
   splashMaterial.opacity = 0.48;
+  const foamGeometry = new THREE.TorusGeometry(1, 0.16, 4, 10);
+  foamGeometry.rotateX(-Math.PI / 2);
+  const foamMaterial = new THREE.MeshBasicMaterial({ color: "#d9e9e5", transparent: true, opacity: 0.43, depthWrite: false });
   const gasGeometry = new THREE.PlaneGeometry(2, 2);
   const gasMaterial = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, toneMapped: false,
@@ -155,9 +158,12 @@ uniform float uLip; uniform float uHeight;
 varying vec2 vP; varying float vGasHeight;
 void main() {
   if (vGasHeight < uLip - 0.0005) discard;
-  vec2 p = vP + 0.13 * vec2(sin(vP.y * 6.0 + uTime), cos(vP.x * 7.0 - uTime * 0.7));
-  float edge = 1.0 - smoothstep(0.2, 1.0, length(p));
-  float wisps = 0.65 + 0.35 * sin(p.x * 8.0 + sin(p.y * 6.0) - uTime * 0.8);
+  vec2 flow = vP * 3.5 + vec2(uTime * 0.16, -uTime * 0.29);
+  float n = sin(flow.x * 2.3 + sin(flow.y * 1.7)) * sin(flow.y * 2.1 - sin(flow.x * 1.9));
+  n += 0.45 * sin(flow.x * 5.1 - flow.y * 3.2 + uTime * 0.37);
+  vec2 p = vP + 0.13 * vec2(sin(vP.y * 5.0 + uTime * 0.8), cos(vP.x * 6.0 - uTime * 0.5));
+  float edge = 1.0 - smoothstep(0.35, 1.0, length(p) + n * 0.08);
+  float wisps = smoothstep(-0.8, 0.85, n) * 0.8 + 0.2;
   float fade = 1.0 - smoothstep(uLip + uHeight * 0.3, uLip + uHeight, vGasHeight);
   gl_FragColor = vec4(uColor, uOpacity * edge * edge * wisps * fade);
   #include <colorspace_fragment>
@@ -175,14 +181,26 @@ vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = p
     fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uTime;
 uniform float uLip; uniform float uRadius; uniform vec3 uColor;
 varying vec3 vP; varying vec3 vN; varying vec3 vEye;
+float gasNoise(vec3 p) {
+  vec3 i = floor(p), f = smoothstep(0.0, 1.0, fract(p));
+  float k = dot(i, vec3(1.0, 57.0, 113.0));
+  vec4 a = fract(sin(vec4(k, k + 1.0, k + 57.0, k + 58.0)) * 43758.5453);
+  vec4 b = fract(sin(vec4(k + 113.0, k + 114.0, k + 170.0, k + 171.0)) * 43758.5453);
+  return mix(mix(mix(a.x, a.y, f.x), mix(a.z, a.w, f.x), f.y),
+    mix(mix(b.x, b.y, f.x), mix(b.z, b.w, f.x), f.y), f.z);
+}
 void main() {
 float aboveWater = dot(uUp, vP) - uLevel;
 if (aboveWater < 0.0004) discard;
-float column = smoothstep(0.0, 0.006, aboveWater);
-float opticalDepth = pow(abs(dot(normalize(vN), normalize(vEye))), 0.6);
-float wisp = 0.8 + 0.2 * sin(vP.y * 150.0 - uTime * 1.1 + sin(vP.z / uRadius * 3.0));
-float lipFade = 1.0 - 0.25 * smoothstep(uLip - 0.012, uLip, vP.y);
-gl_FragColor = vec4(uColor, (1.0 - exp(-uDensity * 1.5)) * opticalDepth * column * wisp * lipFade);
+float h = clamp(aboveWater / max(uLip - uLevel, 0.005), 0.0, 1.0);
+vec3 q = vec3(vP.x / uRadius * 2.4, vP.y / uRadius * 0.9 - uTime * 0.18,
+  vP.z / uRadius * 2.4 + sin(vP.y / uRadius * 0.55 + uTime * 0.24) * 0.35);
+float cloud = gasNoise(q) * 0.7 + gasNoise(q * 2.1 + vec3(4.7, 0.0, 1.9)) * 0.3;
+float density = smoothstep(0.37, 0.7, cloud) * (0.22 + 0.78 * smoothstep(0.0, 0.65, h));
+float base = 0.1 + 0.84 * density;
+float opticalDepth = pow(abs(dot(normalize(vN), normalize(vEye))), 0.5);
+float lipFade = 1.0 - 0.4 * smoothstep(uLip - 0.008, uLip, vP.y);
+gl_FragColor = vec4(uColor, (1.0 - exp(-uDensity * 2.0)) * opticalDepth * base * lipFade);
 #include <colorspace_fragment>
 }`,
   });
@@ -212,6 +230,9 @@ gl_FragColor = vec4(uColor, (1.0 - exp(-uDensity * 1.5)) * opticalDepth * column
   condensate.name = "TubeCondensate";
   const splash = makePool(splashMaterial);
   splash.name = "TubeSplash";
+  const foam = makePool(foamMaterial);
+  foam.geometry = foamGeometry;
+  foam.name = "TubeSurfaceFoam";
   // The measured cavity is a radius-7 mm hemisphere at its base. Truncate
   // the top, preserving the bowl profile instead of flattening the hemisphere.
   const bedMaterial = white.clone();
@@ -328,8 +349,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       sedimentLevel.value = box.min.y + size.y * settled * (curds ? 0.08 : TUBE_VISUALS.crystalLayerHeight);
       flakes.visible = precipitate && p > 0;
       flakes.count = count;
-      bubbles.visible = kind === "copper-nitric" && (rate > 0.005 || temperature > 0.85);
-      bubbles.count = Math.max(1, Math.floor(count * (rate * 0.75 + Math.max(0, temperature - 0.85))));
+      bubbles.visible = kind === "copper-nitric" && (rate > 0.005 || temperature > 0.6);
+      bubbles.count = Math.max(1, Math.floor(count * (rate * 0.75 + Math.max(0, temperature - 0.6) * 0.3)));
       gas.visible = gasDensity > 0.008;
       headspace.visible = gas.visible;
       gas.count = Math.max(8, Math.floor(count / 5));
@@ -343,10 +364,16 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       if (copper) {
         const shrink = Math.cbrt(Math.max(0, 1 - p));
         copper.children.forEach((child, i) => {
+          const etch = THREE.MathUtils.smoothstep(p * (0.8 + random(i + 150) * 0.38), 0.02, 0.9);
+          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
+            child.material.color.set("#d58b68").lerp(new THREE.Color("#59463f"), etch * 0.9);
+            child.material.roughness = THREE.MathUtils.lerp(0.27, 0.84, etch);
+            child.material.metalness = THREE.MathUtils.lerp(0.96, 0.42, etch);
+          }
           // A bounding sphere encloses every rotated, irregular grain. Fit
           // that sphere inside the bowl instead of trusting its drop target.
           const fit = Math.min(1, radius * 0.86 / Math.max(copperBounds[i], 0.000001));
-          child.scale.setScalar(shrink * fit);
+          child.scale.setScalar(shrink * fit * (1 - etch * random(i + 173) * 0.24));
           child.visible = shrink > 0.03;
           child.position.copy(copperPoints[i]);
           child.position.y = box.min.y + (child.position.y - box.min.y) * shrink;
@@ -366,8 +393,12 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       splash.visible = splashAge >= 0 && splashAge < 1;
       splash.count = Math.max(6, Math.floor(count / 2));
+      foam.visible = kind === "copper-nitric" && rate > 0.55;
+      foam.count = Math.floor(count / 4);
+      foamMaterial.opacity = 0.16 + rate * 0.3;
       const activeCount = Math.max(flakes.visible ? count : 0, bubbles.visible ? bubbles.count : 0,
-        gas.visible ? gas.count : 0, condensate.visible ? condensate.count : 0, splash.visible ? splash.count : 0);
+        gas.visible ? gas.count : 0, condensate.visible ? condensate.count : 0, splash.visible ? splash.count : 0,
+        foam.visible ? foam.count : 0);
       for (let i = 0; i < activeCount; i++) {
         const angle = random(i + 1) * Math.PI * 2;
         const radial = radius * 0.64 * Math.sqrt(random(i + 93));
@@ -380,21 +411,29 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         if (flakes.visible) place(flakes, i, x + drift - gravity.x * radius * settled * 0.6, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), floor - gravity.z * z, settled), z - gravity.z * radius * settled * 0.6,
           grain * onset * ingress, grain * onset * ingress * (curds ? 1.5 : 0.65), grain * onset * ingress);
         if (bubbles.visible && i < bubbles.count) {
-          const rise = (bubblePhase + random(i + 42)) % 1;
-          const grainMesh = copper?.children[i % Math.max(1, copper.children.length)];
+          const site = i % 8;
+          const chain = Math.floor(i / 8);
+          const rise = (bubblePhase * (0.7 + random(site + 180) * 0.35)
+            + (rate > 0.35 ? chain * 0.23 : random(i + 42))) % 1;
+          const grainMesh = copper?.children[site % Math.max(1, copper.children.length)];
           if (grainMesh instanceof THREE.Mesh && p < 0.999 && i < count * rate * 0.75) {
-            const vertices = grainMesh.geometry.getAttribute("position");
-            source.fromBufferAttribute(vertices, (i * 7) % vertices.count).multiply(grainMesh.scale)
+            const azimuth = site * 2.39996;
+            source.set(Math.cos(azimuth), 0.36 + random(site + 201) * 0.35, Math.sin(azimuth))
+              .normalize().multiplyScalar(copperBounds[site % copperBounds.length] * 0.68).multiply(grainMesh.scale)
               .applyQuaternion(grainMesh.quaternion).add(grainMesh.position);
           }
           else source.set(x * 0.6, box.min.y + radius * 1.3, z * 0.6);
           const distance = Math.max(0, (level.value - up.value.dot(source)) / Math.max(0.3, up.value.dot(gravity)));
-          bubblePoint.copy(source).addScaledVector(gravity, rise * distance);
+          const travel = rise * rise * (1.25 - rise * 0.25);
+          bubblePoint.copy(source).addScaledVector(gravity, travel * distance);
+          bubblePoint.x += Math.sin(time * 3 + site * 1.7 + rise * 8) * radius * 0.055 * rise;
+          bubblePoint.z += Math.cos(time * 2.4 + site * 2.1 + rise * 7) * radius * 0.045 * rise;
           // A rising bubble hits the wall and slides along it, never exits sideways.
           const radialDistance = Math.hypot(bubblePoint.x, bubblePoint.z);
           if (radialDistance > radius * 0.84) { bubblePoint.x *= radius * 0.84 / radialDistance; bubblePoint.z *= radius * 0.84 / radialDistance; }
           const coldGate = rate > 0.1 || (time + random(i + 14) * 5) % 4 < 1.5;
-          place(bubbles, i, bubblePoint.x, bubblePoint.y, bubblePoint.z, coldGate ? radius * (0.045 + rise * 0.06) : 0);
+          const bubbleSize = coldGate ? radius * (0.06 + Math.pow(random(i + 241), 3) * 0.17) : 0;
+          place(bubbles, i, bubblePoint.x, bubblePoint.y, bubblePoint.z, bubbleSize, bubbleSize * (bubbleSize > radius * 0.1 ? 0.82 : 1), bubbleSize);
         }
         if (gas.visible && i < gas.count) {
           const rise = i === 0 ? 0 : (time * 0.13 + i / gas.count) % 1;
@@ -413,8 +452,15 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           place(splash, i, lip.x + Math.cos(angle) * speed * age, lip.y + speed * age * 2 - size.y * 4 * age * age,
             lip.z + Math.sin(angle) * speed * age, radius * 0.16 * (1 - Math.min(age, 1)));
         }
+        if (foam.visible && i < foam.count) {
+          const localX = center.x + Math.cos(angle) * radius * (0.52 + 0.32 * random(i + 54));
+          const localZ = center.z + Math.sin(angle) * radius * (0.52 + 0.32 * random(i + 54));
+          const localY = (level.value - up.value.x * localX - up.value.z * localZ) / Math.max(up.value.y, 0.3);
+          const pulse = 0.72 + 0.28 * Math.sin(time * 3.1 + i * 2.3);
+          place(foam, i, localX, localY + 0.0002, localZ, radius * (0.04 + random(i + 73) * 0.05) * pulse);
+        }
       }
-      for (const mesh of [flakes, bubbles, gas, splash, condensate]) if (mesh.visible) mesh.instanceMatrix.needsUpdate = true;
+      for (const mesh of [flakes, bubbles, gas, splash, condensate, foam]) if (mesh.visible) mesh.instanceMatrix.needsUpdate = true;
     },
     dispose() {
       if (disposed) return;
@@ -423,12 +469,12 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       volume.geometry = originalGeometry;
       group.removeFromParent();
       deferDispose(group, () => {
-        geometry.dispose();
+        geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();
         wallGeometry.dispose(); capGeometry.dispose(); headGeometry.dispose(); headMaterial.dispose(); dropletMaterial.dispose(); splashMaterial.dispose();
         gasGeometry.dispose(); bedMaterial.dispose();
         curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose();
-        for (const mesh of [flakes, bubbles, gas, splash, condensate]) mesh.dispose();
+        for (const mesh of [flakes, bubbles, gas, splash, condensate, foam]) mesh.dispose();
       });
     },
   };

@@ -11,7 +11,8 @@ const out = resolve(process.env.VISUAL_OUT ?? "tmp/visual");
 const viewport = { width: 1600, height: 900 };
 // Existing close-ups place the tube at x=800, y=100..650. Include its whole
 // +/-20 degree swing and the plume; the previous 200px crop cut off tilts.
-const crop = { x: 480, y: 0, width: 640, height: 720 };
+const crop = { x: 480, y: 0, width: 640, height: 850 };
+const tubeCrop = { x: 725, y: 110, width: 150, height: 700 };
 const times = [0, 1, 3, 6, 12, 30];
 const cases = {
   "copper-nitric": ["cu", "hno3"],
@@ -49,6 +50,16 @@ async function shot(name, group, timing = {}) {
   // Timestamp acquisition before disk I/O. Decode only the PNG transport;
   // preserve the full captured pixels without cropping or image processing.
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
+  // Native Chromium clipping keeps the fine detail in the tube without
+  // enlarging a downsampled contact sheet.
+  if (name.includes("-HIGH-") && (name.endsWith("-3s") || name.endsWith("-6s")
+    || name.endsWith("-12s") || name.endsWith("-0") || name.endsWith("-before") || name.endsWith("-peak"))) {
+    const close = await captureSession.send("Page.captureScreenshot", {
+      format: "png", fromSurface: true, captureBeyondViewport: false,
+      clip: { ...tubeCrop, scale: 1 },
+    });
+    await writeFile(resolve(out, `${name}-tube.png`), Buffer.from(close.data, "base64"));
+  }
   frames.push({ name, group, ...timing, before, after,
     elapsedSeconds: timing.originMs == null ? null : (before.nowMs - timing.originMs) / 1000,
     completionAgeSeconds: before.completedAtMs == null ? null : (before.nowMs - before.completedAtMs) / 1000,
@@ -195,7 +206,7 @@ async function measureFps() {
 async function contactSheets() {
   if (!browser || !frames.length) return;
   const sheet = await browser.newPage();
-  const tileWidth = 400, imageHeight = crop.height * tileWidth / crop.width;
+  const tileWidth = 400, imageHeight = Math.round(crop.height * tileWidth / crop.width);
   const headerHeight = 86, columns = 3, perSheet = 6;
   const escape = value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   try {
@@ -237,7 +248,11 @@ try {
     headless: true, args: [`--use-angle=${angle}`, "--enable-unsafe-swiftshader", "--disable-gpu-sandbox"] });
   page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
   captureSession = await page.context().newCDPSession(page);
-  await page.addInitScript(() => performance.setResourceTimingBufferSize(10000));
+  await page.addInitScript(() => {
+    performance.setResourceTimingBufferSize(10000);
+    // Headless captures have no audio output; leave the sound engine dormant.
+    Object.defineProperty(window, "AudioContext", { value: undefined });
+  });
   page.setDefaultTimeout(120_000);
   page.on("pageerror", e => errors.push(String(e)));
   page.on("console", m => { if (m.type() === "error") errors.push(`${m.text()} ${m.location().url}`); });
@@ -330,7 +345,15 @@ try {
       if (await page.evaluate(() => window.__reactionCapture.read().chemistry.temperature <= 0)) {
         throw new Error("Copper did not heat; check live burner/heating store identity");
       }
-      if (quick) continue;
+      if (quick) {
+        await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: true,
+          progress: 0.45, rate: 0.9, temperature: 1, tiltDegrees: 0 }));
+        await settle(5000);
+        await shot(`${prefix}-peak`, `${prefix}-fixture`);
+        await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false,
+          progress: 0, rate: 0, temperature: 0, tiltDegrees: null }));
+        continue;
+      }
       // Real runtime caps delta at 0.1s: t=30 need not mean completion on a
       // slow GPU. Observe the store instead of pretending it has finished.
       await page.waitForFunction(() => window.__reactionCapture.completedAtMs != null, null, { timeout: 180_000 });

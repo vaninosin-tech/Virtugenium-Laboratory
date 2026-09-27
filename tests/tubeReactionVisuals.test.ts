@@ -220,7 +220,7 @@ describe("tube reaction rendering contract", () => {
     expect(f.get("TubeCondensate").visible).toBe(true);
   });
 
-  it.each([-20, 20])("moves free bubbles vertically in world space at a static %s degree tilt", degrees => {
+  it.each([-20, 20])("moves free bubbles upward with a small wobble at a static %s degree tilt", degrees => {
     const f = fixture("copper-nitric", true);
     f.parent.position.set(0.8, 0.4, -0.6);
     f.parent.rotation.y = 0.7;
@@ -256,8 +256,8 @@ describe("tube reaction rendering contract", () => {
             Math.hypot(b.local.x, b.local.z) >= 0.005 ||
             a.local.distanceTo(b.local) > 0.003) continue;
         const delta = b.world.clone().sub(a.world);
-        expect(delta.y, `frame ${frame}, bubble ${i}: must rise`).toBeGreaterThan(1e-6);
-        expect(Math.hypot(delta.x, delta.z), `frame ${frame}, bubble ${i}: lateral drift`).toBeLessThan(1e-8);
+        expect(delta.y, `frame ${frame}, bubble ${i}: must rise`).toBeGreaterThan(0);
+        expect(Math.hypot(delta.x, delta.z), `frame ${frame}, bubble ${i}: wobble bound`).toBeLessThan(3e-5);
         checked++;
       }
       expect(checked, `frame ${frame}: enough free, non-wrapping bubbles`).toBeGreaterThanOrEqual(2);
