@@ -178,7 +178,9 @@ export function HeatingControls() {
 const panelStyle = (cracked: boolean): CSSProperties => ({
   position: "absolute",
   left: "50%",
-  bottom: 96,
+  // At the very bottom: in the tube close-up the tube's bottom and the flame
+  // sit in the lower third of the screen, and this panel used to cover them.
+  bottom: 12,
   transform: "translateX(-50%)",
   zIndex: 11,
   display: "flex",

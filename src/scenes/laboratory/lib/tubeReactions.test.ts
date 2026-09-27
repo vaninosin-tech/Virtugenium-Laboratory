@@ -68,8 +68,8 @@ describe("advanceChemistry", () => {
     expect(cooling.rate).toBeLessThan(hot.rate);
   });
 
-  it("hot copper finishes in about half a minute and the bubbling stops", () => {
-    const done = run(COPPER, 35, true);
+  it("copper kept in the flame finishes within a minute and the bubbling stops", () => {
+    const done = run(COPPER, TEMPERATURE_RISE_SECONDS + 35, true);
     expect(done.progress).toBe(1);
     expect(done.rate).toBe(0);
   });
@@ -84,8 +84,8 @@ describe("advanceChemistry", () => {
   });
 
   it("tracks temperature even with nothing reacting", () => {
-    const warmed = run(["hno3"], 3, true);
-    expect(warmed.temperature).toBeGreaterThan(0.5);
+    const warmed = run(["hno3"], TEMPERATURE_RISE_SECONDS / 2, true);
+    expect(warmed.temperature).toBeCloseTo(0.5, 1);
     expect(warmed.progress).toBe(0);
   });
 });

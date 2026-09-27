@@ -183,7 +183,9 @@ function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefin
       useBurnerStore.getState().lit &&
       heating.started &&
       heating.phase !== "cracked" &&
-      Math.abs(heating.sweep) < FLAME_HALF_WIDTH;
+      // The contents heat only with the bottom right over the flame; the
+      // flame's edges during the preheat swing warm the glass, not the liquid.
+      Math.abs(heating.sweep) < FLAME_HALF_WIDTH / 2;
     const reactions = useTubeReactionStore.getState();
     const current = reactions.chemistryById[tube.instanceId] ?? ROOM_TEMPERATURE_CHEMISTRY;
     reactions.setChemistry(

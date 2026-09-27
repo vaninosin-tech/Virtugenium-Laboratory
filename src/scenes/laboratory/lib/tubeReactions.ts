@@ -62,8 +62,13 @@ export interface TubeChemistry {
 
 export const ROOM_TEMPERATURE_CHEMISTRY: TubeChemistry = { progress: 0, rate: 0, temperature: 0 };
 
-/** Seconds of holding the tube in the flame to bring cold contents near boiling. */
-export const TEMPERATURE_RISE_SECONDS = 5;
+/**
+ * Seconds of holding the tube in the flame to bring cold contents near
+ * boiling. Slow enough that the preheat passes — which only brush the flame
+ * — warm the glass and barely the contents, so the copper takes off after
+ * the preheat, in front of the player, not during it.
+ */
+export const TEMPERATURE_RISE_SECONDS = 12;
 /** Seconds for hot contents to cool back to room temperature once out of the flame. */
 export const TEMPERATURE_COOL_SECONDS = 40;
 
