@@ -1,0 +1,7 @@
+/* Cyrillic-subset faces only — this label only ever renders Russian
+   category text, and each @fontsource weight/subset is a separate network
+   request, so pulling in the full glyph set (Latin, Greek, etc.) would only
+   add unused download weight. */
+@import "@fontsource/unbounded/cyrillic-600.css";
+@import "@fontsource/exo-2/cyrillic-600.css";
+@import "@fontsource/russo-one/cyrillic-400.css";

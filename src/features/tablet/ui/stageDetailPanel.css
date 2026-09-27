@@ -1,0 +1,107 @@
+.stage-detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-right: 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.stage-detail-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.stage-required-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stage-required-block {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 160px;
+  max-width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  background: rgba(6, 182, 212, 0.08);
+  box-sizing: border-box;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.stage-required-block:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+/* Cu/HNO₃/test tubes: collected only by physically taking them in the 3D
+   scene, not by clicking here — same look as any other block (including
+   full-opacity "is-collected" once taken), just no pointer affordance. */
+.stage-required-block.is-readonly {
+  cursor: default;
+}
+
+.stage-required-block-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.12);
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.stage-required-block-label {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #f1f5f9;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.stage-required-block.is-reagent .stage-required-block-label {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-weight: 700;
+}
+
+.stage-required-block.is-collected {
+  border-color: rgba(52, 211, 153, 0.45);
+  background: rgba(52, 211, 153, 0.14);
+}
+
+.stage-required-block.is-collected .stage-required-block-icon {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.2);
+}
+
+.stage-required-block.is-collected .stage-required-block-label {
+  color: #d1fae5;
+}

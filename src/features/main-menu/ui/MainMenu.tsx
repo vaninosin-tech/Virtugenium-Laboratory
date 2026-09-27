@@ -1,11 +1,18 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MenuButton } from '../../../shared/ui/MenuButton';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import type { AppMode } from '../../../entities/laboratory';
+import { useLaboratoryStore } from '../../../stores/laboratory/useLaboratoryStore';
 
 export function MainMenu() {
     const [activeTab, setActiveTab] = useState<'play' | 'settings' | 'exit' | null>(null);
     const navigate = useNavigate();
+
+    const startMode = (mode: AppMode) => {
+        useLaboratoryStore.getState().setMode(mode);
+        navigate('/lab');
+    };
 
     // Логика закрытия приложения через Tauri API
     const handleExitConfirm = async () => {
@@ -66,17 +73,22 @@ export function MainMenu() {
                                 <ModeCard
                                     title="Обучение"
                                     description="Базовое знакомство с правилами техники безопасности, средствами защиты (СИЗ) и базовым оборудованием лаборатории."
-                                    onClick={() => navigate('/lab')}
+                                    onClick={() => startMode('training')}
                                 />
                                 <ModeCard
                                     title="Классический"
                                     description="Полный процесс работы с использованием справочной книги. Проходите задания, пишите уравнения реакций и получайте баллы."
-                                    onClick={() => navigate('/lab')}
+                                    onClick={() => startMode('classic')}
                                 />
                                 <ModeCard
                                     title="Чистый эксперимент"
                                     description="Режим быстрой практики. Выберите конкретный химический опыт из списка в планшете и сразу приступайте к его проведению."
-                                    onClick={() => navigate('/lab')}
+                                    onClick={() => startMode('clean')}
+                                />
+                                <ModeCard
+                                    title="Песочница (временно)"
+                                    description="Все реактивы четырёх опытов уже в вытяжном шкафу: смешивайте, нагревайте и смотрите на реакции. Без заданий и баллов."
+                                    onClick={() => startMode('sandbox')}
                                 />
                             </div>
                         </PanelContainer>

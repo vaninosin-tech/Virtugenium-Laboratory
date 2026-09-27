@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+const b = fs.readFileSync('public/assets/models/ReagentCabinet.glb');
+const a = await new GLTFLoader().parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), '');
+a.scene.updateMatrixWorld(true);
+const box = new THREE.Box3().setFromObject(a.scene);
+console.log('bbox min', box.min.toArray(), 'max', box.max.toArray());
+const size = box.getSize(new THREE.Vector3());
+console.log('size', size.toArray());

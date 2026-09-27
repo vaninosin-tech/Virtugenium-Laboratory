@@ -1,0 +1,9 @@
+/* Self-hosted via @fontsource (not a Google Fonts CDN link) — this is a
+   Tauri desktop build, and the shipped app may have no network access at
+   runtime. Rajdhani has no Cyrillic subset at all (Devanagari/Latin/
+   Latin-ext only) — the fallback to Exo 2 (which does have Cyrillic) is
+   what actually satisfies "Cyrillic support if ever needed", not Rajdhani
+   itself; CSS font-family fallback resolves per-character, so this is a
+   real fallback, not just a stylistic one. */
+@import "@fontsource/rajdhani/600.css";
+@import "@fontsource/exo-2/600.css";

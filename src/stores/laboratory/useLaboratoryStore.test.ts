@@ -40,8 +40,8 @@ describe("useLaboratoryStore", () => {
     expect(useLaboratoryStore.getState().tabletOpen).toBe(true);
     expect(useLaboratoryStore.getState().tabletSection).toBe("theory");
 
-    actions.setTabletSection("equations");
-    expect(useLaboratoryStore.getState().tabletSection).toBe("equations");
+    actions.setTabletSection("settings");
+    expect(useLaboratoryStore.getState().tabletSection).toBe("settings");
 
     actions.closeTablet();
     expect(useLaboratoryStore.getState().tabletOpen).toBe(false);

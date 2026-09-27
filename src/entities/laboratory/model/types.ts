@@ -1,6 +1,7 @@
 export type EntityId = string;
 
-export type AppMode = "training" | "classic" | "clean";
+/** `sandbox` is TEMPORARY, for looking at the reactions — see `src/scenes/laboratory/sandbox/`. */
+export type AppMode = "training" | "classic" | "clean" | "sandbox";
 
 export type Screen =
   | "main-menu"
@@ -160,6 +161,32 @@ export interface ChemicalEquation {
   netIonic?: string;
 }
 
+/** One choice inside a qualitative-observation block (ToR «признак реакции»). */
+export interface ObservationOption {
+  id: EntityId;
+  label: string;
+}
+
+/**
+ * A scored multiple-choice block on the Answer tab — colour of solution,
+ * gas identity/smell, precipitate texture, etc. Correct answer is checked
+ * when the learner saves the written part of the experiment.
+ */
+export interface ObservationBlock {
+  id: EntityId;
+  title: string;
+  options: readonly ObservationOption[];
+  correctOptionId: EntityId;
+  points: number;
+}
+
+/** Absolute score floors from the ToR grading tables (inclusive). */
+export interface GradeThresholds {
+  excellentMin: number;
+  goodMin: number;
+  satisfactoryMin: number;
+}
+
 export interface Experiment {
   id: EntityId;
   title: string;
@@ -167,6 +194,8 @@ export interface Experiment {
   requiredItemIds: readonly EntityId[];
   steps: readonly ExperimentStep[];
   equations: readonly ChemicalEquation[];
+  observationBlocks?: readonly ObservationBlock[];
+  gradeThresholds: GradeThresholds;
   maximumScore: number;
 }
 

@@ -28,3 +28,10 @@ dist-ssr
 *.keystore
 key.properties
 keystore.properties
+
+# Local scratch, not part of the game
+/output/
+/tmp/
+/_*.png
+.claude/settings.local.json
+.clauderc
