@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { TubeLiquidMaterial } from "./tubeLiquidMaterial";
 import { deferDispose } from "./deferredDispose";
 
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
@@ -197,14 +198,9 @@ export function fillTestTubeContents(
     }
 
     if (liquid) {
-      const material = new THREE.MeshPhysicalMaterial({
-        name: "TubeLiquidContents",
+      const material = new TubeLiquidMaterial(object.geometry, {
         color: liquid.contentsColor,
-        transparent: true,
         opacity: liquid.contentsOpacity,
-        roughness: 0.15,
-        metalness: 0,
-        side: THREE.DoubleSide,
       });
       object.material = material;
       object.visible = true;

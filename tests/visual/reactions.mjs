@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -73,11 +73,11 @@ try {
       window.__tubeVisualTuningStore.setState({ enabled: true, progress: 0 });
       for (const id of reagents) window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, id);
       useTubeCloseUpStore.getState().setViewing(true);
-    }, { reagents: kind === "permanganate-redox" ? reagents.slice(0, 2) : reagents });
+    }, { reagents: kind === "copper-nitric" ? reagents : reagents.slice(0, -1) });
     await settle(2500);
-    if (kind === "permanganate-redox") {
-      await shot(`${kind}-before`);
-      await page.evaluate(() => window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, "na2so3"));
+    await shot(`${kind}-before`);
+    if (kind !== "copper-nitric") {
+      await page.evaluate(id => window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, id), reagents.at(-1));
     }
     for (const p of [0, 0.001, 0.1, 0.5, 1]) {
       if (p === 0.001 && kind !== "permanganate-redox") continue;
@@ -95,10 +95,25 @@ try {
   }
   await page.evaluate(() => window.__heatingStore.setState({ active: true, phase: "cracked" }));
   await shot("cracked");
-  await page.evaluate(() => window.__heatingStore.getState().restartPreheat());
+  await page.evaluate(() => { window.__heatingStore.getState().restartPreheat(); window.__heatingStore.getState().setSweep(0); });
   await shot("replaced");
   await writeFile(resolve(out, "capture.json"), JSON.stringify({ frames, errors, browser: browser.version(), angle, viewport: { width: 1600, height: 900 } }, null, 2));
   if (errors.length) throw new Error(`Browser errors: ${errors.join("\n")}`);
+  await page.close();
+  // Side-by-side crops are derived from the full, unmodified scene captures.
+  const sheet = await browser.newPage();
+  for (const kind of [...Object.keys(cases), "damage"]) {
+    const names = frames.map(f => f.name).filter(n => kind === "damage" ? ["cracked", "replaced"].includes(n) : n.startsWith(kind));
+    await sheet.setViewportSize({ width: names.length * 200, height: 720 });
+    let html = '<body style="margin:0;display:flex;background:#17212b;color:white;font:12px sans-serif">';
+    for (const name of names) {
+      const png = (await readFile(resolve(out, `${name}.png`))).toString("base64");
+      html += `<section style="width:200px;flex-shrink:0"><div style="height:28px;text-align:center">${name.replace(`${kind}-`, "")}</div><div style="width:200px;height:690px;overflow:hidden;position:relative"><img style="position:absolute;left:-700px;top:0;width:1600px;max-width:none" src="data:image/png;base64,${png}"></div></section>`;
+    }
+    await sheet.setContent(`${html}</body>`);
+    await sheet.evaluate(() => Promise.all([...document.images].map(i => i.decode())));
+    await sheet.screenshot({ path: resolve(out, `${kind}-contact.png`) });
+  }
 } finally {
   await browser.close();
   if (server) {

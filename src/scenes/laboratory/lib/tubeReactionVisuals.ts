@@ -1,17 +1,17 @@
 import * as THREE from "three";
 import { REAGENTS } from "../../../entities/laboratory/reagents";
 import { deferDispose } from "./deferredDispose";
-import { LiquidMaterial } from "./reagentMaterials";
+import { TubeLiquidMaterial } from "./tubeLiquidMaterial";
 import type { ReactionKind } from "./tubeReactions";
 import type { RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
   copperColor: "#007fce",
-  gasColor: "#863016",
-  gasOpacity: 0.56,
+  gasColor: "#8b4d24",
+  gasOpacity: 0.4,
   particleCounts: { LOW: 24, MEDIUM: 36, HIGH: 54, ULTRA: 72 },
   curdLayerHeight: 0.24,
-  crystalLayerHeight: 0.045,
+  crystalLayerHeight: 0.065,
   settlingStart: 0.18,
   settlingEnd: 0.94,
 };
@@ -39,32 +39,18 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const baseline = volume.material;
   const base = Array.isArray(baseline) ? baseline[0] : baseline;
   const physical = base as THREE.MeshPhysicalMaterial;
-  const liquid = kind ? new LiquidMaterial(volume.geometry, {
-    color: kind === "permanganate-redox" ? REAGENTS.kmno4.contentsColor : `#${physical.color?.getHexString() ?? "ffffff"}`,
-    opacity: physical.opacity,
+  const baseOpacity = physical instanceof TubeLiquidMaterial ? physical.uniforms.uOpacity.value : physical.opacity;
+  const baseColor = physical instanceof TubeLiquidMaterial ? physical.uniforms.uBaseColor.value : physical.color;
+  const liquid = kind ? new TubeLiquidMaterial(volume.geometry, {
+    color: kind === "permanganate-redox" ? REAGENTS.kmno4.contentsColor : `#${baseColor?.getHexString() ?? "ffffff"}`,
+    opacity: baseOpacity,
     reactionColor: kind === "copper-nitric" ? TUBE_VISUALS.copperColor : "#ffffff",
   }) : null;
   if (liquid) {
     liquid.uniforms.uMixingStrength.value = 0;
     liquid.uniforms.uTopHighlight.value = 0.04;
-    if (kind === "permanganate-redox") {
-      // Match the pre-reaction physical response, including both walls and
-      // depth writing. Switching to the bottle shader diluted the first frame.
-      liquid.side = physical.side;
-      liquid.depthWrite = physical.depthWrite;
-      liquid.roughness = physical.roughness;
-      liquid.ior = physical.ior;
-      liquid.onBeforeCompile = (shader) => {
-        Object.assign(shader.uniforms, liquid.uniforms);
-        shader.fragmentShader = `uniform vec3 uBaseColor; uniform vec3 uReactionColor;
-uniform float uReactionProgress; uniform float uOpacity;
-${shader.fragmentShader}`.replace("#include <color_fragment>", `#include <color_fragment>
-diffuseColor.rgb = mix(uBaseColor, uReactionColor, uReactionProgress);
-diffuseColor.a = uOpacity;`);
-      };
-      liquid.customProgramCacheKey = () => "tube-liquid-continuous-permanganate-v1";
-    }
   }
+
   const group = new THREE.Group();
   group.name = "TubeReactionVisuals";
   group.position.copy(volume.position);
@@ -74,6 +60,20 @@ diffuseColor.a = uOpacity;`);
   const geometry = new THREE.IcosahedronGeometry(1, 1);
   const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1, envMapIntensity: 0.15 });
   white.onBeforeCompile = (shader) => {
+    shader.uniforms.uSedimentBottom = { value: box.min.y };
+    shader.uniforms.uSedimentRadius = { value: radius * 0.98 };
+    shader.uniforms.uSedimentCenter = { value: center };
+    shader.vertexShader = `varying vec3 vSedimentPoint;\n${shader.vertexShader}`.replace("#include <project_vertex>", `
+vSedimentPoint = transformed;
+#ifdef USE_INSTANCING
+vSedimentPoint = (instanceMatrix * vec4(transformed, 1.0)).xyz;
+#endif
+#include <project_vertex>`);
+    shader.fragmentShader = `varying vec3 vSedimentPoint;
+uniform float uSedimentBottom; uniform float uSedimentRadius; uniform vec3 uSedimentCenter;
+${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
+vec3 bowlPoint = vec3(vSedimentPoint.xz - uSedimentCenter.xz, min(vSedimentPoint.y - uSedimentBottom - uSedimentRadius, 0.0));
+if (vSedimentPoint.y < uSedimentBottom || length(bowlPoint) > uSedimentRadius) discard;`);
     // The nearby burner saturates even non-emissive white. Bound the diffuse
     // response before bloom and keep normal-based relief instead of hot spots.
     shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
@@ -92,14 +92,34 @@ outgoingLight = min(totalDiffuse, vec3(0.65)) * relief;
   }
   curdGeometry.computeVertexNormals();
   const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e5f4ff", transparent: true, opacity: 0.48, roughness: 0.08, metalness: 0.12, depthWrite: false });
-  const gasMaterial = new THREE.MeshBasicMaterial({ color: TUBE_VISUALS.gasColor, transparent: true, opacity: TUBE_VISUALS.gasOpacity, depthWrite: false, toneMapped: false });
-  gasMaterial.onBeforeCompile = (shader) => {
-    shader.vertexShader = `varying vec3 vGasNormal; varying vec3 vGasView;\n${shader.vertexShader}`
-      .replace("#include <project_vertex>", "#include <project_vertex>\nvGasNormal = normalize(normalMatrix * mat3(instanceMatrix) * normal); vGasView = -mvPosition.xyz;");
-    shader.fragmentShader = `varying vec3 vGasNormal; varying vec3 vGasView;\n${shader.fragmentShader}`
-      .replace("#include <opaque_fragment>", "diffuseColor.a *= smoothstep(0.0, 0.8, abs(dot(normalize(vGasNormal), normalize(vGasView))));\n#include <opaque_fragment>");
-  };
-  const makePool = (material: THREE.Material) => {
+  const gasGeometry = new THREE.PlaneGeometry(2, 2);
+  const gasMaterial = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, toneMapped: false,
+    uniforms: { uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) },
+      uOpacity: { value: 0 }, uTime: { value: 0 }, uLip: { value: lip.y }, uHeight: { value: radius * 4 } },
+    vertexShader: `varying vec2 vP; varying float vGasHeight;
+void main() {
+  vP = position.xy;
+  vec2 extent = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
+  vGasHeight = instanceMatrix[3].y + position.y * extent.y;
+  vec4 mv = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  mv.xy += position.xy * extent * vec2(length(modelViewMatrix[0].xyz), length(modelViewMatrix[1].xyz));
+  gl_Position = projectionMatrix * mv;
+}`,
+    fragmentShader: `uniform vec3 uColor; uniform float uOpacity; uniform float uTime;
+uniform float uLip; uniform float uHeight;
+varying vec2 vP; varying float vGasHeight;
+void main() {
+  if (vGasHeight < uLip - 0.0005) discard;
+  vec2 p = vP + 0.13 * vec2(sin(vP.y * 6.0 + uTime), cos(vP.x * 7.0 - uTime * 0.7));
+  float edge = 1.0 - smoothstep(0.2, 1.0, length(p));
+  float wisps = 0.65 + 0.35 * sin(p.x * 8.0 + sin(p.y * 6.0) - uTime * 0.8);
+  float fade = 1.0 - smoothstep(uLip + uHeight * 0.3, uLip + uHeight, vGasHeight);
+  gl_FragColor = vec4(uColor, uOpacity * edge * edge * wisps * fade);
+  #include <colorspace_fragment>
+}`,
+  });
+  const makePool = (material: THREE.Material): THREE.InstancedMesh => {
     const mesh = new THREE.InstancedMesh(geometry, material, 72);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.frustumCulled = false;
@@ -114,11 +134,27 @@ outgoingLight = min(totalDiffuse, vec3(0.65)) * relief;
   const bubbles = makePool(bubbleMaterial);
   bubbles.name = "TubeNOBubbles";
   const gas = makePool(gasMaterial);
+  gas.geometry = gasGeometry;
   gas.name = "TubeNO2";
   const splash = makePool(bubbleMaterial);
   splash.name = "TubeSplash";
-  // Reuse the cavity silhouette; a squashed copy cannot pierce its walls.
-  const bed = new THREE.Mesh(volume.geometry, white);
+  // The measured cavity is a radius-7 mm hemisphere at its base. Truncate
+  // the top, preserving the bowl profile instead of flattening the hemisphere.
+  const bedMaterial = white.clone();
+  const sedimentLevel = { value: box.min.y };
+  bedMaterial.onBeforeCompile = (shader, renderer) => {
+    white.onBeforeCompile(shader, renderer);
+    shader.uniforms.uSedimentLevel = sedimentLevel;
+    shader.vertexShader = `uniform float uSedimentLevel;
+uniform float uSedimentBottom; uniform float uSedimentRadius; uniform vec3 uSedimentCenter;
+${shader.vertexShader}`.replace("#include <begin_vertex>", `#include <begin_vertex>
+transformed.y = min(position.y, uSedimentLevel);
+float h = clamp(transformed.y - uSedimentBottom, 0.0, uSedimentRadius);
+float availableRadius = sqrt(max(0.0, h * (2.0 * uSedimentRadius - h)));
+vec2 radial = position.xz - uSedimentCenter.xz;
+transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(length(radial), 0.000001));`);
+  };
+  const bed = new THREE.Mesh(volume.geometry, bedMaterial);
   bed.name = "TubeSediment";
   bed.visible = false;
   bed.raycast = () => {};
@@ -147,20 +183,20 @@ outgoingLight = min(totalDiffuse, vec3(0.65)) * relief;
         liquid.uniforms.uReactionProgress.value = precipitate ? onset : p;
         liquid.uniforms.uCloudiness.value = precipitate ? onset * (1 - settled) : 0;
         liquid.uniforms.uOpacity.value = precipitate ? THREE.MathUtils.lerp(0.12, 0.95, onset * (1 - settled))
-          : kind === "permanganate-redox" ? THREE.MathUtils.lerp(physical.opacity, 0.14, p) : THREE.MathUtils.lerp(physical.opacity, 1, p);
+          : kind === "permanganate-redox" ? THREE.MathUtils.lerp(baseOpacity, 0.14, p) : THREE.MathUtils.lerp(baseOpacity, 1, p);
         liquid.uniforms.uQualityNoise.value = quality === "LOW" ? 0 : 1;
       }
-      bed.visible = precipitate && p > 0;
+      bed.visible = precipitate && settled > 0;
       // AgCl's shallow core only fills gaps; the lobed flocs form its surface.
-      bed.scale.y = Math.max(0.0001, settled * (curds ? 0.08 : TUBE_VISUALS.crystalLayerHeight));
-      bed.position.y = box.min.y * (1 - bed.scale.y);
+      sedimentLevel.value = box.min.y + size.y * settled * (curds ? 0.08 : TUBE_VISUALS.crystalLayerHeight);
       flakes.visible = precipitate && p > 0;
       flakes.count = count;
       bubbles.visible = kind === "copper-nitric" && p > 0;
       bubbles.count = Math.max(4, Math.floor(count / 3));
       gas.visible = bubbles.visible;
       gas.count = Math.max(8, Math.floor(count / 5));
-      gasMaterial.opacity = TUBE_VISUALS.gasOpacity * onset * (0.45 + 0.55 * p);
+      gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * onset * (0.45 + 0.55 * p);
+      gasMaterial.uniforms.uTime.value = time;
       splash.visible = splashAge >= 0 && splashAge < 1;
       splash.count = Math.max(6, Math.floor(count / 2));
       for (let i = 0; i < count; i++) {
@@ -178,10 +214,10 @@ outgoingLight = min(totalDiffuse, vec3(0.65)) * relief;
           place(bubbles, i, x * 0.7, box.min.y + size.y * (0.12 + rise * 0.87), z * 0.7, radius * (0.07 + rise * 0.06) * onset);
         }
         if (i < gas.count) {
-          const rise = (time * 0.12 + i / gas.count) % 1;
-          const r = radius * (0.7 + rise * 0.4);
+          const rise = i === 0 ? 0 : (time * 0.13 + i / gas.count) % 1;
+          const r = radius * (0.65 + rise * 1.2);
           place(gas, i, lip.x + Math.sin(time * 0.65 + i) * radius * rise,
-            lip.y + r * 1.05 + rise * size.y * 0.06, lip.z, r, r * 0.85, r);
+            lip.y + radius * 0.12 + rise * radius * 2.4, lip.z, r, r * 0.8, r);
         }
         if (splash.visible && i < splash.count) {
           const age = Math.max(0, splashAge);
@@ -199,6 +235,7 @@ outgoingLight = min(totalDiffuse, vec3(0.65)) * relief;
       group.removeFromParent();
       deferDispose(group, () => {
         geometry.dispose();
+        gasGeometry.dispose(); bedMaterial.dispose();
         curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose();
         for (const mesh of [flakes, bubbles, gas, splash]) mesh.dispose();

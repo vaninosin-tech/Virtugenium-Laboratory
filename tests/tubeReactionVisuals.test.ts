@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { createTubeReactionVisuals } from "../src/scenes/laboratory/lib/tubeReactionVisuals";
 import { LiquidMaterial } from "../src/scenes/laboratory/lib/reagentMaterials";
+import { TubeLiquidMaterial } from "../src/scenes/laboratory/lib/tubeLiquidMaterial";
 import type { ReactionKind } from "../src/scenes/laboratory/lib/tubeReactions";
 
 function fixture(kind: ReactionKind | null) {
   const root = new THREE.Group();
   const geometry = new THREE.CylinderGeometry(0.007, 0.007, 0.055, 16);
   geometry.translate(0, 0.028, 0);
-  const baseline = new THREE.MeshPhysicalMaterial({ color: "#ffffff", opacity: 0.3 });
+  const baseline = new TubeLiquidMaterial(geometry, { color: kind === "permanganate-redox" ? "#6a0dad" : "#eef6fb", opacity: 0.3 });
   const volume = new THREE.Mesh(geometry, baseline);
   volume.name = "ContentsVolume";
   const shellGeometry = new THREE.CylinderGeometry(0.0098, 0.0098, 0.15, 16);
@@ -106,7 +107,7 @@ describe("tube reaction rendering contract", () => {
     expect(liquid.depthWrite).toBe(f.baseline.depthWrite);
     expect(liquid.roughness).toBe(f.baseline.roughness);
     expect(liquid.ior).toBe(f.baseline.ior);
-    expect(liquid.uniforms.uOpacity.value).toBeCloseTo(f.baseline.opacity, 3);
+    expect(liquid.uniforms.uOpacity.value).toBeCloseTo(f.baseline.uniforms.uOpacity.value, 3);
     f.cleanup();
   });
 
