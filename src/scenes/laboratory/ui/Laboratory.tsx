@@ -15,6 +15,7 @@ import { FumeHood } from "./FumeHood";
 import { FumeHoodWorkArea } from "./FumeHoodWorkArea";
 import { HeatingControls } from "./HeatingControls";
 import { InspectionControls } from "./InspectionControls";
+import { LabAudioRuntime } from "./LabAudioRuntime";
 import { LabNoticeOverlay } from "./LabNoticeOverlay";
 import { TubeCloseUpControls } from "./TubeCloseUpControls";
 import { useHeatingStore } from "../lib/useHeatingStore";
@@ -588,6 +589,7 @@ export function Laboratory() {
 
         <LabRoom />
         <LightingRuntime />
+        <LabAudioRuntime />
         <RuntimeQuality />
         {SHOW_REAGENT_CONTAINER_PREVIEW && <ReagentContainerPreviewRow />}
 

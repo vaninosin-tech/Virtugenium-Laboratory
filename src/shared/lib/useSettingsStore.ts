@@ -13,9 +13,8 @@ interface SettingsState {
  * survive `resetAttempt`/`resetLaboratory` calls rather than being wiped by
  * them.
  *
- * There's no audio engine wired up yet (no sound assets in the project), so
- * this only holds the preference — nothing plays. It's real, persisted UI
- * state ready for when sound is added, not a placeholder.
+ * Read by the procedural lab sound (`scenes/laboratory/lib/labAudio.ts`),
+ * which scales its master gain by `volume` and silences on `muted`.
  */
 export const useSettingsStore = create<SettingsState>((set) => ({
   volume: 70,
