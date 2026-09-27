@@ -1,6 +1,6 @@
 import { useGLTF } from "@react-three/drei";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
@@ -60,8 +60,26 @@ const BOTTLE_SPACING_X = 0.13;
  */
 const STAND_ROTATION_Y = -Math.PI / 2;
 
-/** How far the tube travels either side of the flame on a full crank throw. */
-const SWEEP_AMPLITUDE_Z = 0.035;
+/**
+ * Heating tilts the tube instead of sliding it: the tube stays clamped in the
+ * ring, the knob on the clamp boss turns, and the whole clamp arm rotates
+ * about its own long axis (model X, at the boss's height), swinging the
+ * hanging tube's bottom through the flame. At full knob throw the bottom,
+ * `TUBE_RING_INSERT_DEPTH` below the ring, moves about ±3.5 cm sideways —
+ * the same reach the old slide had, now as an arc from a fixed clamp.
+ */
+const MAX_TILT = Math.asin(0.035 / TUBE_RING_INSERT_DEPTH);
+/** The knob turns further than the arm it drives, so its motion reads as turning a knob. */
+const KNOB_TURNS_PER_TILT = 3;
+/** Height of the clamp arm's axis in the stand model (`ClampJoint` / `ClampNeck`). */
+const CLAMP_AXIS_Y = 0.22;
+/** Centre of `JointKnob` along the arm axis — measured, see `tests/measure-model.mjs`. */
+const JOINT_KNOB_X = -0.022;
+/** The parts that swing with the clamp arm. `ClampJoint` (the boss on the rod) stays put. */
+const CLAMP_ARM_NODES = ["ClampNeck", "TubeRingJoint", "TubeRing"];
+
+/** Current tilt of the clamp arm, radians — shared by the stand model and the clamped tube. */
+const clampTilt = () => useHeatingStore.getState().sweep * MAX_TILT;
 /** Experiment 1's «пробирка нагрета без предварительного прогрева» — what a crack costs. */
 const HEAT_ERROR_RULE_ID = "error-1-heat";
 const HOLDER_ITEM_ID = "equipment-holder";
@@ -71,7 +89,7 @@ const reagentConfig = (id: string): ReagentContainerConfig | undefined =>
 
 function StandInFumeHood({ onActivate }: { readonly onActivate: () => void }) {
   const { scene } = useGLTF(STAND_MODEL_PATH);
-  const instance = useMemo(() => {
+  const { instance, armPivot, knobPivot } = useMemo(() => {
     const clone = scene.clone(true);
     clone.traverse((object) => {
       if (object instanceof THREE.Mesh) {
@@ -79,8 +97,33 @@ function StandInFumeHood({ onActivate }: { readonly onActivate: () => void }) {
         object.receiveShadow = true;
       }
     });
-    return clone;
+
+    // Re-parent the swinging parts under pivots on the arm's axis. `attach`
+    // keeps their world transforms, so at zero tilt the model is unchanged.
+    const root = clone.getObjectByName("BunsenStand") ?? clone;
+    const makePivot = (x: number, names: readonly string[]) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(x, CLAMP_AXIS_Y, 0);
+      root.add(pivot);
+      clone.updateMatrixWorld(true);
+      for (const name of names) {
+        const node = clone.getObjectByName(name);
+        if (node) pivot.attach(node);
+      }
+      return pivot;
+    };
+    return {
+      instance: clone,
+      armPivot: makePivot(0, CLAMP_ARM_NODES),
+      knobPivot: makePivot(JOINT_KNOB_X, ["JointKnob"]),
+    };
   }, [scene]);
+
+  useFrame(() => {
+    const tilt = clampTilt();
+    armPivot.rotation.x = tilt;
+    knobPivot.rotation.x = tilt * KNOB_TURNS_PER_TILT;
+  });
 
   return (
     <primitive
@@ -151,6 +194,24 @@ function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefin
 }
 
 /**
+ * Holds the clamped tube in the ring and tilts it with the clamp arm — the
+ * same pivot and angle `StandInFumeHood` gives the arm itself, so the tube
+ * never slips relative to its ring. Set per frame on the object rather than
+ * through React state: the knob can move every frame while heating.
+ */
+function ClampTiltGroup({ children }: { readonly children: ReactNode }) {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    if (ref.current) ref.current.rotation.x = clampTilt();
+  });
+  return (
+    <group ref={ref} position={[TUBE_RING_LOCAL_OFFSET[0], CLAMP_AXIS_Y, TUBE_RING_LOCAL_OFFSET[2]]}>
+      {children}
+    </group>
+  );
+}
+
+/**
  * Height above the tube's base that the close-up camera aims at: a little
  * below the middle of the 15 cm tube, so the flame under it stays in frame.
  */
@@ -204,7 +265,6 @@ export function FumeHoodWorkArea() {
   const hoodItems = useReagentStorageStore((state) => state.fumeHoodItems);
   const standInHood = useBunsenStandStorageStore((state) => state.onFumeHood);
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
-  const sweep = useHeatingStore((state) => state.sweep);
   const enterHeating = useHeatingStore((state) => state.enter);
   const burnerLit = useBurnerStore((state) => state.lit);
   const hasHolder = useLaboratoryStore((state) => state.inventoryItemIds.includes(HOLDER_ITEM_ID));
@@ -315,20 +375,15 @@ export function FumeHoodWorkArea() {
                 document.body.style.cursor = "auto";
               }}
             >
+            <ClampTiltGroup>
             <LabTestTubeInstance
-              position={[
-                TUBE_RING_LOCAL_OFFSET[0],
-                TUBE_RING_LOCAL_OFFSET[1] - TUBE_RING_INSERT_DEPTH,
-                // Negated: with the stand turned (`STAND_ROTATION_Y`) its
-                // local Z runs right-to-left on screen, and the tube has to
-                // move the same way as the knob on the heating track.
-                TUBE_RING_LOCAL_OFFSET[2] - sweep * SWEEP_AMPLITUDE_Z,
-              ]}
+              position={[0, -TUBE_RING_INSERT_DEPTH, 0]}
               contents={hoodTubes[clampedIndex].contents}
               key={hoodTubes[clampedIndex].instanceId}
               reactionProgress={reactionProgressById[hoodTubes[clampedIndex].instanceId] ?? 0}
               inStand
             />
+            </ClampTiltGroup>
             </group>
           )}
         </group>
