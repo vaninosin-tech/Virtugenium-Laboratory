@@ -6,7 +6,9 @@ export const kmno4: ReagentContainerConfig = {
   displayName: "Перманганат калия",
   containerType: "amber250",
   labelText: "KMnO₄",
-  contentsColor: "#6a0dad",
+  // Raspberry-magenta, as permanganate solution really looks — not the
+  // blue-violet of the crystals' name.
+  contentsColor: "#9c1c6b",
   contentsOpacity: 0.85,
   fillLevel: 0.65,
 };

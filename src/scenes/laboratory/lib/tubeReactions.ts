@@ -28,12 +28,15 @@ const REACTIONS: readonly ReactionDef[] = [
   // about half a minute on a hot tube, about two minutes cold.
   { kind: "copper-nitric", reagents: ["cu", "hno3"], trigger: "heat", seconds: 15, coldRate: 0.25 },
   // Precipitation is instant; what takes time is the settling, which the
-  // visuals map onto the later part of the progress.
+  // visuals map onto the later part of the progress. AgCl's loose curds
+  // coagulate and drop within seconds.
   { kind: "silver-chloride", reagents: ["agno3", "nacl"], trigger: "mix", seconds: 12, coldRate: 1 },
-  // Fine crystals settle slower than AgCl's loose curds.
-  { kind: "barium-sulfate", reagents: ["bacl2", "k2so4"], trigger: "mix", seconds: 16, coldRate: 1 },
-  // Fast in acid, but not instant — the violet has to be seen to fade.
-  { kind: "permanganate-redox", reagents: ["kmno4", "h2so4", "na2so3"], trigger: "mix", seconds: 7, coldRate: 1 },
+  // BaSO₄'s fine crystals stay a milky suspension far longer — on video
+  // hardly settling at all in the ten seconds after mixing.
+  { kind: "barium-sulfate", reagents: ["bacl2", "k2so4"], trigger: "mix", seconds: 45, coldRate: 1 },
+  // In acid the colour goes almost at once (1–2 s on video); a little
+  // slower here so the raspberry is seen to fade rather than just vanish.
+  { kind: "permanganate-redox", reagents: ["kmno4", "h2so4", "na2so3"], trigger: "mix", seconds: 3, coldRate: 1 },
 ];
 
 const findReaction = (contents: readonly string[]) =>

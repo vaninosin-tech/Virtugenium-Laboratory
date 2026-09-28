@@ -31,10 +31,12 @@ export interface SceneSnapshot {
 }
 
 /**
- * How far a reaction must have run for its signs to have been seen — the
- * precipitate formed, the colour gone — before the step counts as done.
+ * How far a reaction must have run for its signs to have been seen before
+ * the step counts as done. The precipitates show at once and then take long
+ * to settle (BaSO₄ ~45 s to the end), so a third of the way is plenty: the
+ * player has seen the white suspension without waiting it out.
  */
-export const REACTION_SEEN = 0.6;
+export const REACTION_SEEN = 0.3;
 
 export interface StageSceneRequirement {
   /** Shown to the player as the condition still standing between them and the step. */

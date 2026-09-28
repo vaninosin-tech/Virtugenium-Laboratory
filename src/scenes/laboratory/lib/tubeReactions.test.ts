@@ -80,10 +80,13 @@ describe("advanceChemistry", () => {
   it("the ionic reactions run on mixing alone, in their own time", () => {
     expect(run(["agno3", "nacl"], 6, false).progress).toBeCloseTo(0.5, 1);
     expect(run(["agno3", "nacl"], 12.5, false).progress).toBe(1);
-    expect(run(["bacl2", "k2so4"], 12.5, false).progress).toBeLessThan(1);
+    // BaSO₄'s fine suspension settles far slower than AgCl's curds.
+    expect(run(["bacl2", "k2so4"], 12.5, false).progress).toBeLessThan(0.35);
+    expect(run(["bacl2", "k2so4"], 45.5, false).progress).toBe(1);
+    // Permanganate in acid: gone in a few seconds, but not in one frame.
     const redox = ["kmno4", "h2so4", "na2so3"];
-    expect(run(redox, 1, false).progress).toBeLessThan(0.2);
-    expect(run(redox, 7.5, false).progress).toBe(1);
+    expect(run(redox, 1, false).progress).toBeLessThan(0.4);
+    expect(run(redox, 3.5, false).progress).toBe(1);
   });
 
   it("tracks temperature even with nothing reacting", () => {
