@@ -7,11 +7,11 @@ import type { RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
   copperColor: "#78cbd7",
-  gasColor: "#8b4513",
+  gasColor: "#674b3c",
   gasOpacity: 0.68,
   gasBuildSeconds: 4,
   gasDecaySeconds: 18,
-  gasResidueSeconds: 85,
+  gasResidueSeconds: 300,
   particleCounts: { LOW: 24, MEDIUM: 36, HIGH: 54, ULTRA: 72 },
   curdLayerHeight: 0.21,
   crystalLayerHeight: 0.11,
@@ -202,11 +202,12 @@ vec3 q = vec3(vP.x / uRadius * 1.7, vP.y / uRadius * 0.65 - uTime * 0.18,
   vP.z / uRadius * 1.7 + sin(vP.y / uRadius * 0.55 + uTime * 0.24) * 0.35);
 float cloud = gasNoise(q) * 0.75 + gasNoise(q * 1.4 + vec3(4.7, 0.0, 1.9)) * 0.25;
 float variation = mix(1.0, 0.7 + 0.6 * cloud, uDetail);
-float heightDensity = mix(0.48, 1.0, smoothstep(0.0, 0.85, h));
+float heightDensity = mix(1.0, 0.48, smoothstep(0.05, 0.95, h));
 float facing = abs(dot(normalize(vN), normalize(vEye)));
 float opticalDepth = mix(0.35, 1.0, smoothstep(0.0, 0.65, facing));
 float lipFade = 1.0 - 0.15 * smoothstep(uLip - 0.008, uLip, vP.y);
-float wallBand = (0.14 + pow(1.0 - facing, 0.55)) * smoothstep(0.08, 0.55, h);
+float wallBand = (0.30 + 0.95 * pow(1.0 - facing, 0.55))
+  * smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.34, 0.72, h));
 float mist = (1.0 - exp(-uDensity * 2.5 * heightDensity * variation)) * opticalDepth * lipFade;
 gl_FragColor = vec4(uColor, mist + uResidue * wallBand);
 #include <colorspace_fragment>
@@ -229,6 +230,15 @@ gl_FragColor = vec4(uColor, mist + uResidue * wallBand);
   const flakes = makePool(white);
   if (kind === "silver-chloride") flakes.geometry = curdGeometry;
   flakes.name = "TubePrecipitate";
+  const crystalGeometry = new THREE.IcosahedronGeometry(1, 0);
+  const crystalMaterial = new THREE.MeshStandardMaterial({ color: "#f1f0eb", roughness: 0.3, metalness: 0.08, envMapIntensity: 0.35 });
+  const crystals = new THREE.InstancedMesh(crystalGeometry, crystalMaterial, 360);
+  crystals.name = "TubeBaCrystals";
+  crystals.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  crystals.frustumCulled = false;
+  crystals.visible = false;
+  crystals.raycast = () => {};
+  group.add(crystals);
   const bubbles = makePool(bubbleMaterial);
   bubbles.name = "TubeNOBubbles";
   const gas = makePool(gasMaterial);
@@ -363,7 +373,24 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       bed.visible = precipitate && settled > 0;
       // A continuous matte core stays legible beneath the sparse instanced grains.
-      sedimentLevel.value = box.min.y + size.y * settled * (curds ? 0.155 : TUBE_VISUALS.crystalLayerHeight);
+      sedimentLevel.value = box.min.y + size.y * settled * (curds ? 0.155 : 0.068);
+      crystals.visible = kind === "barium-sulfate" && settled > 0;
+      crystals.count = quality === "LOW" ? 180 : quality === "MEDIUM" ? 260 : quality === "HIGH" ? 320 : 360;
+      if (crystals.visible) {
+        for (let i = 0; i < crystals.count; i++) {
+          const angle = i * 2.399963 + random(i + 204) * 0.35;
+          const r = radius * (0.08 + 0.82 * Math.sqrt(random(i + 511)));
+          const x = center.x + Math.cos(angle) * r;
+          const z = center.z + Math.sin(angle) * r;
+          const bowlFloor = box.min.y + radius - Math.sqrt(Math.max(0, radius * radius - r * r));
+          const sizeGrain = radius * (0.025 + random(i + 333) * 0.027) * settled;
+          const irregular = (random(i + 601) - 0.5) * size.y * 0.018;
+          const height = size.y * (0.03 + random(i + 807) * 0.065) * settled + irregular * settled;
+          place(crystals, i, x, bowlFloor + Math.max(sizeGrain, height), z,
+            sizeGrain, sizeGrain * (0.55 + random(i + 215) * 0.5), sizeGrain);
+        }
+        crystals.instanceMatrix.needsUpdate = true;
+      }
       flakes.visible = precipitate && p > 0;
       flakes.count = count;
       bubbles.visible = kind === "copper-nitric" && (rate > 0.005 || temperature > 0.6);
@@ -489,6 +516,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       deferDispose(group, () => {
         geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();
         wallGeometry.dispose(); capGeometry.dispose(); headGeometry.dispose(); headMaterial.dispose(); dropletMaterial.dispose(); splashMaterial.dispose();
+        crystalGeometry.dispose(); crystalMaterial.dispose(); crystals.dispose();
         gasGeometry.dispose(); bedMaterial.dispose();
         curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose();

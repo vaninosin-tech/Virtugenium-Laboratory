@@ -51,10 +51,20 @@ float tubeEdge = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.0);
 float tubeLip = smoothstep(0.955, 0.99, vTubeHeight);
 float tubeBase = 1.0 - smoothstep(0.025, 0.10, vTubeHeight);
 float tubeThickness = max(tubeLip, tubeBase);
-diffuseColor.a = clamp(0.10 + 0.66 * tubeEdge + 0.24 * tubeThickness, 0.10, 0.86);
+float tubeRim = smoothstep(0.80, 0.94, 1.0 - abs(dot(normal, normalize(vViewPosition))));
+vec2 tubeRadialOffset = vTubePosition.xz - uTubeCenter;
+vec2 tubeRadialLine = tubeRadialOffset / max(length(tubeRadialOffset), 0.0001);
+float tubeStripe = exp(-pow((tubeRadialLine.y - 0.38) / 0.075, 2.0))
+  * smoothstep(0.07, 0.18, vTubeHeight) * (1.0 - smoothstep(0.91, 0.97, vTubeHeight));
+float tubeLipLine = smoothstep(0.965, 0.982, vTubeHeight) * (1.0 - smoothstep(0.994, 1.0, vTubeHeight));
+float tubeBaseLine = (1.0 - smoothstep(0.06, 0.12, vTubeHeight)) * tubeRim;
+diffuseColor.a = clamp(0.08 + 0.47 * tubeEdge + 0.24 * tubeThickness
+  + 0.19 * tubeRim + 0.18 * tubeStripe + 0.16 * max(tubeLipLine, tubeBaseLine), 0.08, 0.88);
 vec3 tubeTint = mix(vec3(0.78, 0.88, 0.92), vec3(0.13, 0.24, 0.29),
   clamp(tubeEdge * 0.85 + tubeThickness * 0.35, 0.0, 1.0));
 outgoingLight = totalDiffuse * tubeTint + totalSpecular / max(diffuseColor.a, 0.10);
+outgoingLight += vec3(0.52, 0.67, 0.71) * (0.44 * tubeRim + 0.58 * tubeStripe
+  + 0.32 * max(tubeLipLine, tubeBaseLine));
 // The hood/stand rotations put the close-up on local +X. asin(side)
 // anchors z = side * surfaceRadius, x = +sqrt(radius^2 - z^2), including
 // the narrower rounded base. Signed angular distance avoids a mirrored
@@ -99,7 +109,7 @@ outgoingLight = mix(outgoingLight, vec3(0.07, 0.13, 0.16), crack);
 diffuseColor.a = max(diffuseColor.a, crack * 0.95);
 #include <opaque_fragment>`);
   };
-  material.customProgramCacheKey = () => "test-tube-clear-contour-crack-v3";
+  material.customProgramCacheKey = () => "test-tube-clear-contour-crack-v4";
   return material;
 }
 

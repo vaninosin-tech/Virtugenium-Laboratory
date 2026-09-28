@@ -193,8 +193,12 @@ describe("tube reaction rendering contract", () => {
     f.advance(30, chemistry(1, 0), quality);
     expect(head.visible).toBe(true);
     expect(residue(f)).toBeGreaterThan(0.05);
+    expect(residue(f)).toBeGreaterThan(atThirty * 0.8);
+    f.advance(120, chemistry(1, 0), quality);
+    expect(head.visible).toBe(true);
+    expect(residue(f)).toBeGreaterThan(0.05);
     expect(residue(f)).toBeLessThan(atThirty);
-    f.advance(35, chemistry(1, 0), quality);
+    f.advance(145, chemistry(1, 0), quality);
     expect(head.visible).toBe(false);
     expect(plume.visible).toBe(false);
   });
@@ -345,6 +349,7 @@ describe("tube reaction rendering contract", () => {
       f.update(chemistry(1), "LOW");
       expect(f.get("TubeSediment").visible).toBe(true);
       expect(f.get("TubePrecipitate").visible).toBe(true);
+      expect(f.get("TubeBaCrystals").visible).toBe(f === barium);
       expect(f.get("TubeNO2").visible).toBe(false);
       expect(f.get("TubeNO2Headspace").visible).toBe(false);
       expect(f.get("TubeNOBubbles").visible).toBe(false);
@@ -357,6 +362,9 @@ describe("tube reaction rendering contract", () => {
     expect(silverTop).toBeGreaterThan(bariumTop * 2);
     expect(bariumTop).toBeGreaterThan(0.055 * 0.08);
     expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
+    const crystals = barium.get<THREE.InstancedMesh>("TubeBaCrystals");
+    expect(crystals.count).toBeGreaterThan(150);
+    expect(particleBounds(crystals).max.y).toBeGreaterThan(bariumTop * 0.7);
   });
 
   it("makes AgCl opaque with flocs within 0.1 s and BaSO4 milky within 0.2 s", () => {
