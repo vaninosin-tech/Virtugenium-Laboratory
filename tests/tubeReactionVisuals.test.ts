@@ -36,8 +36,9 @@ function fixture(kind: ReactionKind | null, withCopper = false, pour = false) {
   const visuals = createTubeReactionVisuals(root, kind, { activeSurface: true, pour })!;
   const get = <T extends THREE.Mesh = THREE.Mesh>(name: string) => root.getObjectByName(name) as T;
   let time = 0;
-  const update = (state: TubeChemistry, quality: RuntimeQuality = "HIGH", splashAge = Infinity) => {
-    visuals.update(state, time, quality, splashAge);
+  const update = (state: TubeChemistry, quality: RuntimeQuality = "HIGH", splashAge = Infinity,
+    refraction = false) => {
+    visuals.update(state, time, quality, splashAge, refraction);
   };
   const advance = (seconds: number, state: TubeChemistry, quality: RuntimeQuality = "HIGH") => {
     // Exercise the integrators with real frame deltas, not one clamped time jump.
@@ -94,6 +95,17 @@ function particleBounds(pool: THREE.InstancedMesh) {
 
 const kinds: ReactionKind[] = ["copper-nitric", "silver-chloride", "barium-sulfate", "permanganate-redox"];
 describe("tube reaction rendering contract", () => {
+  it("keeps the original water material above the optional refracted backdrop", () => {
+    const f = fixture(null);
+    f.update(chemistry(0), "HIGH", Infinity, true);
+    expect(f.get("TubeRefractedBackdrop").visible).toBe(true);
+    expect(f.get("TubeRefractedSurface").visible).toBe(true);
+    expect(f.volume.material).toBe(f.baseline);
+    expect(f.get("TubeLiquidSurface").material).toBe(f.baseline);
+    f.update(chemistry(0), "LOW", Infinity, true);
+    expect(f.get("TubeRefractedBackdrop").visible).toBe(false);
+  });
+
   it.each(kinds)("%s supports completion and reverse seeking while retaining GPU resources", kind => {
     const f = fixture(kind);
     f.update(chemistry(0));

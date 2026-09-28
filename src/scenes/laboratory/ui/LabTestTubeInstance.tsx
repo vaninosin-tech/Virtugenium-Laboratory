@@ -11,7 +11,8 @@ import { ROOM_TEMPERATURE_CHEMISTRY, reactionKindFor, useTubeReactionStore } fro
 import { useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
 import { useTubeVisualTuningStore } from "../lib/useTubeVisualTuningStore";
 import { useLabNoticeStore } from "../lib/useLabNoticeStore";
-import type { CrackSpot } from "../lib/useHeatingStore";
+import { useHeatingStore, type CrackSpot } from "../lib/useHeatingStore";
+import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 
 const MODEL_PATH = "/assets/models/LabTestTube.glb";
 
@@ -63,8 +64,13 @@ export function LabTestTubeInstance({
   }, [scene]);
 
   const crackUniforms = useRef<THREE.IUniform<THREE.Vector2>[]>([]);
+  const glassBackdrops = useRef<THREE.Mesh[]>([]);
   useEffect(() => {
-    const dispose = prepareTestTube(instance);
+    const dispose = prepareTestTube(instance, inStand);
+    if (inStand) instance.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.name === "TubeGlassRefractedBackdrop")
+        glassBackdrops.current.push(object);
+    });
     // Only the clamped tube reads heating state; cache its newly owned glass.
     if (inStand) instance.traverse((object) => {
       if (object instanceof THREE.Mesh && object.name.startsWith("Tube_Glass")) {
@@ -72,7 +78,7 @@ export function LabTestTubeInstance({
         if (material.userData.crackSpot) crackUniforms.current.push(material.userData.crackSpot);
       }
     });
-    return () => { crackUniforms.current = []; dispose(); };
+    return () => { crackUniforms.current = []; glassBackdrops.current = []; dispose(); };
   }, [instance, inStand]);
 
   const visuals = useRef<ReturnType<typeof createTubeReactionVisuals>>(null);
@@ -125,8 +131,12 @@ export function LabTestTubeInstance({
     const chemistry =
       (chemistryId && useTubeReactionStore.getState().chemistryById[chemistryId]) || ROOM_TEMPERATURE_CHEMISTRY;
     const visualChemistry = import.meta.env.DEV && inStand && tuning.enabled ? tuning : chemistry;
-    visuals.current?.update(visualChemistry, clock.elapsedTime, useRuntimeQualityStore.getState().quality,
-      performance.now() / 1000 - splashStart.current);
+    const quality = useRuntimeQualityStore.getState().quality;
+    const refraction = inStand && quality !== "LOW"
+      && (useTubeCloseUpStore.getState().viewing || useHeatingStore.getState().active);
+    for (const mesh of glassBackdrops.current) mesh.visible = refraction;
+    visuals.current?.update(visualChemistry, clock.elapsedTime, quality,
+      performance.now() / 1000 - splashStart.current, refraction);
     if (inStand) {
       for (const uniform of crackUniforms.current) uniform.value.set(crackSpot?.side ?? 0, crackSpot?.height ?? -1);
     }

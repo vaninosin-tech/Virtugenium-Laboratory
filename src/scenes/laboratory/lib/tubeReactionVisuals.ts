@@ -148,6 +148,42 @@ class TubeSurfaceWaves {
   }
 }
 
+/** Opaque-scene displacement drawn before the original transparent water. */
+function createWaterBackdropMaterial(radius: number) {
+  const material = new THREE.MeshPhysicalMaterial({
+    color: "#ffffff", roughness: 0, metalness: 0, ior: 1.333,
+    transmission: 1, thickness: radius * 1.8, depthWrite: false,
+    side: THREE.FrontSide,
+  });
+  const up = { value: new THREE.Vector3(0, 1, 0) };
+  const level = { value: 0 };
+  material.onBeforeCompile = shader => {
+    shader.uniforms.uBackdropUp = up;
+    shader.uniforms.uBackdropLevel = level;
+    shader.vertexShader = `attribute float tubeSurface; attribute float tubeWave;
+uniform vec3 uBackdropUp; uniform float uBackdropLevel;
+varying vec3 vBackdropPoint; varying float vBackdropCap;
+${shader.vertexShader}`.replace("#include <begin_vertex>", `#include <begin_vertex>
+vBackdropCap = tubeSurface;
+if (tubeSurface > 0.5) transformed.y =
+  (uBackdropLevel - dot(uBackdropUp.xz, position.xz)) / max(uBackdropUp.y, 0.2) + tubeWave;
+vBackdropPoint = transformed;`);
+    shader.fragmentShader = `uniform vec3 uBackdropUp; uniform float uBackdropLevel;
+varying vec3 vBackdropPoint; varying float vBackdropCap;
+${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
+if (vBackdropCap < 0.5 && dot(uBackdropUp, vBackdropPoint) > uBackdropLevel + 0.0004) discard;`)
+      .replace("#include <opaque_fragment>", `
+vec2 screenUv = gl_FragCoord.xy / transmissionSamplerSize;
+vec2 bend = vBackdropCap > 0.5 ? vec2(vNormal.x * 14.0, vNormal.z * 8.0)
+  : vec2(vNormal.x * 24.0, 0.0);
+vec3 backdrop = texture2D(transmissionSamplerMap,
+  clamp(screenUv + bend / transmissionSamplerSize, vec2(0.001), vec2(0.999))).rgb * 1.32;
+gl_FragColor = vec4(backdrop, 1.0);`);
+  };
+  material.customProgramCacheKey = () => "tube-water-backdrop-v1";
+  return { material, up, level };
+}
+
 /** Fixed pools survive progress updates, including seeking backwards in F8. */
 export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKind | null,
   options: { activeSurface?: boolean; pour?: boolean } = {}) {
@@ -214,6 +250,18 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   group.quaternion.copy(volume.quaternion);
   group.scale.copy(volume.scale);
   volume.parent?.add(group);
+  const backdrop = options.activeSurface && hasLiquid ? createWaterBackdropMaterial(radius) : null;
+  const backdropWall = backdrop ? new THREE.Mesh(wallGeometry, backdrop.material) : null;
+  const backdropCap = backdrop ? new THREE.Mesh(capGeometry, backdrop.material) : null;
+  if (backdropWall && backdropCap) {
+    backdropWall.name = "TubeRefractedBackdrop";
+    backdropCap.name = "TubeRefractedSurface";
+    backdropWall.visible = false;
+    backdropCap.visible = false;
+    backdropCap.frustumCulled = false;
+    backdropWall.raycast = backdropCap.raycast = () => {};
+    group.add(backdropWall, backdropCap);
+  }
   const cap = new THREE.Mesh(capGeometry, baseline);
   cap.name = "TubeLiquidSurface";
   cap.visible = hasLiquid;
@@ -464,7 +512,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   const source = new THREE.Vector3();
   const bubblePoint = new THREE.Vector3();
   return {
-    update(chemistry: TubeChemistry, time: number, quality: RuntimeQuality, splashAge: number) {
+    update(chemistry: TubeChemistry, time: number, quality: RuntimeQuality, splashAge: number,
+      refraction = false) {
       const { progress } = chemistry;
       const rate = Number.isFinite(chemistry.rate) ? THREE.MathUtils.clamp(chemistry.rate, 0, 1) : 0;
       const temperature = Number.isFinite(chemistry.temperature) ? THREE.MathUtils.clamp(chemistry.temperature, 0, 1) : 0;
@@ -489,6 +538,11 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       up.value.set(-slope.x, 1, -slope.y).normalize();
       level.value = up.value.x * center.x + up.value.y * box.max.y + up.value.z * center.z;
+      if (backdrop && backdropWall && backdropCap) {
+        backdrop.up.value.copy(up.value);
+        backdrop.level.value = level.value;
+        backdropWall.visible = backdropCap.visible = refraction && quality !== "LOW";
+      }
       inverse.copy(volume.matrixWorld).invert();
       gravity.set(0, 1, 0).transformDirection(inverse);
       // A visual reservoir outlives the instantaneous chemical rate. Seeking
@@ -766,7 +820,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         wallGeometry.dispose(); capGeometry.dispose(); headGeometry.dispose(); headMaterial.dispose(); dropletMaterial.dispose(); splashMaterial.dispose();
         gasGeometry.dispose(); bedMaterial.dispose();
         curdGeometry.dispose();
-        white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose();
+        white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
         for (const mesh of [flakes, bubbles, attachedBubbles, gas, splash, condensate, foam]) mesh.dispose();
       });
     },

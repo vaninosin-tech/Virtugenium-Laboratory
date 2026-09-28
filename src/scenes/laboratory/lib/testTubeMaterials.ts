@@ -1,5 +1,23 @@
 import * as THREE from "three";
 import { deferDispose } from "./deferredDispose";
+import { createExteriorGlassGeometry } from "./reagentMaterials";
+
+function createGlassBackdropMaterial() {
+  const material = new THREE.MeshPhysicalMaterial({
+    color: "#ffffff", roughness: 0, metalness: 0, ior: 1.47,
+    transmission: 1, thickness: 0.001, depthWrite: false, side: THREE.FrontSide,
+  });
+  material.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
+vec2 glassUv = gl_FragCoord.xy / transmissionSamplerSize;
+vec2 glassBend = vec2(vNormal.x * 4.0, 0.0) / transmissionSamplerSize;
+vec3 glassBackground = texture2D(transmissionSamplerMap,
+  clamp(glassUv + glassBend, vec2(0.001), vec2(0.999))).rgb * 1.32;
+gl_FragColor = vec4(glassBackground, 1.0);`);
+  };
+  material.customProgramCacheKey = () => "tube-glass-backdrop-v1";
+  return material;
+}
 
 /** Thin clear glass needs a readable silhouette even against a pale shelf. */
 function createTestTubeGlass(geometry: THREE.BufferGeometry) {
@@ -114,8 +132,10 @@ diffuseColor.a = max(diffuseColor.a, crack * 0.95);
 }
 
 /** Clear walls with reflective edges, including through other transparent glass. */
-export function prepareTestTube(scene: THREE.Object3D) {
+export function prepareTestTube(scene: THREE.Object3D, withBackdrop = false) {
   const materials: THREE.Material[] = [];
+  const backdropGeometry: THREE.BufferGeometry[] = [];
+  const backdrops: THREE.Mesh[] = [];
   scene.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
     if (object.name.startsWith("ContentsVolume")) {
@@ -125,10 +145,26 @@ export function prepareTestTube(scene: THREE.Object3D) {
     if (!object.name.startsWith("Tube_Glass")) return;
     const glass = createTestTubeGlass(object.geometry);
     object.material = glass;
+    if (withBackdrop) {
+      const geometry = createExteriorGlassGeometry(object.geometry);
+      const backdrop = new THREE.Mesh(geometry, createGlassBackdropMaterial());
+      backdrop.name = "TubeGlassRefractedBackdrop";
+      backdrop.visible = false;
+      backdrop.renderOrder = -1;
+      backdrop.raycast = () => {};
+      object.add(backdrop);
+      backdrops.push(backdrop);
+      backdropGeometry.push(geometry);
+      materials.push(backdrop.material);
+    }
     // Shadow maps treat transparent meshes as opaque silhouettes.
     object.castShadow = false;
     object.receiveShadow = false;
     materials.push(glass);
   });
-  return () => materials.forEach((material) => deferDispose(material, () => material.dispose()));
+  return () => {
+    backdrops.forEach(mesh => mesh.removeFromParent());
+    materials.forEach(material => deferDispose(material, () => material.dispose()));
+    backdropGeometry.forEach(geometry => deferDispose(geometry, () => geometry.dispose()));
+  };
 }

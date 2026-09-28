@@ -42,6 +42,8 @@ const iteration19 = process.env.VISUAL_ITERATION_19 === "1";
 const iteration20 = process.env.VISUAL_ITERATION_20 === "1";
 const iteration21 = process.env.VISUAL_ITERATION_21 === "1";
 const iteration21Baseline = process.env.VISUAL_ITERATION_21_BASELINE === "1";
+const iteration22 = process.env.VISUAL_ITERATION_22 === "1";
+const iteration22Baseline = process.env.VISUAL_ITERATION_22_BASELINE === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -91,6 +93,24 @@ async function shot(name, group, timing = {}) {
       elapsedSeconds: timing.originMs == null ? null : (before.nowMs - timing.originMs) / 1000,
       screenshotDurationMs: after.nowMs - before.nowMs });
     console.log(`${name}: p=${before.chemistry.progress.toFixed(4)} rate=${before.chemistry.rate.toFixed(4)} temp=${before.chemistry.temperature.toFixed(4)}`);
+    if (errors.length) throw new Error(`Browser errors after ${name}: ${errors.join("\n")}`);
+    return;
+  }
+  if (iteration22) {
+    const { data } = await captureSession.send("Page.captureScreenshot", {
+      format: "png", fromSurface: true, captureBeyondViewport: false,
+      clip: { x: 575, y: 65, width: 450, height: 710, scale: 1 },
+    });
+    await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
+    if (name.endsWith("-water")) {
+      const close = await captureSession.send("Page.captureScreenshot", {
+        format: "png", fromSurface: true, captureBeyondViewport: false,
+        clip: { x: 740, y: 120, width: 140, height: 340, scale: 1 },
+      });
+      await writeFile(resolve(out, `${name}-close.png`), Buffer.from(close.data, "base64"));
+    }
+    const after = await page.evaluate(() => window.__reactionCapture.read());
+    frames.push({ name, group, ...timing, before, after });
     if (errors.length) throw new Error(`Browser errors after ${name}: ${errors.join("\n")}`);
     return;
   }
@@ -278,7 +298,8 @@ async function warmupShaders(quality) {
     h.closeUp.getState().setViewing(true);
   }, quality);
   try {
-    for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => iteration20
+    for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => iteration22
+      ? kind === "copper-nitric" : iteration20
       ? kind === "barium-sulfate" : iteration21 ? kind === "copper-nitric"
         : !(iteration15 || iteration16 || iteration17) || kind === "copper-nitric")) {
       await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
@@ -428,6 +449,47 @@ async function showSurfaceFromAbove() {
   await settle(350);
 }
 
+async function showStandBehindTube() {
+  const points = await page.evaluate(async () => {
+    const loaded = performance.getEntriesByType("resource").map(entry => entry.name);
+    const fiberUrl = loaded.findLast(name => new URL(name).pathname.endsWith("/@react-three_fiber.js"));
+    if (!fiberUrl) throw new Error("R3F module unavailable");
+    const { _roots } = await import(fiberUrl);
+    const root = _roots.get(document.querySelector("canvas"));
+    if (!root) throw new Error("R3F root unavailable");
+    const state = root.store.getState();
+    const tube = state.scene.getObjectByName("TubeLiquidSurface");
+    if (!tube) throw new Error("Tube unavailable for refraction capture");
+    const tubePoint = tube.getWorldPosition(state.camera.position.clone());
+    let standPoint, distance = Infinity;
+    state.scene.traverse(object => {
+      if (object.name !== "BunsenStand") return;
+      const point = object.getWorldPosition(state.camera.position.clone());
+      const d = point.distanceToSquared(tubePoint);
+      if (d < distance) { distance = d; standPoint = point; }
+    });
+    if (!standPoint) throw new Error("Stand unavailable for refraction capture");
+    const direction = tubePoint.clone().sub(standPoint).setY(0).normalize();
+    const subscriber = { priority: 0.5, store: root.store, ref: { current: current => {
+      const liveTube = current.scene.getObjectByName("TubeLiquidSurface");
+      if (!liveTube) return;
+      liveTube.getWorldPosition(tubePoint);
+      current.camera.position.copy(tubePoint).addScaledVector(direction, 0.20);
+      current.camera.position.y += window.__refractionCaptureElevation ?? 0.028;
+      current.camera.lookAt(tubePoint);
+      current.camera.updateMatrixWorld();
+    } } };
+    state.internal.subscribers.push(subscriber);
+    state.internal.subscribers.sort((a, b) => a.priority - b.priority);
+    window.__refractionCameraRelease = () => {
+      state.internal.subscribers = state.internal.subscribers.filter(item => item !== subscriber);
+    };
+    return { tube: tubePoint.toArray(), stand: standPoint.toArray(), direction: direction.toArray() };
+  });
+  console.log("Refraction view", points);
+  await settle(500);
+}
+
 async function contactSheets() {
   if (!browser || !frames.length) return;
   const sheet = await browser.newPage();
@@ -555,6 +617,57 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (iteration22) {
+      const prefix = `${iteration22Baseline ? "before" : "after"}-${quality}`;
+      await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
+      await page.evaluate(quality => {
+        const h = window.__reactionCapture;
+        h.quality.getState().setMode(quality);
+        h.closeUp.getState().setViewing(true);
+        h.burner.getState().setLit(false);
+        window.__tubeVisualTuningStore.setState({ enabled: false, tiltDegrees: 0 });
+      }, quality);
+      await settle(1600);
+      await showStandBehindTube();
+      await shot(`${prefix}-empty`, "refraction");
+      await page.evaluate(() => window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, "hno3"));
+      await settle(1000);
+      await shot(`${prefix}-water`, "refraction");
+      await measureFps(`${iteration22Baseline ? "before" : "after"}-water`);
+      if (!iteration22Baseline) {
+        await page.evaluate(() => { window.__refractionCaptureElevation = 0.11; });
+        await settle(100);
+        await shot(`${prefix}-surface-calm`, "refraction");
+        await page.evaluate(() => window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, "nacl"));
+        await settle(80);
+        await shot(`${prefix}-ripple`, "refraction");
+        await page.evaluate(() => { window.__refractionCaptureElevation = 0.028; });
+      }
+      const variants = [
+        { name: "blue", contents: ["cu", "hno3"], progress: 0.85 },
+        { name: "raspberry", contents: ["kmno4", "h2so4", "na2so3"], progress: 0 },
+        { name: "barium", contents: ["bacl2", "k2so4"], progress: 0.12 },
+      ];
+      for (const variant of variants) {
+        await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
+        await page.evaluate(({ quality, variant }) => {
+          const h = window.__reactionCapture;
+          h.quality.getState().setMode(quality);
+          h.closeUp.getState().setViewing(true);
+          h.burner.getState().setLit(false);
+          for (const id of variant.contents) window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, id);
+          window.__tubeVisualTuningStore.setState({ enabled: true, progress: variant.progress,
+            rate: 0, temperature: 0, tiltDegrees: 0 });
+        }, { quality, variant });
+        await settle(1200);
+        await shot(`${prefix}-${variant.name}`, "refraction");
+      }
+      await page.evaluate(() => {
+        window.__tubeVisualTuningStore.setState({ enabled: false, tiltDegrees: null });
+        window.__refractionCameraRelease?.();
+      });
+      continue;
+    }
     if (iteration21) {
       await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
       await page.evaluate(quality => {
@@ -1061,11 +1174,11 @@ try {
       events.push(...data.events);
     } catch (error) { errors.push(`Collect trace: ${error.message}`); process.exitCode = 1; }
   }
-  try { if (!iteration16 && !iteration17 && !iteration18 && !iteration19 && !iteration20 && !iteration21) await contactSheets(); }
+  try { if (!iteration16 && !iteration17 && !iteration18 && !iteration19 && !iteration20 && !iteration21 && !iteration22) await contactSheets(); }
   catch (error) { errors.push(`Contact sheets: ${error.message}`); process.exitCode = 1; }
   try {
-    await writeFile(resolve(out, iteration21Baseline ? `capture-baseline-${qualities.join("-")}.json`
-      : iteration16 || iteration17 || iteration18 || iteration19 || iteration20 || iteration21
+    await writeFile(resolve(out, iteration22Baseline || iteration21Baseline ? `capture-baseline-${qualities.join("-")}.json`
+      : iteration16 || iteration17 || iteration18 || iteration19 || iteration20 || iteration21 || iteration22
         ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
       status: failure || errors.length ? "failed" : "complete", failure: failure ? String(failure.stack ?? failure) : null,
       frames, traces, events, errors, performanceSamples, browser: browser?.version(), angle, viewport, crop,
