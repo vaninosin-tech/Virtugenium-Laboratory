@@ -523,18 +523,20 @@ describe("tube reaction rendering contract", () => {
     expect(barium.get("TubeSediment").visible).toBe(true);
   });
 
-  it("keeps a thin BaSO4 wall film while residual haze clears after settling", () => {
+  it("keeps BaSO4 residue on the wall while the milky haze clears over minutes", () => {
     const barium = fixture("barium-sulfate");
     barium.update(chemistry(1));
     const material = liquid(barium);
-    expect(material.uniforms.uWallFilm.value).toBeGreaterThan(0.6);
-    expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0.12);
+    expect(material.uniforms.uWallFilm.value).toBeCloseTo(1);
+    expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0.65);
     barium.advance(45, chemistry(1));
-    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.03);
-    expect(material.uniforms.uResidualHaze.value).toBeLessThan(0.09);
-    barium.advance(35, chemistry(1));
+    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.6);
+    barium.advance(90, chemistry(1));
+    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.1);
+    expect(material.uniforms.uResidualHaze.value).toBeLessThan(0.3);
+    barium.advance(65, chemistry(1));
     expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0);
-    expect(material.uniforms.uWallFilm.value).toBeGreaterThan(0.6);
+    expect(material.uniforms.uWallFilm.value).toBeCloseTo(1);
   });
 
   it("decolorizes permanganate while keeping its water surface visible", () => {

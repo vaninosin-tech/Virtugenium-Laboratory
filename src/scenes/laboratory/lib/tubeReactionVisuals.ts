@@ -414,10 +414,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         liquid.uniforms.uCloudiness.value = curds ? onset * (1 - settled)
           : kind === "barium-sulfate" ? onset : 0;
         liquid.uniforms.uResidualHaze.value = kind === "barium-sulfate"
-          ? 0.12 * THREE.MathUtils.smoothstep(p, 0.90, 1)
-            * (1 - THREE.MathUtils.smoothstep(bariumCompletionAge, 0, 75)) : 0;
+          ? 0.65 * THREE.MathUtils.smoothstep(p, 0.90, 1)
+            * (1 - THREE.MathUtils.smoothstep(bariumCompletionAge, 45, 195)) : 0;
         liquid.uniforms.uWallFilm.value = kind === "barium-sulfate"
-          ? 0.7 * THREE.MathUtils.smoothstep(p, 0.33, 0.95) : 0;
+          ? THREE.MathUtils.smoothstep(p, 0.33, 0.95) : 0;
         liquid.uniforms.uOpacity.value = precipitate ? 0.3
           : kind === "permanganate-redox" ? THREE.MathUtils.lerp(baseOpacity, 0.14, p)
             : THREE.MathUtils.lerp(baseOpacity, 0.42, p);

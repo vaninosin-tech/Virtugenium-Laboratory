@@ -100,10 +100,15 @@ float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + max(meniscus, capRim) 
 waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
 float milk = uReactionKind > 2.5 && uReactionKind < 3.5 ? 1.0 : 0.0;
 float raspberry = uReactionKind > 3.5 ? 1.0 - localMix : 0.0;
-float film = uWallFilm * smoothstep(0.12, 0.70, waterEdge)
-  * (1.0 - smoothstep(0.28, 0.52, h)) * (0.92 + 0.08 * n);
+// Chalky particles cling to the cylindrical wall, independent of moving
+// liquid noise. Broader side bands keep the residue visible at tube scale.
+float wallSide = smoothstep(0.001, 0.04, waterEdge);
+float filmGrain = tubeNoise(vec3(radial.x * 20.0 + 8.0, h * 22.0, radial.y * 20.0 + 3.0));
+float filmPatch = smoothstep(0.42, 0.67, filmGrain);
+float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
+  * (0.10 + 0.55 * filmPatch) * mix(0.55, 1.0, wallSide);
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity)
-  + cloud * mix(1.25, 0.68, milk) + raspberry * 0.28 + film * 0.24, 0.0, 0.995);`)
+  + cloud * mix(1.25, 0.72, milk) + raspberry * 0.28 + film * 0.60, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
 vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
@@ -117,9 +122,9 @@ coloredLight = mix(coloredLight,
 outgoingLight = mix(mix(clearLight, coloredLight, pigment),
   mix(vec3(0.91 + 0.07 * relief), vec3(0.80 + 0.06 * relief), milk),
   clamp(cloud * mix(1.0, 0.88, milk), 0.0, 1.0));
-outgoingLight = mix(outgoingLight, vec3(0.83), film * 0.48);
+outgoingLight = mix(outgoingLight, vec3(0.93), film * 0.80);
 #include <opaque_fragment>`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v6"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v7"; }
 }
