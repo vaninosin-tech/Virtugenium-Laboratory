@@ -38,6 +38,7 @@ const iteration15 = process.env.VISUAL_ITERATION_15 === "1";
 const iteration16 = process.env.VISUAL_ITERATION_16 === "1";
 const iteration17 = process.env.VISUAL_ITERATION_17 === "1";
 const iteration18 = process.env.VISUAL_ITERATION_18 === "1";
+const iteration19 = process.env.VISUAL_ITERATION_19 === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -78,7 +79,7 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (iteration18 || iteration17 || iteration16 || iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (iteration19 || iteration18 || iteration17 || iteration16 || iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
@@ -86,12 +87,12 @@ async function shot(name, group, timing = {}) {
       clip: { ...tubeCrop, scale: 1 },
     });
     await writeFile(resolve(out, `${name}-tube.png`), Buffer.from(close.data, "base64"));
-    if (iteration18) {
+    if (iteration18 || iteration19) {
       const liquidShot = await captureSession.send("Page.captureScreenshot", {
         format: "png", fromSurface: true, captureBeyondViewport: false,
         clip: { x: 725, y: 500, width: 150, height: 310, scale: 1 },
       });
-      await writeFile(resolve(out, `${name}-liquid.png`), Buffer.from(liquidShot.data, "base64"));
+      await writeFile(resolve(out, `${name}-${iteration19 ? "lower" : "liquid"}.png`), Buffer.from(liquidShot.data, "base64"));
       if (name.startsWith("barium-sulfate") && name.endsWith("45s")) {
         const bottom = await captureSession.send("Page.captureScreenshot", {
           format: "png", fromSurface: true, captureBeyondViewport: false,
@@ -484,6 +485,18 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (iteration19) {
+      await prepare("permanganate-redox", quality);
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({
+        enabled: true, progress: 0, rate: 0, temperature: 0, tiltDegrees: 0,
+      }));
+      await settle(350);
+      await shot(`permanganate-redox-${quality}-p0`, `permanganate-redox-${quality}`);
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      const startedAt = await prepare("barium-sulfate", quality);
+      await series(`barium-sulfate-${quality}`, startedAt, [2, 15, 30, 45, 90, 120]);
+      continue;
+    }
     if (iteration18) {
       await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
       await page.evaluate(quality => {
@@ -915,10 +928,10 @@ try {
       events.push(...data.events);
     } catch (error) { errors.push(`Collect trace: ${error.message}`); process.exitCode = 1; }
   }
-  try { if (!iteration16 && !iteration17 && !iteration18) await contactSheets(); }
+  try { if (!iteration16 && !iteration17 && !iteration18 && !iteration19) await contactSheets(); }
   catch (error) { errors.push(`Contact sheets: ${error.message}`); process.exitCode = 1; }
   try {
-    await writeFile(resolve(out, iteration16 || iteration17 || iteration18 ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
+    await writeFile(resolve(out, iteration16 || iteration17 || iteration18 || iteration19 ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
       status: failure || errors.length ? "failed" : "complete", failure: failure ? String(failure.stack ?? failure) : null,
       frames, traces, events, errors, performanceSamples, browser: browser?.version(), angle, viewport, crop,
       selection: { cases: selectedCases, qualities, quick },

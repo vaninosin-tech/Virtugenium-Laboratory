@@ -523,6 +523,20 @@ describe("tube reaction rendering contract", () => {
     expect(barium.get("TubeSediment").visible).toBe(true);
   });
 
+  it("keeps a thin BaSO4 wall film while residual haze clears after settling", () => {
+    const barium = fixture("barium-sulfate");
+    barium.update(chemistry(1));
+    const material = liquid(barium);
+    expect(material.uniforms.uWallFilm.value).toBeGreaterThan(0.6);
+    expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0.12);
+    barium.advance(45, chemistry(1));
+    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.03);
+    expect(material.uniforms.uResidualHaze.value).toBeLessThan(0.09);
+    barium.advance(35, chemistry(1));
+    expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0);
+    expect(material.uniforms.uWallFilm.value).toBeGreaterThan(0.6);
+  });
+
   it("decolorizes permanganate while keeping its water surface visible", () => {
     const f = fixture("permanganate-redox");
     f.update(chemistry(1));

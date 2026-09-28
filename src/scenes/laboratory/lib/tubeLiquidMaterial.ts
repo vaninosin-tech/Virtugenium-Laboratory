@@ -14,6 +14,7 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uUp: { value: new THREE.Vector3(0, 1, 0) },
       uLevel: { value: this.uniforms.uBoundsMin.value.y + this.uniforms.uBoundsSize.value.y },
       uReactionKind: { value: 0 }, uRate: { value: 0 }, uTemperature: { value: 0 },
+      uResidualHaze: { value: 0 }, uWallFilm: { value: 0 },
     });
     this.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
@@ -40,6 +41,7 @@ uniform float uReactionProgress; uniform float uCloudiness; uniform float uOpaci
 uniform float uClearAlpha; uniform float uEdgeAlpha; uniform float uMeniscusAlpha; uniform float uClearHighlight;
 uniform vec3 uUp; uniform float uLevel; uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
 uniform float uReactionKind; uniform float uRate; uniform float uTemperature; uniform float uTime;
+uniform float uResidualHaze; uniform float uWallFilm;
 varying vec3 vTubePoint; varying float vCap;
 float tubeNoise(vec3 p) {
   vec3 i = floor(p), f = smoothstep(0.0, 1.0, fract(p));
@@ -85,6 +87,7 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
     p * 1.36 - 0.18 + stream * 0.12 * sin(p * 3.14159));
 }
 if (p <= 0.0) { localMix = 0.0; cloud = 0.0; }
+cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 tubeColor = mix(uBaseColor, uReactionColor, localMix);
 float baseChroma = max(max(uBaseColor.r, uBaseColor.g), uBaseColor.b) - min(min(uBaseColor.r, uBaseColor.g), uBaseColor.b);
 float endChroma = max(max(uReactionColor.r, uReactionColor.g), uReactionColor.b) - min(min(uReactionColor.r, uReactionColor.g), uReactionColor.b);
@@ -95,7 +98,12 @@ float meniscus = (1.0 - smoothstep(0.00015, 0.0007, abs(surfaceDistance))) * (1.
 float capRim = smoothstep(0.43, 0.50, length(radial)) * vCap;
 float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + max(meniscus, capRim) * uMeniscusAlpha;
 waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
-diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity) + cloud * 1.25, 0.0, 0.995);`)
+float milk = uReactionKind > 2.5 && uReactionKind < 3.5 ? 1.0 : 0.0;
+float raspberry = uReactionKind > 3.5 ? 1.0 - localMix : 0.0;
+float film = uWallFilm * smoothstep(0.12, 0.70, waterEdge)
+  * (1.0 - smoothstep(0.28, 0.52, h)) * (0.92 + 0.08 * n);
+diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity)
+  + cloud * mix(1.25, 0.68, milk) + raspberry * 0.28 + film * 0.24, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
 vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
@@ -103,9 +111,15 @@ vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge
 float relief = 0.7 + 0.2 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
 vec3 coloredLight = tubeColor * (0.68 + relief * 0.42) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.26;
 coloredLight += vec3(0.08, 0.13, 0.15) * (n - 0.5) * smoothstep(0.6, 0.95, uTemperature);
-outgoingLight = mix(mix(clearLight, coloredLight, pigment), vec3(0.91 + 0.07 * relief), clamp(cloud, 0.0, 1.0));
+coloredLight = mix(coloredLight,
+  tubeColor * vec3(1.45, 1.15, 1.25) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.10,
+  raspberry);
+outgoingLight = mix(mix(clearLight, coloredLight, pigment),
+  mix(vec3(0.91 + 0.07 * relief), vec3(0.80 + 0.06 * relief), milk),
+  clamp(cloud * mix(1.0, 0.88, milk), 0.0, 1.0));
+outgoingLight = mix(outgoingLight, vec3(0.83), film * 0.48);
 #include <opaque_fragment>`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v5"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v6"; }
 }

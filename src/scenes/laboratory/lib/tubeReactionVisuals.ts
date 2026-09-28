@@ -292,6 +292,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   let residueAtStop = 0;
   let bubbleStopAge = Infinity;
   let wasProducingBubbles = false;
+  let bariumCompletionAge = 0;
   const releasedBubbles: { position: THREE.Vector3; scale: THREE.Vector3 }[] = [];
   const releasedAttached: { position: THREE.Vector3; scale: THREE.Vector3 }[] = [];
   const snapshotBubbles = (pool: THREE.InstancedMesh, target: typeof releasedBubbles) => {
@@ -353,6 +354,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       if (reverseTime) {
         gasDensity = 0; gasFront = 0; mouthFill = 0; wallResidue = 0; bubblePhase = 0; surfaceActivity = 0;
         residueAge = 0; residueAtStop = 0; bubbleStopAge = Infinity; wasProducingBubbles = false;
+        bariumCompletionAge = 0;
         releasedBubbles.length = 0; releasedAttached.length = 0;
       }
       bubblePhase += dt * (0.3 + rate * 0.4);
@@ -390,6 +392,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.012 : 0.004);
       const settled = precipitate ? THREE.MathUtils.smoothstep(p,
         curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
+      if (kind === "barium-sulfate") bariumCompletionAge = p >= 0.999
+        ? bariumCompletionAge + dt : 0;
       // The permanganate hold stays at p=0; its vivid reaction material must
       // already be visible before the decolorization front starts moving.
       const reactionLiquidActive = !!liquid && (p > 0 || kind === "permanganate-redox");
@@ -409,6 +413,11 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         liquid.uniforms.uReactionKind.value = kind === "copper-nitric" ? 1 : curds ? 2 : kind === "barium-sulfate" ? 3 : 4;
         liquid.uniforms.uCloudiness.value = curds ? onset * (1 - settled)
           : kind === "barium-sulfate" ? onset : 0;
+        liquid.uniforms.uResidualHaze.value = kind === "barium-sulfate"
+          ? 0.12 * THREE.MathUtils.smoothstep(p, 0.90, 1)
+            * (1 - THREE.MathUtils.smoothstep(bariumCompletionAge, 0, 75)) : 0;
+        liquid.uniforms.uWallFilm.value = kind === "barium-sulfate"
+          ? 0.7 * THREE.MathUtils.smoothstep(p, 0.33, 0.95) : 0;
         liquid.uniforms.uOpacity.value = precipitate ? 0.3
           : kind === "permanganate-redox" ? THREE.MathUtils.lerp(baseOpacity, 0.14, p)
             : THREE.MathUtils.lerp(baseOpacity, 0.42, p);
