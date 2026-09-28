@@ -3,13 +3,10 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { DepthOfFieldEffect, MaskFunction } from "postprocessing";
 import { Vector3 } from "three";
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
-import { useHeatingStore } from "../lib/useHeatingStore";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
-import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
 
 const JAR_FOCUS_RANGE = 0.7;
-const TUBE_FOCUS_RANGE = 0.1;
 
 class InspectionBlurEffect extends DepthOfFieldEffect {
   active = false;
@@ -47,21 +44,14 @@ export function InspectionDepthOfField() {
     // instead of chasing a focus distance that would only work for one
     // specific tilt/scale.
     const inspectingJar = inspection.inspectedId !== null && inspection.kind !== "holder";
-    // The tube close-up (looking at it, or heating it) gets the same
-    // treatment: the bottles right in front of the camera and the hood's
-    // walls go soft, the reaction stays sharp.
-    const tubeCloseUp =
-      TUBE_FOCUS.valid && (useTubeCloseUpStore.getState().viewing || useHeatingStore.getState().active);
-    effect.active = (inspectingJar || tubeCloseUp) && useRuntimeQualityStore.getState().quality !== "LOW";
+    // Deliberately NOT for the tube close-up. Depth of field reads the depth
+    // buffer, and the tube's glass and liquid are transparent and write no
+    // depth — so every tube pixel carries the depth of the hood wall behind
+    // it and got blurred like the wall. There is no focus setting that keeps
+    // a see-through subject sharp; the tube close-up stays fully sharp.
+    effect.active = inspectingJar && useRuntimeQualityStore.getState().quality !== "LOW";
     effect.blendMode.opacity.value = effect.active ? 1 : 0;
-    if (effect.active) {
-      if (inspectingJar) effect.target!.fromArray(inspection.stagePosition);
-      else effect.target!.copy(TUBE_FOCUS.point);
-      // World units. The jar's 0.7 m band swallowed the bottles standing
-      // 10–20 cm in front of the tube, so nothing looked blurred; the tube
-      // itself is only a couple of centimetres deep.
-      effect.cocMaterial.focusRange = inspectingJar ? JAR_FOCUS_RANGE : TUBE_FOCUS_RANGE;
-    }
+    if (effect.active) effect.target!.fromArray(inspection.stagePosition);
   });
   useEffect(() => {
     cancelDeferredDispose(effect);
