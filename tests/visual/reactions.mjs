@@ -29,6 +29,7 @@ const precipitates = process.env.VISUAL_PRECIP === "1";
 const bubblesGas = process.env.VISUAL_BUBBLES_GAS === "1";
 const gasResidue = process.env.VISUAL_GAS_RESIDUE === "1";
 const reference = process.env.VISUAL_REFERENCE === "1";
+const permanganateColor = process.env.VISUAL_PERMANGANATE_COLOR === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -56,7 +57,7 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (precipitates || gasResidue || reference || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
@@ -335,6 +336,27 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (permanganateColor) {
+      const prefix = `permanganate-redox-${quality}`;
+      await prepare("permanganate-redox", quality);
+      await shot(`${prefix}-hold-live`, `${prefix}-hold`);
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({
+        enabled: true, progress: 0, rate: 0, temperature: 0, tiltDegrees: 0,
+      }));
+      // Show the stock bottle as well as the tube in the same lit hood.
+      await page.setViewportSize({ width: 1900, height: 900 });
+      await settle(500);
+      await page.screenshot({ path: resolve(out, `${prefix}-shelf.png`) });
+      await page.setViewportSize(viewport);
+      await settle(500);
+      for (const progress of [0, 0.15, 0.35, 0.6, 1]) {
+        await page.evaluate(progress => window.__tubeVisualTuningStore.setState({ progress }), progress);
+        await settle(300);
+        await shot(`${prefix}-p${String(progress).replace(".", "p")}`, `${prefix}-color`);
+      }
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      continue;
+    }
     if (reference) {
       for (const kind of selectedCases) {
         const targets = kind === "silver-chloride" ? [0.1, 1, 5, 12]

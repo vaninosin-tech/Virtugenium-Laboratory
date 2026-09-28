@@ -95,7 +95,8 @@ float meniscus = (1.0 - smoothstep(0.00015, 0.0007, abs(surfaceDistance))) * (1.
 float capRim = smoothstep(0.43, 0.50, length(radial)) * vCap;
 float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + max(meniscus, capRim) * uMeniscusAlpha;
 waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
-diffuseColor.a = clamp(mix(waterAlpha, uOpacity, scatter) + cloud * 1.25, 0.0, 0.995);`)
+float raspberry = uReactionKind > 3.5 ? 1.0 - localMix : 0.0;
+diffuseColor.a = clamp(mix(waterAlpha, uOpacity, scatter) + cloud * 1.25 + raspberry * 0.10, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
 vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
@@ -103,6 +104,8 @@ vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge
 float relief = 0.7 + 0.2 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
 vec3 coloredLight = tubeColor * (0.5 + relief * 0.3) * mix(1.0, 0.68, waterEdge) + boundedSpecular * 0.2;
 coloredLight += vec3(0.08, 0.13, 0.15) * (n - 0.5) * smoothstep(0.6, 0.95, uTemperature);
+// Preserve the raspberry tint in the tube while the reaction is held at zero.
+coloredLight = mix(coloredLight, tubeColor * vec3(1.45, 1.15, 1.25) + boundedSpecular * 0.1, raspberry);
 outgoingLight = mix(mix(clearLight, coloredLight, scatter), vec3(0.91 + 0.07 * relief), clamp(cloud, 0.0, 1.0));
 #include <opaque_fragment>`);
     };

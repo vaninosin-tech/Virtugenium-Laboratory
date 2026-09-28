@@ -338,9 +338,12 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.012 : 0.004);
       const settled = precipitate ? THREE.MathUtils.smoothstep(p,
         curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
-      volume.material = p > 0 && liquid ? liquid : baseline;
+      // The permanganate hold stays at p=0; its vivid reaction material must
+      // already be visible before the decolorization front starts moving.
+      const reactionLiquidActive = !!liquid && (p > 0 || kind === "permanganate-redox");
+      volume.material = reactionLiquidActive ? liquid : baseline;
       cap.material = volume.material;
-      const activeLiquid = p > 0 && liquid ? liquid : base instanceof TubeLiquidMaterial ? base : null;
+      const activeLiquid = reactionLiquidActive ? liquid : base instanceof TubeLiquidMaterial ? base : null;
       if (activeLiquid) {
         activeLiquid.uniforms.uUp.value.copy(up.value);
         activeLiquid.uniforms.uLevel.value = level.value;

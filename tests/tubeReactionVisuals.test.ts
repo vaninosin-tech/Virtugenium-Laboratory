@@ -20,7 +20,10 @@ function fixture(kind: ReactionKind | null, withCopper = false) {
   parent.add(root);
   const geometry = new THREE.CylinderGeometry(0.007, 0.007, 0.055, 16);
   geometry.translate(0, 0.028, 0);
-  const baseline = new TubeLiquidMaterial(geometry, { color: kind === "permanganate-redox" ? REAGENTS.kmno4.contentsColor : "#eef6fb", opacity: 0.3 });
+  const baseline = new TubeLiquidMaterial(geometry, {
+    color: kind === "permanganate-redox" ? REAGENTS.kmno4.contentsColor : "#eef6fb",
+    opacity: kind === "permanganate-redox" ? REAGENTS.kmno4.contentsOpacity : 0.3,
+  });
   const volume = new THREE.Mesh(geometry, baseline);
   volume.name = "ContentsVolume";
   const shellGeometry = new THREE.CylinderGeometry(0.0098, 0.0098, 0.15, 16);
@@ -80,7 +83,8 @@ describe("tube reaction rendering contract", () => {
   it.each(kinds)("%s supports completion and reverse seeking while retaining GPU resources", kind => {
     const f = fixture(kind);
     f.update(chemistry(0));
-    expect(f.volume.material).toBe(f.baseline);
+    const held = f.volume.material;
+    expect(held === f.baseline).toBe(kind !== "permanganate-redox");
     const group = f.root.getObjectByName("TubeReactionVisuals")!;
     const meshes = group.children as THREE.Mesh[];
     const resources = meshes.map(mesh => ({ mesh, geometry: mesh.geometry, material: mesh.material,
@@ -92,7 +96,7 @@ describe("tube reaction rendering contract", () => {
     f.advance(0.5, chemistry(0.5, kind === "copper-nitric" ? 0.8 : 0), "ULTRA");
     expect(f.volume.material).toBe(active);
     f.update(chemistry(0));
-    expect(f.volume.material).toBe(f.baseline);
+    expect(f.volume.material).toBe(held);
     expect(f.volume.geometry).toBe(wall);
     expect(group.children).toHaveLength(resources.length);
     for (const resource of resources) {
@@ -102,7 +106,7 @@ describe("tube reaction rendering contract", () => {
       if (resource.mesh instanceof THREE.InstancedMesh) expect(resource.mesh.instanceMatrix.array).toBe(resource.array);
       expect(resource.mesh.visible).toBe(resource.mesh.name === "TubeLiquidSurface");
     }
-    expect(f.get("TubeLiquidSurface").material).toBe(f.baseline);
+    expect(f.get("TubeLiquidSurface").material).toBe(held);
     f.update(chemistry(0.5));
     expect(f.volume.material).toBe(active);
   });
@@ -386,10 +390,12 @@ describe("tube reaction rendering contract", () => {
 
   it("preserves the physical response at the start of permanganate reduction", () => {
     const f = fixture("permanganate-redox");
-    f.update(chemistry(0.0001));
+    f.update(chemistry(0));
     const active = liquid(f);
+    expect(active).not.toBe(f.baseline);
     expect(f.baseline.uniforms.uBaseColor.value.getHexString()).toBe("9c1c6b");
     expect(active.uniforms.uBaseColor.value.getHexString()).toBe("9c1c6b");
+    expect(active.uniforms.uReactionKind.value).toBe(4);
     expect(active.side).toBe(f.baseline.side);
     expect(active.depthWrite).toBe(f.baseline.depthWrite);
     expect(active.roughness).toBe(f.baseline.roughness);
