@@ -26,6 +26,7 @@ const selectedCases = process.env.VISUAL_CASE ? process.env.VISUAL_CASE.split(",
 const qualities = process.env.VISUAL_QUALITY ? process.env.VISUAL_QUALITY.split(",") : ["HIGH", "LOW"];
 const quick = process.env.VISUAL_QUICK === "1";
 const precipitates = process.env.VISUAL_PRECIP === "1";
+const bubblesGas = process.env.VISUAL_BUBBLES_GAS === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -332,6 +333,18 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (bubblesGas) {
+      await prepare("copper-nitric", quality);
+      for (const rate of [0.25, 1]) {
+        await page.evaluate(rate => window.__tubeVisualTuningStore.setState({
+          enabled: true, progress: 0.45, rate, temperature: 0, tiltDegrees: 0,
+        }), rate);
+        await settle(rate === 1 ? 5000 : 1500);
+        await shot(`copper-nitric-${quality}-r${String(rate).replace(".", "p")}-peak`, `copper-nitric-${quality}-bubbles-gas`);
+      }
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      continue;
+    }
     for (const kind of selectedCases) {
       const prefix = `${kind}-${quality}`;
       if (precipitates) {

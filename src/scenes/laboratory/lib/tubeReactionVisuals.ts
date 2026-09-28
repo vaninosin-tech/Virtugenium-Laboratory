@@ -36,6 +36,8 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const radius = Math.min(size.x, size.z) * 0.5;
   root.updateMatrixWorld(true);
   shell.geometry.computeBoundingBox();
+  const shellBox = shell.geometry.boundingBox!;
+  const headRadius = Math.min(shellBox.max.x - shellBox.min.x, shellBox.max.z - shellBox.min.z) * 0.45;
   // Read the lip in cavity coordinates so authored node transforms remain valid.
   const lip = volume.worldToLocal(shell.localToWorld(new THREE.Vector3(0, shell.geometry.boundingBox!.max.y, 0)));
   const baseline = volume.material;
@@ -116,7 +118,7 @@ outgoingLight = vec3(uSedimentWhite) * relief;
     vertices.setXYZ(i, x * lump, y * lump * 0.75, z * lump);
   }
   curdGeometry.computeVertexNormals();
-  const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#d5ecf1", transparent: true, opacity: 0.55, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
+  const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e8f7fa", transparent: true, opacity: 0.85, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
   const up = { value: new THREE.Vector3(0, 1, 0) };
   const level = { value: box.max.y };
   bubbleMaterial.onBeforeCompile = shader => {
@@ -128,9 +130,9 @@ vBubblePoint = (instanceMatrix * vec4(transformed, 1.0)).xyz;
       .replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
 if (length(vBubblePoint.xz) > uTubeRadius || dot(uWaterUp, vBubblePoint) > uWaterLevel) discard;`)
       .replace("#include <opaque_fragment>", `
-float edge = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.6);
-diffuseColor.a = 0.02 + edge * 0.95;
-outgoingLight = vec3(0.12, 0.21, 0.23) + edge * vec3(0.87, 0.95, 0.97) + totalSpecular / (vec3(1.0) + totalSpecular) * 0.35;
+float edge = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 1.9);
+diffuseColor.a = 0.04 + edge * 0.96;
+outgoingLight = vec3(0.16, 0.25, 0.27) + edge * vec3(1.05, 1.12, 1.15) + totalSpecular / (vec3(1.0) + totalSpecular) * 0.35;
 #include <opaque_fragment>`);
   };
   const dropletMaterial = new THREE.MeshBasicMaterial({ color: "#b9d0d4", transparent: true, opacity: 0.3, depthWrite: false });
@@ -161,7 +163,7 @@ void main() {
   float rise = clamp((vP.y + 1.0) * 0.5, 0.0, 1.0);
   float flow = sin(rise * 9.0 - uTime * 0.75) * 0.06
     + sin(rise * 16.0 + uTime * 0.37) * 0.025;
-  float width = mix(0.23, 0.83, smoothstep(0.0, 0.85, rise));
+  float width = mix(0.52, 0.64, smoothstep(0.2, 1.0, rise));
   float edge = 1.0 - smoothstep(width * 0.5, width, abs(vP.x - flow));
   float bottom = smoothstep(0.0, 0.08, rise);
   float top = 1.0 - smoothstep(0.55, 1.0, rise);
@@ -170,12 +172,13 @@ void main() {
   #include <colorspace_fragment>
 }`,
   });
-  const headGeometry = new THREE.CylinderGeometry(radius * 0.98, radius * 0.98, lip.y - box.min.y, 32, 1, true);
+  // The liquid mesh is inset from the glass; gas must reach the actual bore.
+  const headGeometry = new THREE.CylinderGeometry(headRadius, headRadius, lip.y - box.min.y, 32, 1, true);
   headGeometry.translate(center.x, (lip.y + box.min.y) / 2, center.z);
   const headMaterial = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.FrontSide, toneMapped: false,
     uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
-      uLip: { value: lip.y }, uRadius: { value: radius }, uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) } },
+      uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) } },
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 void main() { vP = position; vN = normalize(normalMatrix * normal);
 vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
@@ -352,7 +355,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       flakes.visible = precipitate && p > 0;
       flakes.count = count;
       bubbles.visible = kind === "copper-nitric" && (rate > 0.005 || temperature > 0.6);
-      bubbles.count = Math.max(1, Math.floor(count * (rate * 0.75 + Math.max(0, temperature - 0.6) * 0.3)));
+      bubbles.count = Math.max(1, Math.min(count, Math.floor(count * (rate > 0 ? 0.4 + rate * 0.6 : Math.max(0, temperature - 0.6) * 0.3))));
       gas.visible = gasDensity > 0.008;
       headspace.visible = gas.visible;
       gas.count = 1;
@@ -417,9 +420,9 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           const site = i % 8;
           const chain = Math.floor(i / 8);
           const rise = (bubblePhase * (0.7 + random(site + 180) * 0.35)
-            + (rate > 0.35 ? chain * 0.23 : random(i + 42))) % 1;
+            + (rate > 0.1 ? chain * 0.23 : random(i + 42))) % 1;
           const grainMesh = copper?.children[site % Math.max(1, copper.children.length)];
-          if (grainMesh instanceof THREE.Mesh && p < 0.999 && i < count * rate * 0.75) {
+          if (grainMesh instanceof THREE.Mesh && p < 0.999) {
             const azimuth = site * 2.39996;
             source.set(Math.cos(azimuth), 0.36 + random(site + 201) * 0.35, Math.sin(azimuth))
               .normalize().multiplyScalar(copperBounds[site % copperBounds.length] * 0.68).multiply(grainMesh.scale)
@@ -434,8 +437,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           // A rising bubble hits the wall and slides along it, never exits sideways.
           const radialDistance = Math.hypot(bubblePoint.x, bubblePoint.z);
           if (radialDistance > radius * 0.84) { bubblePoint.x *= radius * 0.84 / radialDistance; bubblePoint.z *= radius * 0.84 / radialDistance; }
-          const coldGate = rate > 0.1 || (time + random(i + 14) * 5) % 4 < 1.5;
-          const bubbleSize = coldGate ? radius * (0.06 + Math.pow(random(i + 241), 3) * 0.17) : 0;
+          const coldGate = rate > 0.05 || (time + random(i + 14) * 5) % 4 < 1.5;
+          const bubbleSize = coldGate ? radius * (0.095 + Math.pow(random(i + 241), 2) * 0.21) : 0;
           place(bubbles, i, bubblePoint.x, bubblePoint.y, bubblePoint.z, bubbleSize, bubbleSize * (bubbleSize > radius * 0.1 ? 0.82 : 1), bubbleSize);
         }
         if (gas.visible && i < gas.count) {

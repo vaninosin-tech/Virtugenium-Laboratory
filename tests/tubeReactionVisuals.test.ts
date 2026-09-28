@@ -162,6 +162,7 @@ describe("tube reaction rendering contract", () => {
     // The interior gas volume spans the air column; its material clips at water.
     expect(head.geometry.boundingBox!.max.y).toBeCloseTo(0.15, 6);
     expect(head.geometry.boundingBox!.min.y).toBeLessThan(f.geometry.boundingBox!.max.y);
+    expect(head.geometry.boundingBox!.max.x).toBeGreaterThan(0.0085);
     const headUniforms = (head.material as THREE.ShaderMaterial).uniforms;
     expect(headUniforms.uLevel.value).toBeCloseTo(liquid(f).uniforms.uLevel.value);
     expect(headUniforms.uUp.value.equals(liquid(f).uniforms.uUp.value)).toBe(true);
@@ -211,8 +212,12 @@ describe("tube reaction rendering contract", () => {
     f.update(chemistry(0.4, 0.05), quality);
     const slow = bubbles.count;
     expect(bubbles.visible).toBe(true);
+    f.update(chemistry(0.4, 0.25), quality);
+    const cold = bubbles.count;
+    expect(cold).toBeGreaterThanOrEqual(quality === "LOW" ? 12 : 28);
     f.update(chemistry(0.4, 0.9), quality);
-    expect(bubbles.count).toBeGreaterThan(slow * 2);
+    expect(bubbles.count).toBeGreaterThan(cold);
+    expect(cold).toBeGreaterThan(slow);
     expect(bubbles.count).toBeLessThanOrEqual(bubbles.instanceMatrix.count);
     f.update(chemistry(0.4), quality);
     expect(bubbles.visible).toBe(false);
