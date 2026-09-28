@@ -172,6 +172,7 @@ describe("tube reaction rendering contract", () => {
     expect(head.geometry.boundingBox!.min.y).toBeLessThan(f.geometry.boundingBox!.max.y);
     expect(head.geometry.boundingBox!.max.x).toBeGreaterThan(0.0085);
     const headUniforms = (head.material as THREE.ShaderMaterial).uniforms;
+    expect(headUniforms.uDetail.value).toBe(quality === "LOW" ? 0 : 1);
     expect(headUniforms.uLevel.value).toBeCloseTo(liquid(f).uniforms.uLevel.value);
     expect(headUniforms.uUp.value.equals(liquid(f).uniforms.uUp.value)).toBe(true);
     const matrix = new THREE.Matrix4();
@@ -192,13 +193,13 @@ describe("tube reaction rendering contract", () => {
     expect(atThirty).toBeGreaterThan(0.1);
     f.advance(30, chemistry(1, 0), quality);
     expect(head.visible).toBe(true);
-    expect(residue(f)).toBeGreaterThan(0.05);
+    expect(residue(f)).toBeGreaterThan(0.5);
     expect(residue(f)).toBeGreaterThan(atThirty * 0.8);
     f.advance(120, chemistry(1, 0), quality);
     expect(head.visible).toBe(true);
-    expect(residue(f)).toBeGreaterThan(0.05);
+    expect(residue(f)).toBeGreaterThan(0.45);
     expect(residue(f)).toBeLessThan(atThirty);
-    f.advance(145, chemistry(1, 0), quality);
+    f.advance(120, chemistry(1, 0), quality);
     expect(head.visible).toBe(false);
     expect(plume.visible).toBe(false);
   });

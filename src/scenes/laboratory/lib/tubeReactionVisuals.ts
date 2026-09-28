@@ -198,18 +198,24 @@ void main() {
 float aboveWater = dot(uUp, vP) - uLevel;
 if (aboveWater < 0.0004) discard;
 float h = clamp(aboveWater / max(uLip - uLevel, 0.005), 0.0, 1.0);
-vec3 q = vec3(vP.x / uRadius * 1.7, vP.y / uRadius * 0.65 - uTime * 0.18,
-  vP.z / uRadius * 1.7 + sin(vP.y / uRadius * 0.55 + uTime * 0.24) * 0.35);
-float cloud = gasNoise(q) * 0.75 + gasNoise(q * 1.4 + vec3(4.7, 0.0, 1.9)) * 0.25;
-float variation = mix(1.0, 0.7 + 0.6 * cloud, uDetail);
+float motion = 1.0 + 0.13 * sin(h * 8.0 - uTime * 0.32)
+  + 0.07 * sin(h * 13.0 - uTime * 0.19);
+if (uDetail > 0.5) {
+  vec3 q = vec3(vP.x / uRadius * 1.25, vP.y / uRadius * 0.42 - uTime * 0.26,
+    vP.z / uRadius * 1.25);
+  q.x += sin(q.y * 1.4 + uTime * 0.22) * 0.34;
+  q.z += sin(q.y * 0.9 - uTime * 0.11) * 0.27;
+  float cloud = gasNoise(q) * 0.7 + gasNoise(q * 1.7 + vec3(4.7, 0.0, 1.9)) * 0.3;
+  motion = clamp(-0.2 + 2.4 * cloud, 0.65, 1.35);
+}
 float heightDensity = mix(1.0, 0.48, smoothstep(0.05, 0.95, h));
 float facing = abs(dot(normalize(vN), normalize(vEye)));
 float opticalDepth = mix(0.35, 1.0, smoothstep(0.0, 0.65, facing));
 float lipFade = 1.0 - 0.15 * smoothstep(uLip - 0.008, uLip, vP.y);
-float wallBand = (0.30 + 0.95 * pow(1.0 - facing, 0.55))
+float wallBand = (0.55 + 0.55 * pow(1.0 - facing, 0.55))
   * smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.34, 0.72, h));
-float mist = (1.0 - exp(-uDensity * 2.5 * heightDensity * variation)) * opticalDepth * lipFade;
-gl_FragColor = vec4(uColor, mist + uResidue * wallBand);
+float mist = (1.0 - exp(-uDensity * 2.5 * heightDensity)) * opticalDepth * lipFade * motion;
+gl_FragColor = vec4(uColor, min(0.96, mist + uResidue * wallBand));
 #include <colorspace_fragment>
 }`,
   });
@@ -401,7 +407,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * gasDensity;
       gasMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDensity.value = gasDensity;
-      headMaterial.uniforms.uResidue.value = wallResidue * (1 - gasDensity);
+      headMaterial.uniforms.uResidue.value = Math.pow(wallResidue, 0.55) * (1 - gasDensity);
       headMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDetail.value = quality === "LOW" ? 0 : 1;
       condensate.visible = kind === "copper-nitric" && temperature > 0.6;
