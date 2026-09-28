@@ -28,6 +28,7 @@ const quick = process.env.VISUAL_QUICK === "1";
 const precipitates = process.env.VISUAL_PRECIP === "1";
 const bubblesGas = process.env.VISUAL_BUBBLES_GAS === "1";
 const gasResidue = process.env.VISUAL_GAS_RESIDUE === "1";
+const reference = process.env.VISUAL_REFERENCE === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -55,7 +56,7 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (precipitates || gasResidue || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (precipitates || gasResidue || reference || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
@@ -334,6 +335,24 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (reference) {
+      for (const kind of selectedCases) {
+        const targets = kind === "silver-chloride" ? [0.1, 1, 5, 12]
+          : kind === "barium-sulfate" ? [0.2, 10, 25, 45] : [0.5, 1.5, 3];
+        const startedAt = await prepare(kind, quality);
+        for (const targetSeconds of targets) {
+          // A live rAF wait keeps the chemistry and shaders advancing during
+          // BaSO4's long settling interval in headless Chromium.
+          await page.evaluate(({ startedAt, targetSeconds }) => new Promise(resolve => {
+            const tick = now => now >= startedAt + targetSeconds * 1000 ? resolve() : requestAnimationFrame(tick);
+            requestAnimationFrame(tick);
+          }), { startedAt, targetSeconds });
+          await shot(`${kind}-${quality}-${String(targetSeconds).replace(".", "p")}s`, `${kind}-${quality}-reference`,
+            { originMs: startedAt, targetSeconds });
+        }
+      }
+      continue;
+    }
     if (gasResidue) {
       await prepare("copper-nitric", quality);
       await page.evaluate(() => window.__tubeVisualTuningStore.setState({

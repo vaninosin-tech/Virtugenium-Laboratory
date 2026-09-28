@@ -335,7 +335,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const count = TUBE_VISUALS.particleCounts[quality];
       const precipitate = kind === "silver-chloride" || kind === "barium-sulfate";
       const curds = kind === "silver-chloride";
-      const onset = THREE.MathUtils.smoothstep(p, 0, 0.08);
+      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.012 : 0.004);
       const settled = precipitate ? THREE.MathUtils.smoothstep(p,
         curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
       volume.material = p > 0 && liquid ? liquid : baseline;
@@ -423,7 +423,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         const grain = radius * (curds ? (0.34 + random(i + 31) * 0.13) * (0.45 + settled * 0.55) : 0.06);
         const floor = box.min.y + size.y * (curds ? 0.10 + random(i + 14) * (TUBE_VISUALS.curdLayerHeight - 0.13) : 0.07 + random(i + 14) * 0.025);
         const drift = Math.sin(time * 0.75 + i * 2.4) * radius * 0.07 * (1 - settled);
-        const ingress = curds ? THREE.MathUtils.smoothstep(p * 9, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
+        const ingress = curds ? THREE.MathUtils.smoothstep(p * 80, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
         if (flakes.visible) place(flakes, i, x + drift - gravity.x * radius * settled * 0.6, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), floor - gravity.z * z, settled), z - gravity.z * radius * settled * 0.6,
           grain * onset * ingress, grain * onset * ingress * (curds ? 1.5 : 0.65), grain * onset * ingress);
         if (bubbles.visible && i < bubbles.count) {

@@ -1,5 +1,6 @@
 ﻿import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
+import { REAGENTS } from "../src/entities/laboratory/reagents";
 import { createTubeReactionVisuals } from "../src/scenes/laboratory/lib/tubeReactionVisuals";
 import { createTubeCopperGranules } from "../src/scenes/laboratory/lib/testTubeContents";
 import { TubeLiquidMaterial } from "../src/scenes/laboratory/lib/tubeLiquidMaterial";
@@ -19,7 +20,7 @@ function fixture(kind: ReactionKind | null, withCopper = false) {
   parent.add(root);
   const geometry = new THREE.CylinderGeometry(0.007, 0.007, 0.055, 16);
   geometry.translate(0, 0.028, 0);
-  const baseline = new TubeLiquidMaterial(geometry, { color: kind === "permanganate-redox" ? "#6a0dad" : "#eef6fb", opacity: 0.3 });
+  const baseline = new TubeLiquidMaterial(geometry, { color: kind === "permanganate-redox" ? REAGENTS.kmno4.contentsColor : "#eef6fb", opacity: 0.3 });
   const volume = new THREE.Mesh(geometry, baseline);
   volume.name = "ContentsVolume";
   const shellGeometry = new THREE.CylinderGeometry(0.0098, 0.0098, 0.15, 16);
@@ -354,6 +355,25 @@ describe("tube reaction rendering contract", () => {
     expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
   });
 
+  it("makes AgCl opaque with flocs within 0.1 s and BaSO4 milky within 0.2 s", () => {
+    const silver = fixture("silver-chloride");
+    silver.update(chemistry(0.1 / 12));
+    expect(liquid(silver).uniforms.uCloudiness.value).toBeGreaterThan(0.7);
+    const flocs = silver.get<THREE.InstancedMesh>("TubePrecipitate");
+    expect(flocs.visible).toBe(true);
+    expect(particleBounds(flocs).max.y).toBeGreaterThan(0);
+
+    const barium = fixture("barium-sulfate");
+    barium.update(chemistry(0.2 / 45));
+    expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);
+    barium.update(chemistry(15 / 45));
+    expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);
+    expect(barium.get("TubeSediment").visible).toBe(false);
+    barium.update(chemistry(25 / 45));
+    expect(liquid(barium).uniforms.uCloudiness.value).toBeLessThan(1);
+    expect(barium.get("TubeSediment").visible).toBe(true);
+  });
+
   it("decolorizes permanganate while keeping its water surface visible", () => {
     const f = fixture("permanganate-redox");
     f.update(chemistry(1));
@@ -368,6 +388,8 @@ describe("tube reaction rendering contract", () => {
     const f = fixture("permanganate-redox");
     f.update(chemistry(0.0001));
     const active = liquid(f);
+    expect(f.baseline.uniforms.uBaseColor.value.getHexString()).toBe("9c1c6b");
+    expect(active.uniforms.uBaseColor.value.getHexString()).toBe("9c1c6b");
     expect(active.side).toBe(f.baseline.side);
     expect(active.depthWrite).toBe(f.baseline.depthWrite);
     expect(active.roughness).toBe(f.baseline.roughness);
