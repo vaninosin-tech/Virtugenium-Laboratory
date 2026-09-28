@@ -14,7 +14,7 @@ afterEach(() => {
 });
 const chemistry = (progress = 0.5, rate = 0, temperature = 0): TubeChemistry => ({ progress, rate, temperature });
 
-function fixture(kind: ReactionKind | null, withCopper = false) {
+function fixture(kind: ReactionKind | null, withCopper = false, pour = false) {
   const parent = new THREE.Group();
   const root = new THREE.Group();
   parent.add(root);
@@ -33,7 +33,7 @@ function fixture(kind: ReactionKind | null, withCopper = false) {
   root.add(volume, shell);
   const copper = withCopper ? createTubeCopperGranules(geometry) : null;
   if (copper) root.add(copper);
-  const visuals = createTubeReactionVisuals(root, kind)!;
+  const visuals = createTubeReactionVisuals(root, kind, { activeSurface: true, pour })!;
   const get = <T extends THREE.Mesh = THREE.Mesh>(name: string) => root.getObjectByName(name) as T;
   let time = 0;
   const update = (state: TubeChemistry, quality: RuntimeQuality = "HIGH", splashAge = Infinity) => {
@@ -54,6 +54,17 @@ function fixture(kind: ReactionKind | null, withCopper = false) {
 type Fixture = ReturnType<typeof fixture>;
 
 function liquid(f: Fixture) { return f.volume.material as TubeLiquidMaterial; }
+function waveRange(f: Fixture) {
+  const heights = f.get("TubeLiquidSurface").geometry.getAttribute("tubeWave").array;
+  return Math.max(...heights) - Math.min(...heights);
+}
+function maxWaveSlope(f: Fixture) {
+  const normal = f.get("TubeLiquidSurface").geometry.getAttribute("normal");
+  let greatest = 0;
+  for (let i = 0; i < normal.count; i++) greatest = Math.max(greatest,
+    Math.hypot(normal.getX(i), normal.getZ(i)));
+  return greatest;
+}
 function density(f: Fixture): number {
   return (f.get("TubeNO2Headspace").material as THREE.ShaderMaterial).uniforms.uDensity.value;
 }
@@ -154,6 +165,38 @@ describe("tube reaction rendering contract", () => {
     f.advance(3, chemistry(0));
     expect(surfaceError(f)).toBeLessThan(1e-4);
     expect(surfaceError(f)).toBeLessThan(moving * 0.01);
+  });
+
+  it("runs and damps a surface wave after tilt while still water stays smooth", () => {
+    const f = fixture(null);
+    f.advance(1, chemistry(0));
+    expect(waveRange(f)).toBe(0);
+    f.root.rotation.x = THREE.MathUtils.degToRad(20);
+    f.advance(0.2, chemistry(0));
+    expect(waveRange(f)).toBeGreaterThan(0.00001);
+    f.advance(4, chemistry(0));
+    expect(waveRange(f)).toBeLessThan(0.00001);
+  });
+
+  it("disturbs the surface on pouring, bubbling and boiling at both quality levels", () => {
+    const poured = fixture(null, false, true);
+    poured.update(chemistry(0), "LOW");
+    expect(poured.get("TubeLiquidSurface").geometry.userData.waveCells).toBe(13);
+    expect(waveRange(poured)).toBeGreaterThan(0);
+    expect(maxWaveSlope(poured)).toBeGreaterThan(0.05);
+    poured.advance(0.08, chemistry(0), "LOW");
+    expect(maxWaveSlope(poured)).toBeGreaterThan(0.02);
+    poured.advance(4, chemistry(0), "LOW");
+    expect(waveRange(poured)).toBeLessThan(0.00001);
+
+    const copper = fixture("copper-nitric");
+    copper.advance(3, chemistry(0.4, 1), "HIGH");
+    expect(copper.get("TubeLiquidSurface").geometry.userData.waveCells).toBe(25);
+    expect(waveRange(copper)).toBeGreaterThan(0);
+
+    const heated = fixture(null);
+    heated.advance(1, chemistry(0, 0, 1), "LOW");
+    expect(waveRange(heated)).toBeGreaterThan(0);
   });
 
   it.each<RuntimeQuality>(["LOW", "HIGH"])("accumulates headspace gas and an outlet plume, then retains and decays them at %s", quality => {

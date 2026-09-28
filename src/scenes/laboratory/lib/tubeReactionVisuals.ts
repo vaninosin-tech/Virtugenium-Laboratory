@@ -18,8 +18,139 @@ export const TUBE_VISUALS = {
   settlingEnd: 0.94,
 };
 
+/** Small damped height field shared by the cap vertices; no waves at rest. */
+class TubeSurfaceWaves {
+  readonly geometry: THREE.BufferGeometry;
+  private readonly radius: number;
+  private cells = 0;
+  private height = new Float32Array(0);
+  private velocity = new Float32Array(0);
+  private next = new Float32Array(0);
+  private mask = new Uint8Array(0);
+
+  constructor(radius: number) {
+    this.radius = radius;
+    const rings = 12, sectors = 48;
+    const positions = [0, 0, 0];
+    const normals = [0, 1, 0];
+    const waves = [0];
+    const indices: number[] = [];
+    for (let ring = 1; ring <= rings; ring++) {
+      const r = radius * ring / rings;
+      for (let sector = 0; sector < sectors; sector++) {
+        const angle = sector * Math.PI * 2 / sectors;
+        positions.push(Math.cos(angle) * r, 0, -Math.sin(angle) * r);
+        normals.push(0, 1, 0);
+        waves.push(0);
+        const current = 1 + (ring - 1) * sectors + sector;
+        const next = 1 + (ring - 1) * sectors + (sector + 1) % sectors;
+        if (ring === 1) indices.push(0, current, next);
+        else {
+          const inner = current - sectors;
+          const innerNext = next - sectors;
+          indices.push(inner, current, next, inner, next, innerNext);
+        }
+      }
+    }
+    this.geometry = new THREE.BufferGeometry();
+    this.geometry.setIndex(indices);
+    this.geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    this.geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+    this.geometry.setAttribute("tubeWave", new THREE.Float32BufferAttribute(waves, 1));
+    this.geometry.setAttribute("tubeSurface", new THREE.Float32BufferAttribute(new Float32Array(waves.length).fill(1), 1));
+  }
+
+  setQuality(quality: RuntimeQuality) {
+    const cells = quality === "LOW" ? 13 : quality === "MEDIUM" ? 19 : 25;
+    if (cells === this.cells) return;
+    this.cells = cells;
+    this.height = new Float32Array(cells * cells);
+    this.velocity = new Float32Array(cells * cells);
+    this.next = new Float32Array(cells * cells);
+    this.mask = new Uint8Array(cells * cells);
+    for (let z = 0; z < cells; z++) for (let x = 0; x < cells; x++) {
+      const nx = 2 * x / (cells - 1) - 1, nz = 2 * z / (cells - 1) - 1;
+      this.mask[z * cells + x] = nx * nx + nz * nz <= 1 ? 1 : 0;
+    }
+    this.geometry.userData.waveCells = cells;
+  }
+
+  reset() {
+    this.height.fill(0); this.velocity.fill(0); this.next.fill(0);
+    this.updateGeometry();
+  }
+
+  impulse(x: number, z: number, amplitude: number, spread = 0.18) {
+    if (!this.cells) return;
+    const n = this.cells, inv = 1 / (spread * spread);
+    for (let iz = 0; iz < n; iz++) for (let ix = 0; ix < n; ix++) {
+      const index = iz * n + ix;
+      if (!this.mask[index]) continue;
+      const dx = 2 * ix / (n - 1) - 1 - x, dz = 2 * iz / (n - 1) - 1 - z;
+      this.height[index] += amplitude * Math.exp(-3 * (dx * dx + dz * dz) * inv);
+    }
+  }
+
+  advance(dt: number) {
+    const n = this.cells;
+    if (!n) return;
+    const steps = Math.max(1, Math.ceil(dt * 60));
+    const step = dt / steps;
+    const stiffness = Math.pow(1.3 * (n - 1) / 2, 2);
+    for (let frame = 0; frame < steps; frame++) {
+      let sum = 0, count = 0;
+      for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) {
+        const i = z * n + x;
+        if (!this.mask[i]) continue;
+        const h = this.height[i];
+        const left = x > 0 && this.mask[i - 1] ? this.height[i - 1] : h;
+        const right = x + 1 < n && this.mask[i + 1] ? this.height[i + 1] : h;
+        const back = z > 0 && this.mask[i - n] ? this.height[i - n] : h;
+        const front = z + 1 < n && this.mask[i + n] ? this.height[i + n] : h;
+        this.velocity[i] = (this.velocity[i] + (left + right + back + front - 4 * h) * stiffness * step)
+          * Math.exp(-4.5 * step);
+        this.next[i] = h + this.velocity[i] * step;
+        sum += this.next[i]; count++;
+      }
+      const mean = count ? sum / count : 0;
+      for (let i = 0; i < this.next.length; i++) if (this.mask[i]) this.next[i] -= mean;
+      [this.height, this.next] = [this.next, this.height];
+    }
+    this.updateGeometry();
+  }
+
+  private sample(x: number, z: number) {
+    const n = this.cells;
+    if (!n) return 0;
+    const gx = THREE.MathUtils.clamp((x + 1) * (n - 1) / 2, 0, n - 1.001);
+    const gz = THREE.MathUtils.clamp((z + 1) * (n - 1) / 2, 0, n - 1.001);
+    const ix = Math.floor(gx), iz = Math.floor(gz), fx = gx - ix, fz = gz - iz;
+    const a = iz * n + ix, b = a + n;
+    return THREE.MathUtils.lerp(THREE.MathUtils.lerp(this.height[a], this.height[a + 1], fx),
+      THREE.MathUtils.lerp(this.height[b], this.height[b + 1], fx), fz);
+  }
+
+  private updateGeometry() {
+    const position = this.geometry.getAttribute("position");
+    const normal = this.geometry.getAttribute("normal");
+    const wave = this.geometry.getAttribute("tubeWave");
+    const epsilon = 2 / Math.max(1, this.cells - 1);
+    for (let i = 0; i < position.count; i++) {
+      const x = position.getX(i) / this.radius, z = position.getZ(i) / this.radius;
+      wave.setX(i, this.sample(x, z));
+      const dx = (this.sample(x + epsilon, z) - this.sample(x - epsilon, z)) / (2 * epsilon * this.radius);
+      const dz = (this.sample(x, z + epsilon) - this.sample(x, z - epsilon)) / (2 * epsilon * this.radius);
+      const inv = 1 / Math.hypot(dx, 1, dz);
+      normal.setXYZ(i, -dx * inv, inv, -dz * inv);
+    }
+    wave.needsUpdate = true;
+    normal.needsUpdate = true;
+  }
+}
+
 /** Fixed pools survive progress updates, including seeking backwards in F8. */
-export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKind | null) {
+export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKind | null,
+  options: { activeSurface?: boolean; pour?: boolean } = {}) {
   let cavity: THREE.Mesh | undefined;
   let shell: THREE.Mesh | undefined;
   root.traverse((object) => {
@@ -66,9 +197,14 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   profile.push(new THREE.Vector2(radius, box.max.y + radius));
   const wallGeometry = new THREE.LatheGeometry(profile, 48);
   wallGeometry.setAttribute("tubeSurface", new THREE.Float32BufferAttribute(new Float32Array(wallGeometry.attributes.position.count), 1));
-  const capGeometry = new THREE.CircleGeometry(radius, 48);
-  capGeometry.rotateX(-Math.PI / 2);
-  capGeometry.setAttribute("tubeSurface", new THREE.Float32BufferAttribute(new Float32Array(capGeometry.attributes.position.count).fill(1), 1));
+  wallGeometry.setAttribute("tubeWave", new THREE.Float32BufferAttribute(new Float32Array(wallGeometry.attributes.position.count), 1));
+  const waveSurface = options.activeSurface ? new TubeSurfaceWaves(radius) : null;
+  const capGeometry = waveSurface?.geometry ?? new THREE.CircleGeometry(radius, 48);
+  if (!waveSurface) {
+    capGeometry.rotateX(-Math.PI / 2);
+    capGeometry.setAttribute("tubeSurface", new THREE.Float32BufferAttribute(new Float32Array(capGeometry.attributes.position.count).fill(1), 1));
+    capGeometry.setAttribute("tubeWave", new THREE.Float32BufferAttribute(new Float32Array(capGeometry.attributes.position.count), 1));
+  }
   const hasLiquid = base instanceof TubeLiquidMaterial && volume.visible;
   if (hasLiquid) volume.geometry = wallGeometry;
 
@@ -81,6 +217,7 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const cap = new THREE.Mesh(capGeometry, baseline);
   cap.name = "TubeLiquidSurface";
   cap.visible = hasLiquid;
+  cap.frustumCulled = false;
   cap.raycast = () => {};
   group.add(cap);
   const geometry = new THREE.IcosahedronGeometry(1, 1);
@@ -293,6 +430,9 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   let bubbleStopAge = Infinity;
   let wasProducingBubbles = false;
   let bariumCompletionAge = 0;
+  let pendingPour = !!options.pour;
+  let heatPulseAge = 0;
+  const previousBubbleRise = new Float32Array(72).fill(-1);
   const releasedBubbles: { position: THREE.Vector3; scale: THREE.Vector3 }[] = [];
   const releasedAttached: { position: THREE.Vector3; scale: THREE.Vector3 }[] = [];
   const snapshotBubbles = (pool: THREE.InstancedMesh, target: typeof releasedBubbles) => {
@@ -332,11 +472,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const reverseTime = lastTime !== undefined && time < lastTime;
       const dt = lastTime === undefined ? 0 : THREE.MathUtils.clamp(time - lastTime, 0, 0.1);
       lastTime = time;
+      waveSurface?.setQuality(quality);
       volume.updateWorldMatrix(true, false);
       const e = volume.matrixWorld.elements;
       const targetX = -e[1] / Math.max(0.001, e[5]);
       const targetZ = -e[9] / Math.max(0.001, e[5]);
       if (!motionReady) { slope.set(targetX, targetZ); motionReady = true; }
+      const previousSlopeX = slope.x, previousSlopeZ = slope.y;
       // Same bounded spring integration as inspectionSlosh, driven by actual
       // matrix motion instead of its scripted bottle-inspection animation.
       for (let t = 0; t < dt;) {
@@ -355,7 +497,25 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         gasDensity = 0; gasFront = 0; mouthFill = 0; wallResidue = 0; bubblePhase = 0; surfaceActivity = 0;
         residueAge = 0; residueAtStop = 0; bubbleStopAge = Infinity; wasProducingBubbles = false;
         bariumCompletionAge = 0;
+        heatPulseAge = 0; previousBubbleRise.fill(-1); waveSurface?.reset();
         releasedBubbles.length = 0; releasedAttached.length = 0;
+      }
+      if (waveSurface && hasLiquid) {
+        if (pendingPour) {
+          waveSurface.impulse(0.12, -0.08, radius * 0.11, 0.28);
+          pendingPour = false;
+        }
+        const dx = slope.x - previousSlopeX, dz = slope.y - previousSlopeZ;
+        const movement = Math.hypot(dx, dz);
+        if (movement > 0.001) waveSurface.impulse(dx / movement * 0.76, dz / movement * 0.76,
+          Math.min(radius * 0.08, radius * 0.22 * movement), 0.27);
+        heatPulseAge += dt * THREE.MathUtils.smoothstep(temperature, 0.72, 1);
+        if (heatPulseAge > 0.14) {
+          heatPulseAge -= 0.14;
+          const phase = time * 19.7;
+          waveSurface.impulse(Math.sin(phase) * 0.52, Math.cos(phase * 0.83) * 0.52,
+            radius * 0.025, 0.22);
+        }
       }
       bubblePhase += dt * (0.3 + rate * 0.4);
       const drive = kind === "copper-nitric" && p > 0 && p < 0.999 ? rate : 0;
@@ -558,6 +718,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           if (radialDistance > radius * 0.84) { bubblePoint.x *= radius * 0.84 / radialDistance; bubblePoint.z *= radius * 0.84 / radialDistance; }
           const coldGate = rate > 0.05 || (time + random(i + 14) * 5) % 4 < 1.5;
           const bubbleSize = coldGate ? radius * (0.095 + Math.pow(random(i + 241), 2) * 0.21) : 0;
+          if (waveSurface && producingBubbles && bubbleSize > 0 && previousBubbleRise[i] >= 0
+              && (rise > 0.97 && previousBubbleRise[i] <= 0.97
+                || rise < previousBubbleRise[i] && previousBubbleRise[i] > 0.9)) {
+            waveSurface.impulse((bubblePoint.x - center.x) / radius,
+              (bubblePoint.z - center.z) / radius, radius * (0.018 + rate * 0.018), 0.20);
+          }
+          previousBubbleRise[i] = rise;
           place(bubbles, i, bubblePoint.x, bubblePoint.y, bubblePoint.z, bubbleSize, bubbleSize * (bubbleSize > radius * 0.1 ? 0.82 : 1), bubbleSize);
         }
         if (gas.visible && i < gas.count) {
@@ -585,6 +752,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         }
       }
       for (const mesh of [flakes, bubbles, gas, splash, condensate, foam]) if (mesh.visible) mesh.instanceMatrix.needsUpdate = true;
+      if (!producingBubbles) previousBubbleRise.fill(-1);
+      if (waveSurface && hasLiquid) waveSurface.advance(dt);
     },
     dispose() {
       if (disposed) return;

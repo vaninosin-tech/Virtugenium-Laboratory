@@ -92,7 +92,11 @@ export function LabTestTubeInstance({
     const configs = resolveTubeContents(contents);
     const binding = fillTestTubeContents(instance, configs);
     const kind = reactionKindFor(contents ?? []);
-    visuals.current = configs.length || inStand ? createTubeReactionVisuals(instance, kind) : null;
+    visuals.current = configs.length || inStand
+      ? createTubeReactionVisuals(instance, kind, {
+        activeSurface: inStand && !(import.meta.env.DEV && import.meta.env.VITE_TUBE_WAVES === "0"),
+        pour: inStand && configs.length > 0,
+      }) : null;
     return () => {
       visuals.current?.dispose();
       visuals.current = null;

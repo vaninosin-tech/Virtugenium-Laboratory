@@ -40,6 +40,8 @@ const iteration17 = process.env.VISUAL_ITERATION_17 === "1";
 const iteration18 = process.env.VISUAL_ITERATION_18 === "1";
 const iteration19 = process.env.VISUAL_ITERATION_19 === "1";
 const iteration20 = process.env.VISUAL_ITERATION_20 === "1";
+const iteration21 = process.env.VISUAL_ITERATION_21 === "1";
+const iteration21Baseline = process.env.VISUAL_ITERATION_21_BASELINE === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -71,6 +73,27 @@ async function shot(name, group, timing = {}) {
     if (errors.length) throw new Error(`Browser errors after ${name}: ${errors.join("\n")}`);
     return;
   }
+  if (iteration21 && !iteration21Baseline) {
+    const surface = await captureSession.send("Page.captureScreenshot", {
+      format: "png", fromSurface: true, captureBeyondViewport: false,
+      clip: { x: 675, y: 350, width: 250, height: 210, scale: 1 },
+    });
+    await writeFile(resolve(out, `${name}-surface.png`), Buffer.from(surface.data, "base64"));
+    if (name.endsWith("-calm") || name.endsWith("-0p22s") || name.endsWith("-bubbles-0s")) {
+      const tube = await captureSession.send("Page.captureScreenshot", {
+        format: "png", fromSurface: true, captureBeyondViewport: false,
+        clip: { x: 600, y: 250, width: 400, height: 500, scale: 1 },
+      });
+      await writeFile(resolve(out, `${name}-tube.png`), Buffer.from(tube.data, "base64"));
+    }
+    const after = await page.evaluate(() => window.__reactionCapture.read());
+    frames.push({ name, group, ...timing, before, after,
+      elapsedSeconds: timing.originMs == null ? null : (before.nowMs - timing.originMs) / 1000,
+      screenshotDurationMs: after.nowMs - before.nowMs });
+    console.log(`${name}: p=${before.chemistry.progress.toFixed(4)} rate=${before.chemistry.rate.toFixed(4)} temp=${before.chemistry.temperature.toFixed(4)}`);
+    if (errors.length) throw new Error(`Browser errors after ${name}: ${errors.join("\n")}`);
+    return;
+  }
   const { data } = await captureSession.send("Page.captureScreenshot", {
     format: "png", fromSurface: true, optimizeForSpeed: true, captureBeyondViewport: false,
   });
@@ -80,14 +103,21 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (iteration20 || iteration19 || iteration18 || iteration17 || iteration16 || iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (iteration21 || iteration20 || iteration19 || iteration18 || iteration17 || iteration16 || iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
       format: "png", fromSurface: true, captureBeyondViewport: false,
-      clip: { ...tubeCrop, scale: 1 },
+      clip: { ...(iteration21 && !iteration21Baseline ? { x: 600, y: 250, width: 400, height: 500 } : tubeCrop), scale: 1 },
     });
     await writeFile(resolve(out, `${name}-tube.png`), Buffer.from(close.data, "base64"));
+    if (iteration21) {
+      const surface = await captureSession.send("Page.captureScreenshot", {
+        format: "png", fromSurface: true, captureBeyondViewport: false,
+        clip: { x: 675, y: 350, width: 250, height: 210, scale: 1 },
+      });
+      await writeFile(resolve(out, `${name}-surface.png`), Buffer.from(surface.data, "base64"));
+    }
     if (iteration18 || iteration19 || iteration20) {
       const liquidShot = await captureSession.send("Page.captureScreenshot", {
         format: "png", fromSurface: true, captureBeyondViewport: false,
@@ -249,7 +279,8 @@ async function warmupShaders(quality) {
   }, quality);
   try {
     for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => iteration20
-      ? kind === "barium-sulfate" : !(iteration15 || iteration16 || iteration17) || kind === "copper-nitric")) {
+      ? kind === "barium-sulfate" : iteration21 ? kind === "copper-nitric"
+        : !(iteration15 || iteration16 || iteration17) || kind === "copper-nitric")) {
       await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
       await page.evaluate(reagents => {
         window.__tubeVisualTuningStore.setState({ enabled: true,
@@ -337,7 +368,7 @@ async function stopHeat() {
   return page.evaluate(() => window.__reactionCapture.event("cool: rendered flame-off pose"));
 }
 
-async function measureFps() {
+async function measureFps(label = "runtime") {
   // One browser-side sample, no screenshots or cross-process polling during
   // the interval. rAF cadence describes this host/browser, not an i3 benchmark.
   const sample = await page.evaluate(() => new Promise(resolve => {
@@ -356,8 +387,45 @@ async function measureFps() {
     }
     requestAnimationFrame(tick);
   }));
-  performanceSamples.push(sample);
-  console.log(`${sample.before.quality}: ${sample.averageFps.toFixed(1)} FPS, p99 ${sample.p99FrameDtMs.toFixed(1)}ms (host rAF)`);
+  performanceSamples.push({ label, ...sample });
+  console.log(`${label}/${sample.before.quality}: ${sample.averageFps.toFixed(1)} FPS, p99 ${sample.p99FrameDtMs.toFixed(1)}ms (host rAF)`);
+  return sample;
+}
+
+async function showSurfaceFromAbove() {
+  await page.evaluate(async () => {
+    const loaded = performance.getEntriesByType("resource").map(entry => entry.name);
+    const fiberUrl = loaded.findLast(name => new URL(name).pathname.endsWith("/@react-three_fiber.js"));
+    const focusUrl = loaded.findLast(name => new URL(name).pathname === "/src/scenes/laboratory/lib/useTubeCloseUpStore.ts");
+    if (!fiberUrl || !focusUrl) throw new Error("Wave capture camera modules unavailable");
+    const [{ _roots }, { TUBE_FOCUS }] = await Promise.all([import(fiberUrl), import(focusUrl)]);
+    const root = _roots.get(document.querySelector("canvas"));
+    if (!root) throw new Error("Wave capture R3F root unavailable");
+    const state = root.store.getState();
+    const initial = state.camera.position.clone();
+    const front = initial.sub(TUBE_FOCUS.point).setY(0).normalize();
+    const subscriber = { priority: 0.5, store: root.store, ref: { current: current => {
+      let closest = null, distance = Infinity;
+      current.scene.traverse(object => {
+        if (object.name !== "TubeLiquidSurface" || !object.visible) return;
+        const level = object.material.uniforms?.uLevel?.value ?? 0;
+        const point = object.localToWorld(current.camera.position.clone().set(0, level, 0));
+        const d = point.distanceToSquared(TUBE_FOCUS.point);
+        if (d < distance) { distance = d; closest = point; }
+      });
+      if (!closest) return;
+      current.camera.position.copy(closest).addScaledVector(front, 0.105);
+      current.camera.position.y += 0.08;
+      current.camera.lookAt(closest);
+      current.camera.updateMatrixWorld();
+    } } };
+    state.internal.subscribers.push(subscriber);
+    state.internal.subscribers.sort((a, b) => a.priority - b.priority);
+    window.__waveCameraRelease = () => {
+      state.internal.subscribers = state.internal.subscribers.filter(item => item !== subscriber);
+    };
+  });
+  await settle(350);
 }
 
 async function contactSheets() {
@@ -487,6 +555,54 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (iteration21) {
+      await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
+      await page.evaluate(quality => {
+        const h = window.__reactionCapture;
+        h.quality.getState().setMode(quality);
+        h.closeUp.getState().setViewing(true);
+        window.__tubeVisualTuningStore.setState({ enabled: false, tiltDegrees: 0 });
+        window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, "hno3");
+      }, quality);
+      await settle(1600);
+      await measureFps(iteration21Baseline ? "before-calm" : "after-calm");
+      if (!iteration21Baseline) {
+        await showSurfaceFromAbove();
+        await shot(`water-${quality}-calm`, `water-${quality}`);
+        const tiltedAt = await page.evaluate(() => {
+          window.__tubeVisualTuningStore.setState({ tiltDegrees: 20 });
+          return performance.now();
+        });
+        await series(`water-${quality}-tilt`, tiltedAt, [0.08, 0.22, 0.48]);
+        await page.evaluate(() => window.__tubeVisualTuningStore.setState({ tiltDegrees: 0 }));
+        await settle(3500);
+        const pouredAt = await page.evaluate(() => {
+          window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, "nacl");
+          return performance.now();
+        });
+        await series(`water-${quality}-pour`, pouredAt, [0.08, 0.24]);
+        await page.evaluate(() => window.__tubeVisualTuningStore.setState({
+          enabled: true, progress: 0, rate: 0, temperature: 1, tiltDegrees: 0,
+        }));
+        await settle(1800);
+        await shot(`water-${quality}-boiling`, `water-${quality}`);
+        await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      }
+      await prepare("copper-nitric", quality);
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({
+        enabled: true, progress: 0.5, rate: 1, temperature: 0, tiltDegrees: 0,
+      }));
+      await settle(2700);
+      if (!iteration21Baseline) {
+        const bubblingAt = await page.evaluate(() => performance.now());
+        await series(`copper-nitric-${quality}-bubbles`, bubblingAt, [0, 0.18]);
+        await page.evaluate(() => window.__waveCameraRelease?.());
+        await settle(350);
+      }
+      await measureFps(iteration21Baseline ? "before-bubbles" : "after-bubbles");
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      continue;
+    }
     if (iteration20) {
       await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
       await page.evaluate(quality => {
@@ -945,10 +1061,12 @@ try {
       events.push(...data.events);
     } catch (error) { errors.push(`Collect trace: ${error.message}`); process.exitCode = 1; }
   }
-  try { if (!iteration16 && !iteration17 && !iteration18 && !iteration19 && !iteration20) await contactSheets(); }
+  try { if (!iteration16 && !iteration17 && !iteration18 && !iteration19 && !iteration20 && !iteration21) await contactSheets(); }
   catch (error) { errors.push(`Contact sheets: ${error.message}`); process.exitCode = 1; }
   try {
-    await writeFile(resolve(out, iteration16 || iteration17 || iteration18 || iteration19 || iteration20 ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
+    await writeFile(resolve(out, iteration21Baseline ? `capture-baseline-${qualities.join("-")}.json`
+      : iteration16 || iteration17 || iteration18 || iteration19 || iteration20 || iteration21
+        ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
       status: failure || errors.length ? "failed" : "complete", failure: failure ? String(failure.stack ?? failure) : null,
       frames, traces, events, errors, performanceSamples, browser: browser?.version(), angle, viewport, crop,
       selection: { cases: selectedCases, qualities, quick },

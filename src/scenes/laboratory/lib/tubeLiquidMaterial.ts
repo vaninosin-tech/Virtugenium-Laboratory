@@ -22,18 +22,20 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       shader.uniforms.uEdgeAlpha = { value: TUBE_LIQUID.edgeAlpha };
       shader.uniforms.uMeniscusAlpha = { value: TUBE_LIQUID.meniscusAlpha };
       shader.uniforms.uClearHighlight = { value: TUBE_LIQUID.clearHighlight };
-      shader.vertexShader = `attribute float tubeSurface;
+      shader.vertexShader = `attribute float tubeSurface; attribute float tubeWave;
 uniform vec3 uUp; uniform float uLevel;
 uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
-varying vec3 vTubePoint; varying float vCap;
+varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
 ${shader.vertexShader}`.replace("#include <beginnormal_vertex>", `#include <beginnormal_vertex>
-if (tubeSurface > 0.5) objectNormal = uUp;`).replace("#include <begin_vertex>", `#include <begin_vertex>
+vTubeWaveSlope = tubeSurface > 0.5 ? dot(normal.xz, vec2(0.78, 0.62)) : 0.0;
+if (tubeSurface > 0.5) objectNormal = normalize(uUp + vec3(normal.x, 0.0, normal.z));`).replace("#include <begin_vertex>", `#include <begin_vertex>
 vCap = tubeSurface;
 if (tubeSurface > 0.5) {
   transformed.y = (uLevel - dot(uUp.xz, position.xz)) / max(uUp.y, 0.2);
   // Small wetting rise at the wall, not a tilted solid disk.
   float radial = length((position.xz - uBoundsMin.xz - uBoundsSize.xz * 0.5) / (uBoundsSize.xz * 0.5));
   transformed.y += 0.00035 * pow(radial, 12.0);
+  transformed.y += tubeWave;
 }
 vTubePoint = transformed;`);
       shader.fragmentShader = `uniform vec3 uBaseColor; uniform vec3 uReactionColor;
@@ -42,7 +44,7 @@ uniform float uClearAlpha; uniform float uEdgeAlpha; uniform float uMeniscusAlph
 uniform vec3 uUp; uniform float uLevel; uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
 uniform float uReactionKind; uniform float uRate; uniform float uTemperature; uniform float uTime;
 uniform float uResidualHaze; uniform float uWallFilm;
-varying vec3 vTubePoint; varying float vCap;
+varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
 float tubeNoise(vec3 p) {
   vec3 i = floor(p), f = smoothstep(0.0, 1.0, fract(p));
   float n = dot(i, vec3(1.0, 57.0, 113.0));
@@ -108,7 +110,8 @@ float filmPatch = smoothstep(0.42, 0.67, filmGrain);
 float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
   * (0.10 + 0.55 * filmPatch) * mix(0.55, 1.0, wallSide);
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity)
-  + cloud * mix(1.25, 0.72, milk) + raspberry * 0.28 + film * 0.60, 0.0, 0.995);`)
+  + cloud * mix(1.25, 0.72, milk) + raspberry * 0.28 + film * 0.60
+  + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
 vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
@@ -123,8 +126,12 @@ outgoingLight = mix(mix(clearLight, coloredLight, pigment),
   mix(vec3(0.91 + 0.07 * relief), vec3(0.80 + 0.06 * relief), milk),
   clamp(cloud * mix(1.0, 0.88, milk), 0.0, 1.0));
 outgoingLight = mix(outgoingLight, vec3(0.93), film * 0.80);
+float waveBright = vCap * clamp(vTubeWaveSlope * 10.0, 0.0, 1.0);
+float waveDark = vCap * clamp(-vTubeWaveSlope * 10.0, 0.0, 1.0);
+outgoingLight = mix(outgoingLight, vec3(0.90, 0.97, 1.0), waveBright * 0.85);
+outgoingLight *= 1.0 - waveDark * 0.55;
 #include <opaque_fragment>`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v7"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v9-waves"; }
 }
