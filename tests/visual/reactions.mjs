@@ -44,6 +44,8 @@ const iteration21 = process.env.VISUAL_ITERATION_21 === "1";
 const iteration21Baseline = process.env.VISUAL_ITERATION_21_BASELINE === "1";
 const iteration22 = process.env.VISUAL_ITERATION_22 === "1";
 const iteration22Baseline = process.env.VISUAL_ITERATION_22_BASELINE === "1";
+const iteration23 = process.env.VISUAL_ITERATION_23 === "1";
+const iteration23Baseline = process.env.VISUAL_ITERATION_23_BASELINE === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -109,6 +111,19 @@ async function shot(name, group, timing = {}) {
       });
       await writeFile(resolve(out, `${name}-close.png`), Buffer.from(close.data, "base64"));
     }
+    const after = await page.evaluate(() => window.__reactionCapture.read());
+    frames.push({ name, group, ...timing, before, after });
+    if (errors.length) throw new Error(`Browser errors after ${name}: ${errors.join("\n")}`);
+    return;
+  }
+  if (iteration23) {
+    const clip = name.includes("meniscus")
+      ? { x: 675, y: 350, width: 250, height: 210, scale: 1 }
+      : { x: 575, y: 65, width: 450, height: 710, scale: 1 };
+    const { data } = await captureSession.send("Page.captureScreenshot", {
+      format: "png", fromSurface: true, captureBeyondViewport: false, clip,
+    });
+    await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
     const after = await page.evaluate(() => window.__reactionCapture.read());
     frames.push({ name, group, ...timing, before, after });
     if (errors.length) throw new Error(`Browser errors after ${name}: ${errors.join("\n")}`);
@@ -298,7 +313,7 @@ async function warmupShaders(quality) {
     h.closeUp.getState().setViewing(true);
   }, quality);
   try {
-    for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => iteration22
+    for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => iteration23 || iteration22
       ? kind === "copper-nitric" : iteration20
       ? kind === "barium-sulfate" : iteration21 ? kind === "copper-nitric"
         : !(iteration15 || iteration16 || iteration17) || kind === "copper-nitric")) {
@@ -617,6 +632,59 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (iteration23) {
+      const prefix = `${iteration23Baseline ? "before" : "after"}-${quality}`;
+      const captureWater = process.env.VISUAL_23_SKIP_WATER !== "1";
+      const variantFilter = process.env.VISUAL_23_VARIANT ?? "all";
+      await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
+      await page.evaluate(quality => {
+        const h = window.__reactionCapture;
+        h.quality.getState().setMode(quality);
+        h.closeUp.getState().setViewing(true);
+        h.burner.getState().setLit(false);
+        window.__tubeVisualTuningStore.setState({ enabled: false, tiltDegrees: 0 });
+      }, quality);
+      await settle(1200);
+      if (captureWater) {
+        await showStandBehindTube();
+        await shot(`${prefix}-empty`, "meniscus-caustics");
+        await page.evaluate(() => window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, "hno3"));
+        await settle(800);
+        await shot(`${prefix}-water`, "meniscus-caustics");
+        await measureFps(`${iteration23Baseline ? "before" : "after"}-water`);
+        await page.evaluate(() => window.__refractionCameraRelease?.());
+        await showSurfaceFromAbove();
+        await shot(`${prefix}-meniscus-calm`, "meniscus-caustics");
+        await page.evaluate(() => window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, "nacl"));
+        await settle(80);
+        await shot(`${prefix}-meniscus-ripple`, "meniscus-caustics");
+        await page.evaluate(() => window.__waveCameraRelease?.());
+      }
+      if (variantFilter !== "none") await showStandBehindTube();
+      for (const variant of [
+        { name: "blue", contents: ["cu", "hno3"], progress: 0.85 },
+        { name: "raspberry", contents: ["kmno4", "h2so4", "na2so3"], progress: 0 },
+        { name: "cloudy", contents: ["bacl2", "k2so4"], progress: 0.12 },
+      ].filter(variant => variantFilter === "all" || variant.name === variantFilter)) {
+        await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
+        await page.evaluate(({ quality, variant }) => {
+          const h = window.__reactionCapture;
+          h.quality.getState().setMode(quality);
+          h.closeUp.getState().setViewing(true);
+          h.burner.getState().setLit(false);
+          for (const id of variant.contents) window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, id);
+          window.__tubeVisualTuningStore.setState({ enabled: true, progress: variant.progress,
+            rate: 0, temperature: 0, tiltDegrees: 0 });
+        }, { quality, variant });
+        await settle(1200);
+        await shot(`${prefix}-${variant.name}`, "meniscus-caustics");
+      }
+      await page.evaluate(() => {
+        window.__tubeVisualTuningStore.setState({ enabled: false, tiltDegrees: null });
+        window.__refractionCameraRelease?.();
+      });
+      continue;
+    }
     if (iteration22) {
       const prefix = `${iteration22Baseline ? "before" : "after"}-${quality}`;
       await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
@@ -1174,11 +1242,11 @@ try {
       events.push(...data.events);
     } catch (error) { errors.push(`Collect trace: ${error.message}`); process.exitCode = 1; }
   }
-  try { if (!iteration16 && !iteration17 && !iteration18 && !iteration19 && !iteration20 && !iteration21 && !iteration22) await contactSheets(); }
+  try { if (!iteration16 && !iteration17 && !iteration18 && !iteration19 && !iteration20 && !iteration21 && !iteration22 && !iteration23) await contactSheets(); }
   catch (error) { errors.push(`Contact sheets: ${error.message}`); process.exitCode = 1; }
   try {
-    await writeFile(resolve(out, iteration22Baseline || iteration21Baseline ? `capture-baseline-${qualities.join("-")}.json`
-      : iteration16 || iteration17 || iteration18 || iteration19 || iteration20 || iteration21 || iteration22
+    await writeFile(resolve(out, iteration23Baseline || iteration22Baseline || iteration21Baseline ? `capture-baseline-${qualities.join("-")}.json`
+      : iteration16 || iteration17 || iteration18 || iteration19 || iteration20 || iteration21 || iteration22 || iteration23
         ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
       status: failure || errors.length ? "failed" : "complete", failure: failure ? String(failure.stack ?? failure) : null,
       frames, traces, events, errors, performanceSamples, browser: browser?.version(), angle, viewport, crop,

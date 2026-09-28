@@ -22,19 +22,19 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       shader.uniforms.uEdgeAlpha = { value: TUBE_LIQUID.edgeAlpha };
       shader.uniforms.uMeniscusAlpha = { value: TUBE_LIQUID.meniscusAlpha };
       shader.uniforms.uClearHighlight = { value: TUBE_LIQUID.clearHighlight };
-      shader.vertexShader = `attribute float tubeSurface; attribute float tubeWave;
+      shader.vertexShader = `attribute float tubeSurface; attribute float tubeWave; attribute float tubeWaveSlope;
 uniform vec3 uUp; uniform float uLevel;
 uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
 varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
 ${shader.vertexShader}`.replace("#include <beginnormal_vertex>", `#include <beginnormal_vertex>
-vTubeWaveSlope = tubeSurface > 0.5 ? dot(normal.xz, vec2(0.78, 0.62)) : 0.0;
+vTubeWaveSlope = tubeSurface > 0.5 ? tubeWaveSlope : 0.0;
 if (tubeSurface > 0.5) objectNormal = normalize(uUp + vec3(normal.x, 0.0, normal.z));`).replace("#include <begin_vertex>", `#include <begin_vertex>
 vCap = tubeSurface;
 if (tubeSurface > 0.5) {
   transformed.y = (uLevel - dot(uUp.xz, position.xz)) / max(uUp.y, 0.2);
-  // Small wetting rise at the wall, not a tilted solid disk.
+  // A wetting rim rises 1.6 mm along the glass.
   float radial = length((position.xz - uBoundsMin.xz - uBoundsSize.xz * 0.5) / (uBoundsSize.xz * 0.5));
-  transformed.y += 0.00035 * pow(radial, 12.0);
+  transformed.y += 0.0016 * pow(clamp((radial - 0.67) / 0.33, 0.0, 1.0), 2.0);
   transformed.y += tubeWave;
 }
 vTubePoint = transformed;`);
@@ -130,6 +130,11 @@ float waveBright = vCap * clamp(vTubeWaveSlope * 10.0, 0.0, 1.0);
 float waveDark = vCap * clamp(-vTubeWaveSlope * 10.0, 0.0, 1.0);
 outgoingLight = mix(outgoingLight, vec3(0.90, 0.97, 1.0), waveBright * 0.85);
 outgoingLight *= 1.0 - waveDark * 0.55;
+float wetRim = vCap * smoothstep(0.432, 0.465, length(radial))
+  * (1.0 - smoothstep(0.482, 0.505, length(radial)));
+float reflectedWindow = 0.42 + 0.35 * clamp(vTubeWaveSlope * 2.5 + 0.5, 0.0, 1.0);
+outgoingLight = mix(outgoingLight, vec3(0.82, 0.94, 1.0), wetRim * reflectedWindow);
+diffuseColor.a = max(diffuseColor.a, wetRim * reflectedWindow * 0.65);
 #include <opaque_fragment>`);
     };
   }

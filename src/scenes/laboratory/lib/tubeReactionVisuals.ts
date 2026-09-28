@@ -18,9 +18,12 @@ export const TUBE_VISUALS = {
   settlingEnd: 0.94,
 };
 
+const MENISCUS_RISE = 0.0016;
+
 /** Small damped height field shared by the cap vertices; no waves at rest. */
 class TubeSurfaceWaves {
   readonly geometry: THREE.BufferGeometry;
+  activity = 0;
   private readonly radius: number;
   private cells = 0;
   private height = new Float32Array(0);
@@ -57,6 +60,7 @@ class TubeSurfaceWaves {
     this.geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     this.geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
     this.geometry.setAttribute("tubeWave", new THREE.Float32BufferAttribute(waves, 1));
+    this.geometry.setAttribute("tubeWaveSlope", new THREE.Float32BufferAttribute(new Float32Array(waves.length), 1));
     this.geometry.setAttribute("tubeSurface", new THREE.Float32BufferAttribute(new Float32Array(waves.length).fill(1), 1));
   }
 
@@ -134,16 +138,28 @@ class TubeSurfaceWaves {
     const position = this.geometry.getAttribute("position");
     const normal = this.geometry.getAttribute("normal");
     const wave = this.geometry.getAttribute("tubeWave");
+    const waveSlope = this.geometry.getAttribute("tubeWaveSlope");
     const epsilon = 2 / Math.max(1, this.cells - 1);
+    let peak = 0;
     for (let i = 0; i < position.count; i++) {
       const x = position.getX(i) / this.radius, z = position.getZ(i) / this.radius;
-      wave.setX(i, this.sample(x, z));
-      const dx = (this.sample(x + epsilon, z) - this.sample(x - epsilon, z)) / (2 * epsilon * this.radius);
-      const dz = (this.sample(x, z + epsilon) - this.sample(x, z - epsilon)) / (2 * epsilon * this.radius);
+      const height = this.sample(x, z);
+      wave.setX(i, height);
+      peak = Math.max(peak, Math.abs(height));
+      const waveDx = (this.sample(x + epsilon, z) - this.sample(x - epsilon, z)) / (2 * epsilon * this.radius);
+      const waveDz = (this.sample(x, z + epsilon) - this.sample(x, z - epsilon)) / (2 * epsilon * this.radius);
+      const r = Math.hypot(x, z);
+      const s = THREE.MathUtils.clamp((r - 0.67) / 0.33, 0, 1);
+      const radialSlope = r > 0 ? 2 * MENISCUS_RISE * s / (0.33 * this.radius * r) : 0;
+      const dx = waveDx + radialSlope * x;
+      const dz = waveDz + radialSlope * z;
+      waveSlope.setX(i, -(waveDx * 0.78 + waveDz * 0.62));
       const inv = 1 / Math.hypot(dx, 1, dz);
       normal.setXYZ(i, -dx * inv, inv, -dz * inv);
     }
     wave.needsUpdate = true;
+    this.activity = Math.min(1, peak / (this.radius * 0.035));
+    waveSlope.needsUpdate = true;
     normal.needsUpdate = true;
   }
 }
@@ -166,7 +182,8 @@ varying vec3 vBackdropPoint; varying float vBackdropCap;
 ${shader.vertexShader}`.replace("#include <begin_vertex>", `#include <begin_vertex>
 vBackdropCap = tubeSurface;
 if (tubeSurface > 0.5) transformed.y =
-  (uBackdropLevel - dot(uBackdropUp.xz, position.xz)) / max(uBackdropUp.y, 0.2) + tubeWave;
+  (uBackdropLevel - dot(uBackdropUp.xz, position.xz)) / max(uBackdropUp.y, 0.2)
+  + 0.0016 * pow(clamp((length(position.xz) / ${radius.toFixed(7)} - 0.67) / 0.33, 0.0, 1.0), 2.0) + tubeWave;
 vBackdropPoint = transformed;`);
     shader.fragmentShader = `uniform vec3 uBackdropUp; uniform float uBackdropLevel;
 varying vec3 vBackdropPoint; varying float vBackdropCap;
@@ -182,6 +199,36 @@ gl_FragColor = vec4(backdrop, 1.0);`);
   };
   material.customProgramCacheKey = () => "tube-water-backdrop-v1";
   return { material, up, level };
+}
+
+function createCausticMaterial() {
+  return new THREE.ShaderMaterial({
+    name: "TubeCaustic",
+    transparent: true, depthWrite: false, depthTest: true,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+    uniforms: {
+      uTint: { value: new THREE.Color("#e2f5ff") },
+      uStrength: { value: 0 }, uWave: { value: 0 }, uTime: { value: 0 }, uBillboard: { value: 0 },
+    },
+    vertexShader: `varying vec2 vUv; uniform float uBillboard;
+void main() {
+  vUv = uv * 2.0 - 1.0;
+  vec4 view = modelViewMatrix * vec4(uBillboard > 0.5 ? vec3(0.0) : position, 1.0);
+  if (uBillboard > 0.5) view.xy += position.xy;
+  gl_Position = projectionMatrix * view;
+}`,
+    fragmentShader: `varying vec2 vUv;
+uniform vec3 uTint; uniform float uStrength; uniform float uWave; uniform float uTime;
+void main() {
+  vec2 p = vUv;
+  float drift = uWave * sin(uTime * 3.1 + p.y * 5.0) * 0.11;
+  float band = exp(-pow((p.x - 0.18 * sin(p.y * 2.7) - drift) / 0.16, 2.0));
+  float fringe = exp(-pow((p.x + 0.33 + 0.08 * sin(p.y * 3.9 + uWave * uTime * 2.0)) / 0.11, 2.0));
+  float falloff = exp(-dot(p, p) * 1.6);
+  float light = (band * 0.8 + fringe * 0.4) * falloff * uStrength;
+  gl_FragColor = vec4(uTint, light);
+}`,
+  });
 }
 
 /** Fixed pools survive progress updates, including seeking backwards in F8. */
@@ -234,12 +281,14 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const wallGeometry = new THREE.LatheGeometry(profile, 48);
   wallGeometry.setAttribute("tubeSurface", new THREE.Float32BufferAttribute(new Float32Array(wallGeometry.attributes.position.count), 1));
   wallGeometry.setAttribute("tubeWave", new THREE.Float32BufferAttribute(new Float32Array(wallGeometry.attributes.position.count), 1));
+  wallGeometry.setAttribute("tubeWaveSlope", new THREE.Float32BufferAttribute(new Float32Array(wallGeometry.attributes.position.count), 1));
   const waveSurface = options.activeSurface ? new TubeSurfaceWaves(radius) : null;
   const capGeometry = waveSurface?.geometry ?? new THREE.CircleGeometry(radius, 48);
   if (!waveSurface) {
     capGeometry.rotateX(-Math.PI / 2);
     capGeometry.setAttribute("tubeSurface", new THREE.Float32BufferAttribute(new Float32Array(capGeometry.attributes.position.count).fill(1), 1));
     capGeometry.setAttribute("tubeWave", new THREE.Float32BufferAttribute(new Float32Array(capGeometry.attributes.position.count), 1));
+    capGeometry.setAttribute("tubeWaveSlope", new THREE.Float32BufferAttribute(new Float32Array(capGeometry.attributes.position.count), 1));
   }
   const hasLiquid = base instanceof TubeLiquidMaterial && volume.visible;
   if (hasLiquid) volume.geometry = wallGeometry;
@@ -268,6 +317,20 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   cap.frustumCulled = false;
   cap.raycast = () => {};
   group.add(cap);
+  const bottomCausticGeometry = new THREE.PlaneGeometry(radius * 1.7, radius * 1.7);
+  const standCausticGeometry = new THREE.PlaneGeometry(radius * 2.5, 0.105);
+  bottomCausticGeometry.rotateX(-Math.PI / 2);
+  const bottomCausticMaterial = createCausticMaterial();
+  const standCausticMaterial = createCausticMaterial();
+  standCausticMaterial.uniforms.uBillboard.value = 1;
+  const bottomCaustic = new THREE.Mesh(bottomCausticGeometry, bottomCausticMaterial);
+  const standCaustic = new THREE.Mesh(standCausticGeometry, standCausticMaterial);
+  bottomCaustic.name = "TubeBottomCaustic";
+  standCaustic.name = "TubeStandCaustic";
+  bottomCaustic.position.set(center.x, box.min.y + radius * 0.34, center.z);
+  standCaustic.position.set(center.x, box.min.y - 0.055, center.z);
+  bottomCaustic.raycast = standCaustic.raycast = () => {};
+  group.add(bottomCaustic, standCaustic);
   const geometry = new THREE.IcosahedronGeometry(1, 1);
   const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1, envMapIntensity: 0.15 });
   white.onBeforeCompile = (shader) => {
@@ -637,6 +700,19 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
             : THREE.MathUtils.lerp(baseOpacity, 0.42, p);
         liquid.uniforms.uQualityNoise.value = quality === "LOW" ? 0 : 1;
       }
+      const causticTint = kind === "copper-nitric" && p > 0.05 ? "#a5ecff"
+        : kind === "permanganate-redox" ? "#ffc0e6" : "#e2f5ff";
+      const causticStrength = kind === "barium-sulfate" && p > 0.01 ? 0.035 : 1;
+      for (const [mesh, material, scale] of [
+        [bottomCaustic, bottomCausticMaterial, 0.30],
+        [standCaustic, standCausticMaterial, 0.16],
+      ] as const) {
+        mesh.visible = hasLiquid && quality !== "LOW";
+        material.uniforms.uTint.value.set(causticTint);
+        material.uniforms.uStrength.value = causticStrength * scale;
+        material.uniforms.uWave.value = surfaceActivity;
+        material.uniforms.uTime.value = time;
+      }
       bed.visible = precipitate && settled > 0;
       sedimentLevel.value = box.min.y + size.y * (curds ? settled * 0.155 : Math.sqrt(settled) * 0.10);
       flakes.visible = curds && p > 0;
@@ -808,6 +884,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       for (const mesh of [flakes, bubbles, gas, splash, condensate, foam]) if (mesh.visible) mesh.instanceMatrix.needsUpdate = true;
       if (!producingBubbles) previousBubbleRise.fill(-1);
       if (waveSurface && hasLiquid) waveSurface.advance(dt);
+      bottomCausticMaterial.uniforms.uWave.value = standCausticMaterial.uniforms.uWave.value =
+        Math.max(surfaceActivity, waveSurface?.activity ?? 0);
     },
     dispose() {
       if (disposed) return;
@@ -818,7 +896,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       deferDispose(group, () => {
         geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();
         wallGeometry.dispose(); capGeometry.dispose(); headGeometry.dispose(); headMaterial.dispose(); dropletMaterial.dispose(); splashMaterial.dispose();
-        gasGeometry.dispose(); bedMaterial.dispose();
+        gasGeometry.dispose(); bedMaterial.dispose(); bottomCausticGeometry.dispose(); standCausticGeometry.dispose();
+        bottomCausticMaterial.dispose(); standCausticMaterial.dispose();
         curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
         for (const mesh of [flakes, bubbles, attachedBubbles, gas, splash, condensate, foam]) mesh.dispose();

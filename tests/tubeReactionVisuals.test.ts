@@ -95,6 +95,38 @@ function particleBounds(pool: THREE.InstancedMesh) {
 
 const kinds: ReactionKind[] = ["copper-nitric", "silver-chloride", "barium-sulfate", "permanganate-redox"];
 describe("tube reaction rendering contract", () => {
+  it("curves the calm rim while keeping the wave highlight dormant", () => {
+    const f = fixture(null);
+    f.advance(0.1, chemistry(0));
+    const cap = f.get("TubeLiquidSurface").geometry;
+    const normal = cap.getAttribute("normal");
+    const waveSlope = cap.getAttribute("tubeWaveSlope");
+    expect(Math.hypot(normal.getX(1), normal.getZ(1))).toBeLessThan(0.02);
+    expect(Math.hypot(normal.getX(normal.count - 1), normal.getZ(normal.count - 1))).toBeGreaterThan(0.1);
+    for (let i = 0; i < waveSlope.count; i++) expect(Math.abs(waveSlope.getX(i))).toBeLessThan(1e-6);
+  });
+
+  it("projects tinted caustics only on detailed clear water", () => {
+    const clear = fixture(null);
+    clear.update(chemistry(0), "HIGH");
+    expect(clear.get("TubeStandCaustic").visible).toBe(true);
+    const clearCaustic = clear.get("TubeStandCaustic").material as THREE.ShaderMaterial;
+    expect(clearCaustic.uniforms.uWave.value).toBe(0);
+    clear.update(chemistry(0), "LOW");
+    expect(clear.get("TubeStandCaustic").visible).toBe(false);
+    const blue = fixture("copper-nitric");
+    blue.update(chemistry(0.8), "HIGH");
+    const blueTint = (blue.get("TubeStandCaustic").material as THREE.ShaderMaterial).uniforms.uTint.value as THREE.Color;
+    expect(blueTint.b).toBeGreaterThan(blueTint.r);
+    const cloudy = fixture("barium-sulfate");
+    cloudy.update(chemistry(0.2), "HIGH");
+    const cloudStrength = (cloudy.get("TubeStandCaustic").material as THREE.ShaderMaterial).uniforms.uStrength.value;
+    expect(cloudStrength).toBeLessThan(0.05);
+    const poured = fixture(null, false, true);
+    poured.update(chemistry(0), "HIGH");
+    expect((poured.get("TubeStandCaustic").material as THREE.ShaderMaterial).uniforms.uWave.value).toBeGreaterThan(0);
+  });
+
   it("keeps the original water material above the optional refracted backdrop", () => {
     const f = fixture(null);
     f.update(chemistry(0), "HIGH", Infinity, true);
@@ -130,7 +162,7 @@ describe("tube reaction rendering contract", () => {
       expect(resource.mesh.geometry).toBe(resource.geometry);
       if (resource.mesh.name !== "TubeLiquidSurface") expect(resource.mesh.material).toBe(resource.material);
       if (resource.mesh instanceof THREE.InstancedMesh) expect(resource.mesh.instanceMatrix.array).toBe(resource.array);
-      expect(resource.mesh.visible).toBe(resource.mesh.name === "TubeLiquidSurface"
+      expect(resource.mesh.visible).toBe(["TubeLiquidSurface", "TubeBottomCaustic", "TubeStandCaustic"].includes(resource.mesh.name)
         || kind === "copper-nitric" && ["TubeNO2Headspace", "TubeNOBubbles"].includes(resource.mesh.name));
     }
     expect(f.get("TubeLiquidSurface").material).toBe(held);
@@ -600,7 +632,7 @@ describe("tube reaction rendering contract", () => {
     expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("ffffff");
     expect(liquid(f).uniforms.uOpacity.value).toBeCloseTo(0.14);
     for (const o of f.root.getObjectByName("TubeReactionVisuals")!.children) {
-      expect(o.visible).toBe(o.name === "TubeLiquidSurface");
+      expect(o.visible).toBe(["TubeLiquidSurface", "TubeBottomCaustic", "TubeStandCaustic"].includes(o.name));
     }
   });
 
