@@ -53,6 +53,9 @@ function liquid(f: Fixture) { return f.volume.material as TubeLiquidMaterial; }
 function density(f: Fixture): number {
   return (f.get("TubeNO2Headspace").material as THREE.ShaderMaterial).uniforms.uDensity.value;
 }
+function residue(f: Fixture): number {
+  return (f.get("TubeNO2Headspace").material as THREE.ShaderMaterial).uniforms.uResidue.value;
+}
 function surfacePlane(f: Fixture) {
   const material = liquid(f);
   f.volume.updateWorldMatrix(true, false);
@@ -151,7 +154,7 @@ describe("tube reaction rendering contract", () => {
     f.advance(1, chemistry(0.4, 1), quality);
     const first = density(f);
     expect(first).toBeGreaterThan(0);
-    f.advance(2, chemistry(0.5, 1), quality);
+    f.advance(4, chemistry(0.5, 1), quality);
     const accumulated = density(f);
     expect(accumulated).toBeGreaterThan(first);
     const head = f.get("TubeNO2Headspace");
@@ -175,14 +178,27 @@ describe("tube reaction rendering contract", () => {
     expect(density(f)).toBeLessThan(accumulated);
     expect(density(f)).toBeGreaterThan(accumulated * 0.8);
     expect(head.visible).toBe(true);
-    expect(plume.visible).toBe(true);
+    expect(plume.visible).toBe(false);
     expect(f.get("TubeNOBubbles").visible).toBe(false);
     f.advance(30, chemistry(1, 0), quality);
     expect(density(f)).toBeGreaterThan(0);
     expect(density(f)).toBeLessThan(accumulated * 0.3);
-    f.advance(70, chemistry(1, 0), quality);
+    const atThirty = residue(f);
+    expect(atThirty).toBeGreaterThan(0.1);
+    f.advance(30, chemistry(1, 0), quality);
+    expect(head.visible).toBe(true);
+    expect(residue(f)).toBeGreaterThan(0.05);
+    expect(residue(f)).toBeLessThan(atThirty);
+    f.advance(35, chemistry(1, 0), quality);
     expect(head.visible).toBe(false);
     expect(plume.visible).toBe(false);
+  });
+
+  it("keeps the final copper solution pale and transparent", () => {
+    const f = fixture("copper-nitric");
+    f.update(chemistry(1));
+    expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("78cbd7");
+    expect(liquid(f).uniforms.uOpacity.value).toBeLessThan(0.5);
   });
 
   it("clears accumulated gas on reverse progress seek", () => {

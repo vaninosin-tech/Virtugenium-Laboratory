@@ -6,11 +6,12 @@ import type { ReactionKind, TubeChemistry } from "./tubeReactions";
 import type { RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
-  copperColor: "#007fce",
+  copperColor: "#78cbd7",
   gasColor: "#8b4513",
   gasOpacity: 0.68,
   gasBuildSeconds: 4,
   gasDecaySeconds: 18,
+  gasResidueSeconds: 85,
   particleCounts: { LOW: 24, MEDIUM: 36, HIGH: 54, ULTRA: 72 },
   curdLayerHeight: 0.21,
   crystalLayerHeight: 0.11,
@@ -164,10 +165,10 @@ void main() {
   float flow = sin(rise * 9.0 - uTime * 0.75) * 0.06
     + sin(rise * 16.0 + uTime * 0.37) * 0.025;
   float width = mix(0.52, 0.64, smoothstep(0.2, 1.0, rise));
-  float edge = 1.0 - smoothstep(width * 0.5, width, abs(vP.x - flow));
-  float bottom = smoothstep(0.0, 0.08, rise);
-  float top = 1.0 - smoothstep(0.55, 1.0, rise);
-  float cloud = 0.87 + 0.13 * sin(rise * 12.0 - uTime * 0.6 + vP.x * 4.0);
+  float edge = 1.0 - smoothstep(width * 0.3, width * 1.12, abs(vP.x - flow));
+  float bottom = smoothstep(0.0, 0.12, rise);
+  float top = 1.0 - smoothstep(0.5, 1.0, rise);
+  float cloud = 0.87 + 0.13 * sin(rise * 9.0 - uTime * 0.6 + vP.x * 3.0);
   gl_FragColor = vec4(uColor, uOpacity * edge * bottom * top * cloud);
   #include <colorspace_fragment>
 }`,
@@ -177,12 +178,12 @@ void main() {
   headGeometry.translate(center.x, (lip.y + box.min.y) / 2, center.z);
   const headMaterial = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.FrontSide, toneMapped: false,
-    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
+    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
       uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) } },
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 void main() { vP = position; vN = normalize(normalMatrix * normal);
 vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uTime; uniform float uDetail;
+    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uResidue; uniform float uTime; uniform float uDetail;
 uniform float uLip; uniform float uRadius; uniform vec3 uColor;
 varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 float gasNoise(vec3 p) {
@@ -197,14 +198,17 @@ void main() {
 float aboveWater = dot(uUp, vP) - uLevel;
 if (aboveWater < 0.0004) discard;
 float h = clamp(aboveWater / max(uLip - uLevel, 0.005), 0.0, 1.0);
-vec3 q = vec3(vP.x / uRadius * 2.4, vP.y / uRadius * 0.9 - uTime * 0.18,
-  vP.z / uRadius * 2.4 + sin(vP.y / uRadius * 0.55 + uTime * 0.24) * 0.35);
-float cloud = gasNoise(q) * 0.7 + gasNoise(q * 1.8 + vec3(4.7, 0.0, 1.9)) * 0.3;
+vec3 q = vec3(vP.x / uRadius * 1.7, vP.y / uRadius * 0.65 - uTime * 0.18,
+  vP.z / uRadius * 1.7 + sin(vP.y / uRadius * 0.55 + uTime * 0.24) * 0.35);
+float cloud = gasNoise(q) * 0.75 + gasNoise(q * 1.4 + vec3(4.7, 0.0, 1.9)) * 0.25;
 float variation = mix(1.0, 0.7 + 0.6 * cloud, uDetail);
 float heightDensity = mix(0.48, 1.0, smoothstep(0.0, 0.85, h));
-float opticalDepth = mix(0.55, 1.0, pow(abs(dot(normalize(vN), normalize(vEye))), 0.5));
+float facing = abs(dot(normalize(vN), normalize(vEye)));
+float opticalDepth = mix(0.35, 1.0, smoothstep(0.0, 0.65, facing));
 float lipFade = 1.0 - 0.15 * smoothstep(uLip - 0.008, uLip, vP.y);
-gl_FragColor = vec4(uColor, (1.0 - exp(-uDensity * 2.5 * heightDensity * variation)) * opticalDepth * lipFade);
+float wallBand = (0.14 + pow(1.0 - facing, 0.55)) * smoothstep(0.08, 0.55, h);
+float mist = (1.0 - exp(-uDensity * 2.5 * heightDensity * variation)) * opticalDepth * lipFade;
+gl_FragColor = vec4(uColor, mist + uResidue * wallBand);
 #include <colorspace_fragment>
 }`,
   });
@@ -272,6 +276,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   let lastTime: number | undefined;
   let lastProgress = 0;
   let gasDensity = 0;
+  let wallResidue = 0;
   let bubblePhase = 0;
   let motionReady = false;
   const slope = new THREE.Vector2();
@@ -319,11 +324,14 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       gravity.set(0, 1, 0).transformDirection(inverse);
       // A visual reservoir outlives the instantaneous chemical rate. Seeking
       // backwards resets it; a completed reaction dissipates over tens of seconds.
-      if (p < lastProgress || p === 0 || reverseTime) { gasDensity = 0; bubblePhase = 0; }
+      if (p < lastProgress || p === 0 || reverseTime) { gasDensity = 0; wallResidue = 0; bubblePhase = 0; }
       lastProgress = p;
       bubblePhase += dt * (0.3 + rate * 0.4);
       const drive = kind === "copper-nitric" ? Math.max(0, rate) : 0;
       gasDensity = THREE.MathUtils.clamp(gasDensity + dt * (drive / TUBE_VISUALS.gasBuildSeconds - gasDensity / TUBE_VISUALS.gasDecaySeconds), 0, 1);
+      wallResidue = drive > 0.005
+        ? Math.min(1, wallResidue + dt * drive / TUBE_VISUALS.gasBuildSeconds)
+        : Math.max(0, wallResidue - dt / TUBE_VISUALS.gasResidueSeconds);
       const count = TUBE_VISUALS.particleCounts[quality];
       const precipitate = kind === "silver-chloride" || kind === "barium-sulfate";
       const curds = kind === "silver-chloride";
@@ -346,7 +354,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         liquid.uniforms.uReactionKind.value = kind === "copper-nitric" ? 1 : curds ? 2 : kind === "barium-sulfate" ? 3 : 4;
         liquid.uniforms.uCloudiness.value = precipitate ? onset * (1 - settled) : 0;
         liquid.uniforms.uOpacity.value = precipitate ? 0.3
-          : kind === "permanganate-redox" ? THREE.MathUtils.lerp(baseOpacity, 0.14, p) : THREE.MathUtils.lerp(baseOpacity, 0.68, p);
+          : kind === "permanganate-redox" ? THREE.MathUtils.lerp(baseOpacity, 0.14, p)
+            : THREE.MathUtils.lerp(baseOpacity, 0.42, p);
         liquid.uniforms.uQualityNoise.value = quality === "LOW" ? 0 : 1;
       }
       bed.visible = precipitate && settled > 0;
@@ -356,12 +365,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       flakes.count = count;
       bubbles.visible = kind === "copper-nitric" && (rate > 0.005 || temperature > 0.6);
       bubbles.count = Math.max(1, Math.min(count, Math.floor(count * (rate > 0 ? 0.4 + rate * 0.6 : Math.max(0, temperature - 0.6) * 0.3))));
-      gas.visible = gasDensity > 0.008;
-      headspace.visible = gas.visible;
+      gas.visible = drive > 0.005 && gasDensity > 0.008;
+      headspace.visible = gasDensity > 0.008 || wallResidue > 0.008;
       gas.count = 1;
       gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * gasDensity;
       gasMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDensity.value = gasDensity;
+      headMaterial.uniforms.uResidue.value = wallResidue * (1 - gasDensity);
       headMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDetail.value = quality === "LOW" ? 0 : 1;
       condensate.visible = kind === "copper-nitric" && temperature > 0.6;

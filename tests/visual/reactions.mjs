@@ -27,6 +27,7 @@ const qualities = process.env.VISUAL_QUALITY ? process.env.VISUAL_QUALITY.split(
 const quick = process.env.VISUAL_QUICK === "1";
 const precipitates = process.env.VISUAL_PRECIP === "1";
 const bubblesGas = process.env.VISUAL_BUBBLES_GAS === "1";
+const gasResidue = process.env.VISUAL_GAS_RESIDUE === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -54,7 +55,7 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (precipitates || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (precipitates || gasResidue || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
@@ -333,6 +334,32 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (gasResidue) {
+      await prepare("copper-nitric", quality);
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({
+        enabled: true, progress: 0.85, rate: 1, temperature: 1, tiltDegrees: 0,
+      }));
+      await settle(5000);
+      await shot(`copper-nitric-${quality}-peak`, `copper-nitric-${quality}-gas-residue`);
+      const endedAt = await page.evaluate(() => {
+        window.__tubeVisualTuningStore.setState({ progress: 1, rate: 0, temperature: 0 });
+        return window.__reactionCapture.event("fixture: reaction ended");
+      });
+      await settle(100);
+      await shot(`copper-nitric-${quality}-end`, `copper-nitric-${quality}-gas-residue`);
+      for (const targetSeconds of [30, 60]) {
+        // Keep the scene rendering while waiting; headless tabs can suspend
+        // their animation loop during a long automation-only timeout.
+        await page.evaluate(({ endedAt, targetSeconds }) => new Promise(resolve => {
+          const tick = now => now >= endedAt + targetSeconds * 1000 ? resolve() : requestAnimationFrame(tick);
+          requestAnimationFrame(tick);
+        }), { endedAt, targetSeconds });
+        await shot(`copper-nitric-${quality}-after-${targetSeconds}s`, `copper-nitric-${quality}-gas-residue`,
+          { originMs: endedAt, targetSeconds });
+      }
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      continue;
+    }
     if (bubblesGas) {
       await prepare("copper-nitric", quality);
       for (const rate of [0.25, 1]) {
