@@ -35,6 +35,7 @@ const iteration12GasOnly = process.env.VISUAL_ITERATION_12_GAS_ONLY === "1";
 const iteration13 = process.env.VISUAL_ITERATION_13 === "1";
 const iteration14 = process.env.VISUAL_ITERATION_14 === "1";
 const iteration15 = process.env.VISUAL_ITERATION_15 === "1";
+const iteration16 = process.env.VISUAL_ITERATION_16 === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -75,7 +76,7 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (iteration16 || iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
@@ -149,7 +150,7 @@ async function warmupShaders(quality) {
     h.closeUp.getState().setViewing(true);
   }, quality);
   try {
-    for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => !iteration15 || kind === "copper-nitric")) {
+    for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => !(iteration15 || iteration16) || kind === "copper-nitric")) {
       await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
       await page.evaluate(reagents => {
         window.__tubeVisualTuningStore.setState({ enabled: true,
@@ -387,6 +388,27 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (iteration16) {
+      await prepare("copper-nitric", quality);
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({
+        enabled: true, progress: 0.85, rate: 1, temperature: 1, tiltDegrees: 0,
+      }));
+      await settle(5000);
+      const endedAt = await page.evaluate(() => {
+        window.__tubeVisualTuningStore.setState({ progress: 1, rate: 0, temperature: 0 });
+        return window.__reactionCapture.event("fixture: reaction ended");
+      });
+      for (const targetSeconds of [0, 1, 3, 10, 60, 120, 180, 300, 360]) {
+        await page.evaluate(({ endedAt, targetSeconds }) => new Promise(resolve => {
+          const tick = now => now >= endedAt + targetSeconds * 1000 ? resolve() : requestAnimationFrame(tick);
+          requestAnimationFrame(tick);
+        }), { endedAt, targetSeconds });
+        await shot(`copper-nitric-${quality}-after-${targetSeconds}s`, `copper-nitric-${quality}-after`,
+          { originMs: endedAt, targetSeconds });
+      }
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      continue;
+    }
     if (iteration15) {
       await prepare("copper-nitric", quality, "copper-slow");
       await page.evaluate(() => window.__tubeVisualTuningStore.setState({
@@ -745,10 +767,10 @@ try {
       events.push(...data.events);
     } catch (error) { errors.push(`Collect trace: ${error.message}`); process.exitCode = 1; }
   }
-  try { await contactSheets(); }
+  try { if (!iteration16) await contactSheets(); }
   catch (error) { errors.push(`Contact sheets: ${error.message}`); process.exitCode = 1; }
   try {
-    await writeFile(resolve(out, "capture.json"), JSON.stringify({
+    await writeFile(resolve(out, iteration16 ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
       status: failure || errors.length ? "failed" : "complete", failure: failure ? String(failure.stack ?? failure) : null,
       frames, traces, events, errors, performanceSamples, browser: browser?.version(), angle, viewport, crop,
       selection: { cases: selectedCases, qualities, quick },

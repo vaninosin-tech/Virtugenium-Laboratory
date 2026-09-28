@@ -11,7 +11,7 @@ export const TUBE_VISUALS = {
   gasOpacity: 0.68,
   gasBuildSeconds: 4,
   gasDecaySeconds: 18,
-  gasResidueSeconds: 300,
+  gasResidueSeconds: 350,
   particleCounts: { LOW: 24, MEDIUM: 36, HIGH: 54, ULTRA: 72 },
   curdLayerHeight: 0.21,
   crystalLayerHeight: 0.11,
@@ -295,6 +295,22 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   let wallResidue = 0;
   let bubblePhase = 0;
   let surfaceActivity = 0;
+  let residueAge = 0;
+  let residueAtStop = 0;
+  let bubbleStopAge = Infinity;
+  let wasProducingBubbles = false;
+  const releasedBubbles: { position: THREE.Vector3; scale: THREE.Vector3 }[] = [];
+  const releasedAttached: { position: THREE.Vector3; scale: THREE.Vector3 }[] = [];
+  const snapshotBubbles = (pool: THREE.InstancedMesh, target: typeof releasedBubbles) => {
+    target.length = 0;
+    if (!pool.visible) return;
+    const matrix = new THREE.Matrix4();
+    for (let i = 0; i < pool.count; i++) {
+      pool.getMatrixAt(i, matrix);
+      const scale = new THREE.Vector3().setFromMatrixScale(matrix);
+      if (scale.x > 0) target.push({ position: new THREE.Vector3().setFromMatrixPosition(matrix), scale });
+    }
+  };
   let motionReady = false;
   const slope = new THREE.Vector2();
   const velocity = new THREE.Vector2();
@@ -340,18 +356,39 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       inverse.copy(volume.matrixWorld).invert();
       gravity.set(0, 1, 0).transformDirection(inverse);
       // A visual reservoir outlives the instantaneous chemical rate. Seeking
-      // backwards resets it; a completed reaction dissipates over tens of seconds.
-      if (reverseTime) { gasDensity = 0; gasFront = 0; wallResidue = 0; bubblePhase = 0; surfaceActivity = 0; }
+      // backwards resets it; wall residue clears over several minutes.
+      if (reverseTime) {
+        gasDensity = 0; gasFront = 0; wallResidue = 0; bubblePhase = 0; surfaceActivity = 0;
+        residueAge = 0; residueAtStop = 0; bubbleStopAge = Infinity; wasProducingBubbles = false;
+        releasedBubbles.length = 0; releasedAttached.length = 0;
+      }
       bubblePhase += dt * (0.3 + rate * 0.4);
-      const drive = kind === "copper-nitric" && p > 0 ? Math.max(0, rate) : 0;
+      const drive = kind === "copper-nitric" && p > 0 && p < 0.999 ? rate : 0;
+      const producingBubbles = drive > 0.005;
+      if (!producingBubbles && wasProducingBubbles) {
+        snapshotBubbles(bubbles, releasedBubbles);
+        snapshotBubbles(attachedBubbles, releasedAttached);
+        bubbleStopAge = 0;
+      } else if (producingBubbles) {
+        bubbleStopAge = Infinity;
+        releasedBubbles.length = 0;
+        releasedAttached.length = 0;
+      }
+      wasProducingBubbles = producingBubbles;
+      if (!producingBubbles && bubbleStopAge < Infinity) bubbleStopAge += dt;
       gasDensity = THREE.MathUtils.clamp(gasDensity + dt * (drive / TUBE_VISUALS.gasBuildSeconds - gasDensity / TUBE_VISUALS.gasDecaySeconds), 0, 1);
       gasFront = THREE.MathUtils.clamp(gasFront + dt * drive / 3, 0, 1);
-      const targetActivity = drive > 0.005 ? 0.4 + 0.6 * drive : 0;
-      surfaceActivity = THREE.MathUtils.lerp(surfaceActivity, targetActivity,
-        1 - Math.exp(-dt * (targetActivity > surfaceActivity ? 7 : 0.65)));
-      wallResidue = drive > 0.005
-        ? Math.min(1, wallResidue + dt * drive / TUBE_VISUALS.gasBuildSeconds)
-        : Math.max(0, wallResidue - dt / TUBE_VISUALS.gasResidueSeconds);
+      const targetActivity = producingBubbles ? Math.sqrt(drive) : 0;
+      surfaceActivity = producingBubbles
+        ? THREE.MathUtils.lerp(surfaceActivity, targetActivity, 1 - Math.exp(-dt * 7)) : 0;
+      if (drive > 0.005) {
+        wallResidue = Math.min(1, wallResidue + dt * drive / TUBE_VISUALS.gasBuildSeconds);
+        residueAtStop = wallResidue;
+        residueAge = 0;
+      } else {
+        residueAge += dt;
+        wallResidue = residueAtStop * (1 - THREE.MathUtils.smoothstep(residueAge, 180, TUBE_VISUALS.gasResidueSeconds));
+      }
       const count = TUBE_VISUALS.particleCounts[quality];
       const precipitate = kind === "silver-chloride" || kind === "barium-sulfate";
       const curds = kind === "silver-chloride";
@@ -403,11 +440,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       flakes.visible = precipitate && p > 0;
       flakes.count = count;
-      bubbles.visible = kind === "copper-nitric" && (rate > 0.005 || surfaceActivity > 0.02 || temperature > 0.6);
-      bubbles.count = Math.max(1, Math.min(count, Math.floor(count * (rate > 0
-        ? 0.4 + rate * 0.6 : surfaceActivity * 0.45 + Math.max(0, temperature - 0.6) * 0.3))));
-      attachedBubbles.visible = kind === "copper-nitric" && p < 0.999 && surfaceActivity > 0.02;
-      attachedBubbles.count = Math.min(72, Math.floor((quality === "LOW" ? 24 : quality === "MEDIUM" ? 32 : quality === "HIGH" ? 42 : 50) * surfaceActivity));
+      bubbles.visible = producingBubbles || bubbleStopAge < 1.8 && releasedBubbles.length > 0;
+      bubbles.count = producingBubbles ? Math.min(count, Math.floor(count * Math.sqrt(rate))) : releasedBubbles.length;
+      attachedBubbles.visible = producingBubbles && surfaceActivity > 0.02
+        || bubbleStopAge < 1.8 && releasedAttached.length > 0;
+      attachedBubbles.count = producingBubbles
+        ? Math.min(72, Math.floor((quality === "LOW" ? 24 : quality === "MEDIUM" ? 32 : quality === "HIGH" ? 42 : 50) * surfaceActivity))
+        : releasedAttached.length;
       gas.visible = drive > 0.005 && gasDensity > 0.008 && gasFront > 0.98;
       headspace.visible = gasDensity > 0.008 || wallResidue > 0.008;
       gas.count = 1;
@@ -415,7 +454,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       gasMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDensity.value = gasDensity;
       headMaterial.uniforms.uFront.value = gasFront;
-      headMaterial.uniforms.uResidue.value = Math.pow(wallResidue, 0.55) * (1 - gasDensity);
+      headMaterial.uniforms.uResidue.value = Math.pow(wallResidue, 0.85) * (1 - gasDensity);
       headMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDetail.value = quality === "LOW" ? 0 : 1;
       condensate.visible = kind === "copper-nitric" && temperature > 0.6;
@@ -452,8 +491,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         });
       }
       const copperGrain = copper?.children[0];
-      attachedBubbles.visible = attachedBubbles.visible && copperGrain instanceof THREE.Mesh && copperGrain.visible;
-      if (attachedBubbles.visible && copperGrain instanceof THREE.Mesh) {
+      if (producingBubbles) attachedBubbles.visible = attachedBubbles.visible && copperGrain instanceof THREE.Mesh && copperGrain.visible;
+      if (attachedBubbles.visible && producingBubbles && copperGrain instanceof THREE.Mesh) {
         const grainBound = copperBounds[0] * copperGrain.scale.x;
         for (let i = 0; i < attachedBubbles.count; i++) {
           const elevation = -0.06 + 1.03 * ((i + 0.5) / 50);
@@ -467,6 +506,17 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
             .multiplyScalar(grainBound * 1.03).add(copperGrain.position);
           place(attachedBubbles, i, source.x, source.y + radius * 0.22 * (1 - release), source.z,
             sizeBubble, sizeBubble, sizeBubble);
+        }
+        attachedBubbles.instanceMatrix.needsUpdate = true;
+      } else if (attachedBubbles.visible) {
+        for (let i = 0; i < releasedAttached.length; i++) {
+          const { position, scale } = releasedAttached[i];
+          const distance = Math.max(0, (level.value - up.value.dot(position)) / Math.max(0.3, up.value.dot(gravity)));
+          const fade = 1 - THREE.MathUtils.smoothstep(bubbleStopAge, 0.8, 1.8);
+          place(attachedBubbles, i, position.x + gravity.x * distance * bubbleStopAge / 1.8,
+            position.y + gravity.y * distance * bubbleStopAge / 1.8,
+            position.z + gravity.z * distance * bubbleStopAge / 1.8,
+            scale.x * fade, scale.y * fade, scale.z * fade);
         }
         attachedBubbles.instanceMatrix.needsUpdate = true;
       }
@@ -489,7 +539,15 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         const ingress = curds ? THREE.MathUtils.smoothstep(p * 80, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
         if (flakes.visible) place(flakes, i, x + drift - gravity.x * radius * settled * 0.6, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), floor - gravity.z * z, settled), z - gravity.z * radius * settled * 0.6,
           grain * onset * ingress, grain * onset * ingress * (curds ? 1.5 : 0.65), grain * onset * ingress);
-        if (bubbles.visible && i < bubbles.count) {
+        if (bubbles.visible && !producingBubbles && i < bubbles.count) {
+          const { position, scale } = releasedBubbles[i];
+          const distance = Math.max(0, (level.value - up.value.dot(position)) / Math.max(0.3, up.value.dot(gravity)));
+          const fade = 1 - THREE.MathUtils.smoothstep(bubbleStopAge, 0.8, 1.8);
+          place(bubbles, i, position.x + gravity.x * distance * bubbleStopAge / 1.8,
+            position.y + gravity.y * distance * bubbleStopAge / 1.8,
+            position.z + gravity.z * distance * bubbleStopAge / 1.8,
+            scale.x * fade, scale.y * fade, scale.z * fade);
+        } else if (bubbles.visible && i < bubbles.count) {
           const site = i % 8;
           const chain = Math.floor(i / 8);
           const rise = (bubblePhase * (0.7 + random(site + 180) * 0.35)

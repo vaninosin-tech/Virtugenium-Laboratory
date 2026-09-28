@@ -196,7 +196,7 @@ describe("tube reaction rendering contract", () => {
     expect(head.visible).toBe(true);
     expect(plume.visible).toBe(false);
     expect(f.get("TubeNOBubbles").visible).toBe(true);
-    f.advance(30, chemistry(1, 0), quality);
+    f.advance(29, chemistry(1, 0), quality);
     expect(f.get("TubeNOBubbles").visible).toBe(false);
     expect(density(f)).toBeGreaterThan(0);
     expect(density(f)).toBeLessThan(atLip * 0.3);
@@ -206,11 +206,15 @@ describe("tube reaction rendering contract", () => {
     expect(head.visible).toBe(true);
     expect(residue(f)).toBeGreaterThan(0.5);
     expect(residue(f)).toBeGreaterThan(atThirty * 0.8);
-    f.advance(120, chemistry(1, 0), quality);
+    f.advance(60, chemistry(1, 0), quality);
     expect(head.visible).toBe(true);
     expect(residue(f)).toBeGreaterThan(0.45);
-    expect(residue(f)).toBeLessThan(atThirty);
+    f.advance(60, chemistry(1, 0), quality);
+    expect(head.visible).toBe(true);
+    expect(residue(f)).toBeGreaterThan(0.5);
     f.advance(120, chemistry(1, 0), quality);
+    expect(residue(f)).toBeLessThan(0.3);
+    f.advance(60, chemistry(1, 0), quality);
     expect(head.visible).toBe(false);
     expect(plume.visible).toBe(false);
   });
@@ -274,7 +278,7 @@ describe("tube reaction rendering contract", () => {
     expect(bubbles.visible).toBe(true);
     f.update(chemistry(0.4, 0.25), quality);
     const cold = bubbles.count;
-    expect(cold).toBeGreaterThanOrEqual(quality === "LOW" ? 12 : 28);
+    expect(cold).toBeGreaterThanOrEqual(quality === "LOW" ? 12 : 27);
     f.update(chemistry(0.4, 0.9), quality);
     expect(bubbles.count).toBeGreaterThan(cold);
     expect(cold).toBeGreaterThan(slow);
@@ -285,7 +289,7 @@ describe("tube reaction rendering contract", () => {
     f.advance(10, chemistry(0.4));
     expect(bubbles.visible).toBe(false);
     f.update(chemistry(0.4, 0, 0.95), quality);
-    expect(bubbles.visible).toBe(true);
+    expect(bubbles.visible).toBe(false);
     expect(f.get("TubeCondensate").visible).toBe(true);
   });
 
@@ -312,8 +316,37 @@ describe("tube reaction rendering contract", () => {
     const activeCount = attached.count;
     f.advance(1, chemistry(0.6), quality);
     expect(attached.visible).toBe(true);
-    expect(attached.count).toBeLessThan(activeCount);
+    expect(attached.count).toBe(activeCount);
+    f.advance(1, chemistry(0.6), quality);
+    expect(attached.visible).toBe(false);
     f.advance(10, chemistry(0.6), quality);
+    expect(attached.visible).toBe(false);
+  });
+
+  it.each<RuntimeQuality>(["LOW", "HIGH"])("clears released bubbles after copper dissolves without creating new ones at %s", quality => {
+    const f = fixture("copper-nitric", true);
+    const free = f.get<THREE.InstancedMesh>("TubeNOBubbles");
+    const attached = f.get<THREE.InstancedMesh>("TubeNOAttachedBubbles");
+    f.update(chemistry(1, 0, 0.95), quality);
+    expect(free.visible).toBe(false);
+    expect(attached.visible).toBe(false);
+    f.advance(0.5, chemistry(0.8, 1, 0.95), quality);
+    expect(free.visible).toBe(true);
+    expect(attached.visible).toBe(true);
+    f.update(chemistry(1, 0, 0.95), quality);
+    expect(free.visible).toBe(true);
+    expect(attached.visible).toBe(true);
+    const first = new THREE.Matrix4();
+    free.getMatrixAt(0, first);
+    const startY = first.elements[13];
+    f.advance(1, chemistry(1, 0, 0.95), quality);
+    free.getMatrixAt(0, first);
+    expect(first.elements[13]).toBeGreaterThan(startY);
+    f.advance(1, chemistry(1, 0, 0.95), quality);
+    expect(free.visible).toBe(false);
+    expect(attached.visible).toBe(false);
+    f.advance(10, chemistry(1, 0, 0.95), quality);
+    expect(free.visible).toBe(false);
     expect(attached.visible).toBe(false);
   });
 
