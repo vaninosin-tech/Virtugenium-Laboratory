@@ -108,7 +108,7 @@ describe("tube reaction rendering contract", () => {
       if (resource.mesh.name !== "TubeLiquidSurface") expect(resource.mesh.material).toBe(resource.material);
       if (resource.mesh instanceof THREE.InstancedMesh) expect(resource.mesh.instanceMatrix.array).toBe(resource.array);
       expect(resource.mesh.visible).toBe(resource.mesh.name === "TubeLiquidSurface"
-        || kind === "copper-nitric" && resource.mesh.name === "TubeNO2Headspace");
+        || kind === "copper-nitric" && ["TubeNO2Headspace", "TubeNOBubbles"].includes(resource.mesh.name));
     }
     expect(f.get("TubeLiquidSurface").material).toBe(held);
     f.update(chemistry(0.5));
@@ -163,7 +163,7 @@ describe("tube reaction rendering contract", () => {
     f.advance(1, chemistry(0.4, 1), quality);
     const first = density(f);
     expect(first).toBeGreaterThan(0);
-    f.advance(4, chemistry(0.5, 1), quality);
+    f.advance(1, chemistry(0.5, 1), quality);
     const accumulated = density(f);
     expect(accumulated).toBeGreaterThan(first);
     const head = f.get("TubeNO2Headspace");
@@ -195,8 +195,9 @@ describe("tube reaction rendering contract", () => {
     expect(density(f)).toBeGreaterThan(atLip * 0.8);
     expect(head.visible).toBe(true);
     expect(plume.visible).toBe(false);
-    expect(f.get("TubeNOBubbles").visible).toBe(false);
+    expect(f.get("TubeNOBubbles").visible).toBe(true);
     f.advance(30, chemistry(1, 0), quality);
+    expect(f.get("TubeNOBubbles").visible).toBe(false);
     expect(density(f)).toBeGreaterThan(0);
     expect(density(f)).toBeLessThan(atLip * 0.3);
     const atThirty = residue(f);
@@ -246,7 +247,8 @@ describe("tube reaction rendering contract", () => {
     fast.advance(2, chemistry(0.1, 1));
     slow.advance(2, chemistry(0.1, 0.25));
     expect(front(fast)).toBeGreaterThan(front(slow) * 3.9);
-    expect(front(fast)).toBeLessThan(0.3);
+    expect(front(fast)).toBeGreaterThan(0.5);
+    expect(front(fast)).toBeLessThan(0.7);
     expect(fast.get("TubeNO2").visible).toBe(false);
     fast.advance(8, chemistry(0.1, 1));
     expect(front(fast)).toBe(1);
@@ -277,11 +279,42 @@ describe("tube reaction rendering contract", () => {
     expect(bubbles.count).toBeGreaterThan(cold);
     expect(cold).toBeGreaterThan(slow);
     expect(bubbles.count).toBeLessThanOrEqual(bubbles.instanceMatrix.count);
+    f.advance(0.3, chemistry(0.4, 0.9), quality);
     f.update(chemistry(0.4), quality);
+    expect(bubbles.visible).toBe(true);
+    f.advance(10, chemistry(0.4));
     expect(bubbles.visible).toBe(false);
     f.update(chemistry(0.4, 0, 0.95), quality);
     expect(bubbles.visible).toBe(true);
     expect(f.get("TubeCondensate").visible).toBe(true);
+  });
+
+  it.each<RuntimeQuality>(["LOW", "HIGH"])("grows attached bubbles on the single copper grain and releases them after stopping at %s", quality => {
+    const f = fixture("copper-nitric", true);
+    const attached = f.get<THREE.InstancedMesh>("TubeNOAttachedBubbles");
+    const grain = f.copper!.children[0];
+    f.update(chemistry(0.1, 1), quality);
+    expect(attached.visible).toBe(false);
+    f.advance(0.4, chemistry(0.1, 1), quality);
+    expect(attached.visible).toBe(true);
+    expect(attached.count).toBeGreaterThan(quality === "LOW" ? 18 : 30);
+    const first = new THREE.Matrix4();
+    attached.getMatrixAt(0, first);
+    const firstPosition = new THREE.Vector3().setFromMatrixPosition(first);
+    expect(firstPosition.distanceTo(grain.position)).toBeLessThan(0.007);
+    const firstScale = new THREE.Vector3().setFromMatrixScale(first).x;
+    f.advance(0.3, chemistry(0.1, 1), quality);
+    attached.getMatrixAt(0, first);
+    expect(new THREE.Vector3().setFromMatrixScale(first).x).not.toBeCloseTo(firstScale, 6);
+    f.update(chemistry(0.6, 1), quality);
+    attached.getMatrixAt(0, first);
+    expect(new THREE.Vector3().setFromMatrixScale(first).x).toBeLessThan(firstScale);
+    const activeCount = attached.count;
+    f.advance(1, chemistry(0.6), quality);
+    expect(attached.visible).toBe(true);
+    expect(attached.count).toBeLessThan(activeCount);
+    f.advance(10, chemistry(0.6), quality);
+    expect(attached.visible).toBe(false);
   });
 
   it.each([-20, 20])("moves free bubbles upward with a small wobble at a static %s degree tilt", degrees => {

@@ -34,6 +34,7 @@ const iteration12 = process.env.VISUAL_ITERATION_12 === "1";
 const iteration12GasOnly = process.env.VISUAL_ITERATION_12_GAS_ONLY === "1";
 const iteration13 = process.env.VISUAL_ITERATION_13 === "1";
 const iteration14 = process.env.VISUAL_ITERATION_14 === "1";
+const iteration15 = process.env.VISUAL_ITERATION_15 === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -52,6 +53,19 @@ async function settle(ms = 500) {
 async function shot(name, group, timing = {}) {
   // No hidden settling: it would erase early kinetics and transient slosh.
   const before = await page.evaluate(() => window.__reactionCapture.read());
+  if (timing.fastSequence) {
+    const { data } = await captureSession.send("Page.captureScreenshot", {
+      format: "png", fromSurface: true, captureBeyondViewport: false,
+      clip: { x: 725, y: 0, width: 150, height: 810, scale: 1 },
+    });
+    const after = await page.evaluate(() => window.__reactionCapture.read());
+    await writeFile(resolve(out, `${name}-tube.png`), Buffer.from(data, "base64"));
+    frames.push({ name, group, ...timing, before, after,
+      screenshotDurationMs: after.nowMs - before.nowMs });
+    console.log(`${name}: p=${before.chemistry.progress.toFixed(4)} rate=${before.chemistry.rate.toFixed(4)} temp=${before.chemistry.temperature.toFixed(4)}`);
+    if (errors.length) throw new Error(`Browser errors after ${name}: ${errors.join("\n")}`);
+    return;
+  }
   const { data } = await captureSession.send("Page.captureScreenshot", {
     format: "png", fromSurface: true, optimizeForSpeed: true, captureBeyondViewport: false,
   });
@@ -61,7 +75,7 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
@@ -69,6 +83,25 @@ async function shot(name, group, timing = {}) {
       clip: { ...tubeCrop, scale: 1 },
     });
     await writeFile(resolve(out, `${name}-tube.png`), Buffer.from(close.data, "base64"));
+    if (iteration15) {
+      const detail = name.includes("-cling-") ? { x: 730, y: 620, width: 140, height: 190 }
+        : name.includes("-plume-") ? { x: 730, y: 0, width: 140, height: 260 }
+          : name.includes("-gas-") ? { x: 730, y: 490, width: 140, height: 125 } : null;
+      if (detail) {
+        const detailShot = await captureSession.send("Page.captureScreenshot", {
+          format: "png", fromSurface: true, captureBeyondViewport: false,
+          clip: { ...detail, scale: 1 },
+        });
+        await writeFile(resolve(out, `${name}-detail.png`), Buffer.from(detailShot.data, "base64"));
+      }
+      if (name.includes("-plume-")) {
+        const clingShot = await captureSession.send("Page.captureScreenshot", {
+          format: "png", fromSurface: true, captureBeyondViewport: false,
+          clip: { x: 730, y: 620, width: 140, height: 190, scale: 1 },
+        });
+        await writeFile(resolve(out, `${name}-cling.png`), Buffer.from(clingShot.data, "base64"));
+      }
+    }
     if (iteration14 && (name.endsWith("-before") || name.endsWith("-2s"))) {
       const bottom = await captureSession.send("Page.captureScreenshot", {
         format: "png", fromSurface: true, captureBeyondViewport: false,
@@ -116,7 +149,7 @@ async function warmupShaders(quality) {
     h.closeUp.getState().setViewing(true);
   }, quality);
   try {
-    for (const [kind, reagents] of Object.entries(cases)) {
+    for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => !iteration15 || kind === "copper-nitric")) {
       await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
       await page.evaluate(reagents => {
         window.__tubeVisualTuningStore.setState({ enabled: true,
@@ -234,8 +267,8 @@ async function contactSheets() {
   const headerHeight = 86, columns = 3, perSheet = 6;
   const escape = value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   try {
-    for (const group of new Set(frames.map(f => f.group))) {
-      const groupFrames = frames.filter(f => f.group === group);
+    for (const group of new Set(frames.filter(f => !f.fastSequence).map(f => f.group))) {
+      const groupFrames = frames.filter(f => f.group === group && !f.fastSequence);
       for (let offset = 0; offset < groupFrames.length; offset += perSheet) {
         const batch = groupFrames.slice(offset, offset + perSheet);
         const cols = Math.min(columns, batch.length);
@@ -354,6 +387,46 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (iteration15) {
+      await prepare("copper-nitric", quality, "copper-slow");
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({
+        enabled: true, progress: 0.12, rate: 0.25, temperature: 0, tiltDegrees: 0,
+      }));
+      await settle(1000);
+      const slowAt = await page.evaluate(() => performance.now());
+      for (const index of [0, 1, 2]) {
+        await page.evaluate(({ slowAt, index }) => new Promise(resolve => {
+          const tick = now => now >= slowAt + index * 300 ? resolve() : requestAnimationFrame(tick);
+          requestAnimationFrame(tick);
+        }), { slowAt, index });
+        await shot(`copper-nitric-${quality}-cling-r0p25-${index}`, `copper-nitric-${quality}-slow`, { fastSequence: true });
+      }
+      await prepare("copper-nitric", quality, "copper-fast");
+      const startedAt = await page.evaluate(() => {
+        window.__tubeVisualTuningStore.setState({
+          enabled: true, progress: 0.12, rate: 1, temperature: 0, tiltDegrees: 0,
+        });
+        return performance.now();
+      });
+      for (const targetSeconds of [0, 1, 2, 4]) {
+        await page.evaluate(({ startedAt, targetSeconds }) => new Promise(resolve => {
+          const tick = now => now >= startedAt + targetSeconds * 1000 ? resolve() : requestAnimationFrame(tick);
+          requestAnimationFrame(tick);
+        }), { startedAt, targetSeconds });
+        await shot(`copper-nitric-${quality}-gas-${targetSeconds}s`, `copper-nitric-${quality}-gas`,
+          { originMs: startedAt, targetSeconds });
+      }
+      const plumeAt = await page.evaluate(() => performance.now());
+      for (const index of [0, 1, 2]) {
+        await page.evaluate(({ plumeAt, index }) => new Promise(resolve => {
+          const tick = now => now >= plumeAt + index * 300 ? resolve() : requestAnimationFrame(tick);
+          requestAnimationFrame(tick);
+        }), { plumeAt, index });
+        await shot(`copper-nitric-${quality}-plume-${index}`, `copper-nitric-${quality}-plume`, { fastSequence: true });
+      }
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      continue;
+    }
     if (iteration14) {
       await prepare("copper-nitric", quality);
       const startedAt = await page.evaluate(() => {
