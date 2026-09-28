@@ -52,7 +52,7 @@ export function SandboxPanel() {
       {kind ? (
         <span style={hintStyle}>
           Прогресс реакции: {Math.round(progress * 100)}%
-          {slowCold ? " — на холоду идёт очень медленно, нагрейте" : ""}
+          {slowCold ? " — без нагрева идёт медленно" : ""}
         </span>
       ) : null}
       <span style={hintStyle}>Температура содержимого: {Math.round(20 + temperature * 80)} °C</span>

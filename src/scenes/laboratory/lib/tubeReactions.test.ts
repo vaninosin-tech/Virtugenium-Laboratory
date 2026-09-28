@@ -46,18 +46,21 @@ const run = (contents: string[], seconds: number, inFlame: boolean, from: TubeCh
 describe("advanceChemistry", () => {
   const COPPER = ["cu", "hno3"];
 
-  it("cold copper and dilute acid barely react", () => {
-    const state = run(COPPER, 20, false);
-    expect(state.progress).toBeGreaterThan(0);
-    expect(state.progress).toBeLessThan(0.1);
-    expect(state.rate).toBeLessThan(0.1);
+  it("cold copper and dilute acid react slowly but visibly, finishing in about two minutes", () => {
+    const minute = run(COPPER, 60, false);
+    expect(minute.progress).toBeGreaterThan(0.5);
+    expect(minute.progress).toBeLessThan(1);
+    expect(minute.rate).toBeLessThan(0.25);
+    expect(run(COPPER, 125, false).progress).toBe(1);
   });
 
   it("heating brings the contents up to temperature and speeds the copper up", () => {
     const hot = run(COPPER, TEMPERATURE_RISE_SECONDS + 5, true);
     expect(hot.temperature).toBe(1);
     expect(hot.rate).toBeGreaterThan(0.5);
-    expect(hot.progress).toBeGreaterThan(run(COPPER, TEMPERATURE_RISE_SECONDS + 5, false).progress * 5);
+    const cold = run(COPPER, TEMPERATURE_RISE_SECONDS + 5, false);
+    expect(hot.rate).toBeGreaterThan(cold.rate * 2.5);
+    expect(hot.progress).toBeGreaterThan(cold.progress * 1.5);
   });
 
   it("copper keeps reacting, more and more slowly, after leaving the flame", () => {

@@ -16,16 +16,17 @@ interface ReactionDef {
   readonly seconds: number;
   /**
    * Fraction of the full rate at room temperature. Only copper depends on
-   * temperature: cold dilute nitric acid does attack it, just so slowly the
-   * player sees a lone bubble now and then — heating is what makes it go.
+   * temperature. Cold dilute nitric acid does dissolve copper — on video the
+   * solution visibly turns blue-green within about a minute, unheated — so
+   * cold is slow, not stopped; heating makes it go several times faster.
    */
   readonly coldRate: number;
 }
 
 const REACTIONS: readonly ReactionDef[] = [
-  // dp/dt ∝ √(1 − p) (see `advanceChemistry`) finishes in 2·seconds: about
-  // half a minute on a hot tube, the copper visibly lasting that long.
-  { kind: "copper-nitric", reagents: ["cu", "hno3"], trigger: "heat", seconds: 15, coldRate: 0.05 },
+  // dp/dt ∝ √(1 − p) (see `advanceChemistry`) finishes in 2·seconds/drive:
+  // about half a minute on a hot tube, about two minutes cold.
+  { kind: "copper-nitric", reagents: ["cu", "hno3"], trigger: "heat", seconds: 15, coldRate: 0.25 },
   // Precipitation is instant; what takes time is the settling, which the
   // visuals map onto the later part of the progress.
   { kind: "silver-chloride", reagents: ["agno3", "nacl"], trigger: "mix", seconds: 12, coldRate: 1 },
