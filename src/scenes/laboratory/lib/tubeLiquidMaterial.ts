@@ -88,27 +88,24 @@ if (p <= 0.0) { localMix = 0.0; cloud = 0.0; }
 vec3 tubeColor = mix(uBaseColor, uReactionColor, localMix);
 float baseChroma = max(max(uBaseColor.r, uBaseColor.g), uBaseColor.b) - min(min(uBaseColor.r, uBaseColor.g), uBaseColor.b);
 float endChroma = max(max(uReactionColor.r, uReactionColor.g), uReactionColor.b) - min(min(uReactionColor.r, uReactionColor.g), uReactionColor.b);
-float scatter = mix(smoothstep(0.15, 0.3, baseChroma), smoothstep(0.15, 0.3, endChroma), localMix);
+float pigment = mix(smoothstep(0.15, 0.3, baseChroma), smoothstep(0.15, 0.3, endChroma), localMix);
 diffuseColor.rgb = tubeColor;
 float waterEdge = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.4);
 float meniscus = (1.0 - smoothstep(0.00015, 0.0007, abs(surfaceDistance))) * (1.0 - vCap);
 float capRim = smoothstep(0.43, 0.50, length(radial)) * vCap;
 float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + max(meniscus, capRim) * uMeniscusAlpha;
 waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
-float raspberry = uReactionKind > 3.5 ? 1.0 - localMix : 0.0;
-diffuseColor.a = clamp(mix(waterAlpha, uOpacity, scatter) + cloud * 1.25 + raspberry * 0.10, 0.0, 0.995);`)
+diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity) + cloud * 1.25, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
 vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
 // Neutral scattering keeps a white precipitate white next to the warm burner.
 float relief = 0.7 + 0.2 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
-vec3 coloredLight = tubeColor * (0.5 + relief * 0.3) * mix(1.0, 0.68, waterEdge) + boundedSpecular * 0.2;
+vec3 coloredLight = tubeColor * (0.68 + relief * 0.42) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.26;
 coloredLight += vec3(0.08, 0.13, 0.15) * (n - 0.5) * smoothstep(0.6, 0.95, uTemperature);
-// Preserve the raspberry tint in the tube while the reaction is held at zero.
-coloredLight = mix(coloredLight, tubeColor * vec3(1.45, 1.15, 1.25) + boundedSpecular * 0.1, raspberry);
-outgoingLight = mix(mix(clearLight, coloredLight, scatter), vec3(0.91 + 0.07 * relief), clamp(cloud, 0.0, 1.0));
+outgoingLight = mix(mix(clearLight, coloredLight, pigment), vec3(0.91 + 0.07 * relief), clamp(cloud, 0.0, 1.0));
 #include <opaque_fragment>`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-gravity-fronts-v4"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v5"; }
 }

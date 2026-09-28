@@ -37,6 +37,7 @@ const iteration14 = process.env.VISUAL_ITERATION_14 === "1";
 const iteration15 = process.env.VISUAL_ITERATION_15 === "1";
 const iteration16 = process.env.VISUAL_ITERATION_16 === "1";
 const iteration17 = process.env.VISUAL_ITERATION_17 === "1";
+const iteration18 = process.env.VISUAL_ITERATION_18 === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -77,7 +78,7 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (iteration17 || iteration16 || iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (iteration18 || iteration17 || iteration16 || iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
@@ -85,6 +86,20 @@ async function shot(name, group, timing = {}) {
       clip: { ...tubeCrop, scale: 1 },
     });
     await writeFile(resolve(out, `${name}-tube.png`), Buffer.from(close.data, "base64"));
+    if (iteration18) {
+      const liquidShot = await captureSession.send("Page.captureScreenshot", {
+        format: "png", fromSurface: true, captureBeyondViewport: false,
+        clip: { x: 725, y: 500, width: 150, height: 310, scale: 1 },
+      });
+      await writeFile(resolve(out, `${name}-liquid.png`), Buffer.from(liquidShot.data, "base64"));
+      if (name.startsWith("barium-sulfate") && name.endsWith("45s")) {
+        const bottom = await captureSession.send("Page.captureScreenshot", {
+          format: "png", fromSurface: true, captureBeyondViewport: false,
+          clip: { x: 730, y: 650, width: 140, height: 160, scale: 1 },
+        });
+        await writeFile(resolve(out, `${name}-bottom.png`), Buffer.from(bottom.data, "base64"));
+      }
+    }
     if (iteration17) {
       const mouth = await captureSession.send("Page.captureScreenshot", {
         format: "png", fromSurface: true, captureBeyondViewport: false,
@@ -469,6 +484,38 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (iteration18) {
+      await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
+      await page.evaluate(quality => {
+        const h = window.__reactionCapture;
+        h.quality.getState().setMode(quality);
+        h.closeUp.getState().setViewing(true);
+        window.__tubeVisualTuningStore.setState({ enabled: false, tiltDegrees: 0 });
+        window.__testTubeStorageStore.getState().addTubeContents("fumeHood", 0, "hno3");
+      }, quality);
+      await settle(1000);
+      await shot(`water-${quality}`, `water-${quality}`);
+      await prepare("permanganate-redox", quality);
+      for (const progress of [0, 0.3, 0.6]) {
+        await page.evaluate(progress => window.__tubeVisualTuningStore.setState({
+          enabled: true, progress, rate: 0, temperature: 0, tiltDegrees: 0,
+        }), progress);
+        await settle(350);
+        await shot(`permanganate-redox-${quality}-p${String(progress).replace(".", "p")}`,
+          `permanganate-redox-${quality}`);
+      }
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      await prepare("copper-nitric", quality);
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({
+        enabled: true, progress: 1, rate: 0, temperature: 0, tiltDegrees: 0,
+      }));
+      await settle(2200);
+      await shot(`copper-nitric-${quality}-blue`, `copper-nitric-${quality}`);
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      const startedAt = await prepare("barium-sulfate", quality);
+      await series(`barium-sulfate-${quality}`, startedAt, [5, 15, 25, 35, 45]);
+      continue;
+    }
     if (iteration17) {
       await prepare("copper-nitric", quality);
       const startedAt = await page.evaluate(() => {
@@ -868,10 +915,10 @@ try {
       events.push(...data.events);
     } catch (error) { errors.push(`Collect trace: ${error.message}`); process.exitCode = 1; }
   }
-  try { if (!iteration16 && !iteration17) await contactSheets(); }
+  try { if (!iteration16 && !iteration17 && !iteration18) await contactSheets(); }
   catch (error) { errors.push(`Contact sheets: ${error.message}`); process.exitCode = 1; }
   try {
-    await writeFile(resolve(out, iteration16 || iteration17 ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
+    await writeFile(resolve(out, iteration16 || iteration17 || iteration18 ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
       status: failure || errors.length ? "failed" : "complete", failure: failure ? String(failure.stack ?? failure) : null,
       frames, traces, events, errors, performanceSamples, browser: browser?.version(), angle, viewport, crop,
       selection: { cases: selectedCases, qualities, quick },

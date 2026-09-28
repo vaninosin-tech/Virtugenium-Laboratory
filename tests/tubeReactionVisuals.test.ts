@@ -482,23 +482,22 @@ describe("tube reaction rendering contract", () => {
     for (const f of [silver, barium]) {
       f.update(chemistry(1), "LOW");
       expect(f.get("TubeSediment").visible).toBe(true);
-      expect(f.get("TubePrecipitate").visible).toBe(true);
-      expect(f.get("TubeBaCrystals").visible).toBe(f === barium);
+      expect(f.get("TubePrecipitate").visible).toBe(f === silver);
+      expect(f.get("TubeBaCrystals")).toBeUndefined();
       expect(f.get("TubeNO2").visible).toBe(false);
       expect(f.get("TubeNO2Headspace").visible).toBe(false);
       expect(f.get("TubeNOBubbles").visible).toBe(false);
       expect(f.get("TubeLiquidSurface").visible).toBe(true);
     }
     const silverTop = particleBounds(silver.get<THREE.InstancedMesh>("TubePrecipitate")).max.y;
-    const bariumTop = particleBounds(barium.get<THREE.InstancedMesh>("TubePrecipitate")).max.y;
+    const bariumBed = barium.get("TubeSediment");
     expect(silverTop).toBeGreaterThan(0.055 * 0.2);
     expect(silverTop).toBeLessThan(0.055 * 0.28);
-    expect(silverTop).toBeGreaterThan(bariumTop * 2);
-    expect(bariumTop).toBeGreaterThan(0.055 * 0.08);
+    expect(barium.get("TubePrecipitate").visible).toBe(false);
+    expect(bariumBed.visible).toBe(true);
+    expect((bariumBed.material as THREE.MeshStandardMaterial).roughness).toBe(1);
+    expect((bariumBed.material as THREE.MeshStandardMaterial).metalness).toBe(0);
     expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
-    const crystals = barium.get<THREE.InstancedMesh>("TubeBaCrystals");
-    expect(crystals.count).toBeGreaterThan(150);
-    expect(particleBounds(crystals).max.y).toBeGreaterThan(bariumTop * 0.7);
   });
 
   it("makes AgCl opaque with flocs within 0.1 s and BaSO4 milky within 0.2 s", () => {
@@ -516,7 +515,11 @@ describe("tube reaction rendering contract", () => {
     expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);
     expect(barium.get("TubeSediment").visible).toBe(false);
     barium.update(chemistry(25 / 45));
-    expect(liquid(barium).uniforms.uCloudiness.value).toBeLessThan(1);
+    expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);
+    expect(barium.get("TubeSediment").visible).toBe(true);
+    barium.update(chemistry(35 / 45));
+    expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);
+    barium.update(chemistry(1));
     expect(barium.get("TubeSediment").visible).toBe(true);
   });
 

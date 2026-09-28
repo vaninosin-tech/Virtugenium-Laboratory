@@ -14,7 +14,6 @@ export const TUBE_VISUALS = {
   gasResidueSeconds: 350,
   particleCounts: { LOW: 24, MEDIUM: 36, HIGH: 54, ULTRA: 72 },
   curdLayerHeight: 0.21,
-  crystalLayerHeight: 0.11,
   settlingStart: 0.18,
   settlingEnd: 0.94,
 };
@@ -87,7 +86,8 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const geometry = new THREE.IcosahedronGeometry(1, 1);
   const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1, envMapIntensity: 0.15 });
   white.onBeforeCompile = (shader) => {
-    shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 1.04 : 0.96 };
+    shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 0.92 : 0.96 };
+    shader.uniforms.uPowder = { value: kind === "barium-sulfate" ? 1 : 0 };
     shader.uniforms.uSedimentBottom = { value: box.min.y };
     shader.uniforms.uSedimentRadius = { value: radius * 0.98 };
     shader.uniforms.uSedimentCenter = { value: center };
@@ -97,7 +97,7 @@ vSedimentPoint = transformed;
 vSedimentPoint = (instanceMatrix * vec4(transformed, 1.0)).xyz;
 #endif
 #include <project_vertex>`);
-    shader.fragmentShader = `varying vec3 vSedimentPoint; uniform float uSedimentWhite;
+    shader.fragmentShader = `varying vec3 vSedimentPoint; uniform float uSedimentWhite; uniform float uPowder;
 uniform float uSedimentBottom; uniform float uSedimentRadius; uniform vec3 uSedimentCenter;
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
 vec3 bowlPoint = vec3(vSedimentPoint.xz - uSedimentCenter.xz, min(vSedimentPoint.y - uSedimentBottom - uSedimentRadius, 0.0));
@@ -106,11 +106,11 @@ if (vSedimentPoint.y < uSedimentBottom || length(bowlPoint) > uSedimentRadius) d
     // response before bloom and keep normal-based relief instead of hot spots.
     shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
 float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
-outgoingLight = vec3(uSedimentWhite) * relief;
+float powderGrain = sin(vSedimentPoint.x * 12000.0) * sin(vSedimentPoint.z * 10800.0) * 0.012 * uPowder;
+outgoingLight = vec3(uSedimentWhite) * (relief + powderGrain);
 #include <opaque_fragment>`);
   };
-  // Lobed, asymmetric flocs cast their own small shading variations. They do
-  // not depend on bloom or emission to distinguish curds from fine crystals.
+  // Lobed, asymmetric AgCl flocs cast their own small shading variations.
   const curdGeometry = new THREE.IcosahedronGeometry(1, 2);
   const vertices = curdGeometry.getAttribute("position");
   for (let i = 0; i < vertices.count; i++) {
@@ -234,15 +234,6 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uResidue * wallBand * smoothstep(0.0
   const flakes = makePool(white);
   if (kind === "silver-chloride") flakes.geometry = curdGeometry;
   flakes.name = "TubePrecipitate";
-  const crystalGeometry = new THREE.IcosahedronGeometry(1, 0);
-  const crystalMaterial = new THREE.MeshStandardMaterial({ color: "#f1f0eb", roughness: 0.3, metalness: 0.08, envMapIntensity: 0.35 });
-  const crystals = new THREE.InstancedMesh(crystalGeometry, crystalMaterial, 360);
-  crystals.name = "TubeBaCrystals";
-  crystals.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  crystals.frustumCulled = false;
-  crystals.visible = false;
-  crystals.raycast = () => {};
-  group.add(crystals);
   const bubbles = makePool(bubbleMaterial);
   bubbles.name = "TubeNOBubbles";
   const attachedBubbles = makePool(bubbleMaterial);
@@ -267,7 +258,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uResidue * wallBand * smoothstep(0.0
     shader.uniforms.uSedimentUp = up;
     shader.vertexShader = `uniform float uSedimentLevel; uniform vec3 uSedimentUp;
 uniform float uSedimentBottom; uniform float uSedimentRadius; uniform vec3 uSedimentCenter;
-${shader.vertexShader}`.replace("#include <begin_vertex>", `#include <begin_vertex>
+${shader.vertexShader}`.replace("#include <beginnormal_vertex>", `#include <beginnormal_vertex>
+if (position.y > uSedimentLevel) objectNormal = uSedimentUp;`).replace("#include <begin_vertex>", `#include <begin_vertex>
 transformed.y = min(position.y, uSedimentLevel - dot(uSedimentUp.xz, position.xz - uSedimentCenter.xz) / max(0.3, uSedimentUp.y));
 float h = clamp(transformed.y - uSedimentBottom, 0.0, uSedimentRadius);
 float availableRadius = sqrt(max(0.0, h * (2.0 * uSedimentRadius - h)));
@@ -415,33 +407,16 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         liquid.uniforms.uTime.value = time;
         liquid.uniforms.uReactionProgress.value = p;
         liquid.uniforms.uReactionKind.value = kind === "copper-nitric" ? 1 : curds ? 2 : kind === "barium-sulfate" ? 3 : 4;
-        liquid.uniforms.uCloudiness.value = precipitate ? onset * (1 - settled) : 0;
+        liquid.uniforms.uCloudiness.value = curds ? onset * (1 - settled)
+          : kind === "barium-sulfate" ? onset : 0;
         liquid.uniforms.uOpacity.value = precipitate ? 0.3
           : kind === "permanganate-redox" ? THREE.MathUtils.lerp(baseOpacity, 0.14, p)
             : THREE.MathUtils.lerp(baseOpacity, 0.42, p);
         liquid.uniforms.uQualityNoise.value = quality === "LOW" ? 0 : 1;
       }
       bed.visible = precipitate && settled > 0;
-      // A continuous matte core stays legible beneath the sparse instanced grains.
-      sedimentLevel.value = box.min.y + size.y * settled * (curds ? 0.155 : 0.068);
-      crystals.visible = kind === "barium-sulfate" && settled > 0;
-      crystals.count = quality === "LOW" ? 180 : quality === "MEDIUM" ? 260 : quality === "HIGH" ? 320 : 360;
-      if (crystals.visible) {
-        for (let i = 0; i < crystals.count; i++) {
-          const angle = i * 2.399963 + random(i + 204) * 0.35;
-          const r = radius * (0.08 + 0.82 * Math.sqrt(random(i + 511)));
-          const x = center.x + Math.cos(angle) * r;
-          const z = center.z + Math.sin(angle) * r;
-          const bowlFloor = box.min.y + radius - Math.sqrt(Math.max(0, radius * radius - r * r));
-          const sizeGrain = radius * (0.025 + random(i + 333) * 0.027) * settled;
-          const irregular = (random(i + 601) - 0.5) * size.y * 0.018;
-          const height = size.y * (0.03 + random(i + 807) * 0.065) * settled + irregular * settled;
-          place(crystals, i, x, bowlFloor + Math.max(sizeGrain, height), z,
-            sizeGrain, sizeGrain * (0.55 + random(i + 215) * 0.5), sizeGrain);
-        }
-        crystals.instanceMatrix.needsUpdate = true;
-      }
-      flakes.visible = precipitate && p > 0;
+      sedimentLevel.value = box.min.y + size.y * (curds ? settled * 0.155 : Math.sqrt(settled) * 0.10);
+      flakes.visible = curds && p > 0;
       flakes.count = count;
       bubbles.visible = producingBubbles || bubbleStopAge < 1.8 && releasedBubbles.length > 0;
       bubbles.count = producingBubbles ? Math.min(count, Math.floor(count * Math.sqrt(rate))) : releasedBubbles.length;
@@ -611,7 +586,6 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       deferDispose(group, () => {
         geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();
         wallGeometry.dispose(); capGeometry.dispose(); headGeometry.dispose(); headMaterial.dispose(); dropletMaterial.dispose(); splashMaterial.dispose();
-        crystalGeometry.dispose(); crystalMaterial.dispose(); crystals.dispose();
         gasGeometry.dispose(); bedMaterial.dispose();
         curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose();
