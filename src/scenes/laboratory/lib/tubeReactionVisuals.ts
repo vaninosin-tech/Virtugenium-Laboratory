@@ -178,12 +178,12 @@ void main() {
   headGeometry.translate(center.x, (lip.y + box.min.y) / 2, center.z);
   const headMaterial = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.FrontSide, toneMapped: false,
-    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
+    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uFront: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
       uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) } },
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 void main() { vP = position; vN = normalize(normalMatrix * normal);
 vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uResidue; uniform float uTime; uniform float uDetail;
+    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uFront; uniform float uResidue; uniform float uTime; uniform float uDetail;
 uniform float uLip; uniform float uRadius; uniform vec3 uColor;
 varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 float gasNoise(vec3 p) {
@@ -196,26 +196,26 @@ float gasNoise(vec3 p) {
 }
 void main() {
 float aboveWater = dot(uUp, vP) - uLevel;
-if (aboveWater < 0.0004) discard;
+if (aboveWater < 0.0) discard;
 float h = clamp(aboveWater / max(uLip - uLevel, 0.005), 0.0, 1.0);
-float motion = 1.0 + 0.13 * sin(h * 8.0 - uTime * 0.32)
-  + 0.07 * sin(h * 13.0 - uTime * 0.19);
+float motion = 1.0 + 0.10 * sin(h * 2.4 - uTime * 0.3);
 if (uDetail > 0.5) {
-  vec3 q = vec3(vP.x / uRadius * 1.25, vP.y / uRadius * 0.42 - uTime * 0.26,
-    vP.z / uRadius * 1.25);
-  q.x += sin(q.y * 1.4 + uTime * 0.22) * 0.34;
-  q.z += sin(q.y * 0.9 - uTime * 0.11) * 0.27;
-  float cloud = gasNoise(q) * 0.7 + gasNoise(q * 1.7 + vec3(4.7, 0.0, 1.9)) * 0.3;
-  motion = clamp(-0.2 + 2.4 * cloud, 0.65, 1.35);
+  vec3 q = vec3(vP.x / uRadius * 1.1, vP.y / uRadius * 0.35 - uTime * 0.13,
+    vP.z / uRadius * 1.1);
+  float cloud = gasNoise(q) * 0.7 + gasNoise(q * 0.9 + vec3(4.7, 0.0, 1.9)) * 0.3;
+  motion = clamp(1.0 + (cloud - 0.5) * 1.25, 0.72, 1.28);
 }
 float heightDensity = mix(1.0, 0.48, smoothstep(0.05, 0.95, h));
 float facing = abs(dot(normalize(vN), normalize(vEye)));
-float opticalDepth = mix(0.35, 1.0, smoothstep(0.0, 0.65, facing));
+float edgeFade = smoothstep(0.0, 0.3, facing);
 float lipFade = 1.0 - 0.15 * smoothstep(uLip - 0.008, uLip, vP.y);
 float wallBand = (0.55 + 0.55 * pow(1.0 - facing, 0.55))
   * smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.34, 0.72, h));
-float mist = (1.0 - exp(-uDensity * 2.5 * heightDensity)) * opticalDepth * lipFade * motion;
-gl_FragColor = vec4(uColor, min(0.96, mist + uResidue * wallBand));
+float lowerFade = smoothstep(0.0, 0.045, h);
+float rise = 1.0 - smoothstep(uFront - 0.12, uFront + 0.08, h);
+float mist = (1.0 - exp(-uDensity * 1.55 * heightDensity)) * edgeFade * lipFade
+  * lowerFade * rise * motion;
+gl_FragColor = vec4(uColor, min(0.9, mist + uResidue * wallBand * smoothstep(0.0, 0.12, facing)));
 #include <colorspace_fragment>
 }`,
   });
@@ -290,8 +290,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   };
   let disposed = false;
   let lastTime: number | undefined;
-  let lastProgress = 0;
   let gasDensity = 0;
+  let gasFront = 0;
   let wallResidue = 0;
   let bubblePhase = 0;
   let motionReady = false;
@@ -340,11 +340,11 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       gravity.set(0, 1, 0).transformDirection(inverse);
       // A visual reservoir outlives the instantaneous chemical rate. Seeking
       // backwards resets it; a completed reaction dissipates over tens of seconds.
-      if (p < lastProgress || p === 0 || reverseTime) { gasDensity = 0; wallResidue = 0; bubblePhase = 0; }
-      lastProgress = p;
+      if (reverseTime) { gasDensity = 0; gasFront = 0; wallResidue = 0; bubblePhase = 0; }
       bubblePhase += dt * (0.3 + rate * 0.4);
-      const drive = kind === "copper-nitric" ? Math.max(0, rate) : 0;
+      const drive = kind === "copper-nitric" && p > 0 ? Math.max(0, rate) : 0;
       gasDensity = THREE.MathUtils.clamp(gasDensity + dt * (drive / TUBE_VISUALS.gasBuildSeconds - gasDensity / TUBE_VISUALS.gasDecaySeconds), 0, 1);
+      gasFront = THREE.MathUtils.clamp(gasFront + dt * drive / 8, 0, 1);
       wallResidue = drive > 0.005
         ? Math.min(1, wallResidue + dt * drive / TUBE_VISUALS.gasBuildSeconds)
         : Math.max(0, wallResidue - dt / TUBE_VISUALS.gasResidueSeconds);
@@ -401,12 +401,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       flakes.count = count;
       bubbles.visible = kind === "copper-nitric" && (rate > 0.005 || temperature > 0.6);
       bubbles.count = Math.max(1, Math.min(count, Math.floor(count * (rate > 0 ? 0.4 + rate * 0.6 : Math.max(0, temperature - 0.6) * 0.3))));
-      gas.visible = drive > 0.005 && gasDensity > 0.008;
+      gas.visible = drive > 0.005 && gasDensity > 0.008 && gasFront > 0.98;
       headspace.visible = gasDensity > 0.008 || wallResidue > 0.008;
       gas.count = 1;
       gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * gasDensity;
       gasMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDensity.value = gasDensity;
+      headMaterial.uniforms.uFront.value = gasFront;
       headMaterial.uniforms.uResidue.value = Math.pow(wallResidue, 0.55) * (1 - gasDensity);
       headMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDetail.value = quality === "LOW" ? 0 : 1;
@@ -471,7 +472,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           if (grainMesh instanceof THREE.Mesh && p < 0.999) {
             const azimuth = site * 2.39996;
             source.set(Math.cos(azimuth), 0.36 + random(site + 201) * 0.35, Math.sin(azimuth))
-              .normalize().multiplyScalar(copperBounds[site % copperBounds.length] * 0.68).multiply(grainMesh.scale)
+              .normalize().multiplyScalar(copperBounds[site % copperBounds.length] * 0.84).multiply(grainMesh.scale)
               .applyQuaternion(grainMesh.quaternion).add(grainMesh.position);
           }
           else source.set(x * 0.6, box.min.y + radius * 1.3, z * 0.6);

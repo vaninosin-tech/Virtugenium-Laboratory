@@ -57,6 +57,9 @@ function liquid(f: Fixture) { return f.volume.material as TubeLiquidMaterial; }
 function density(f: Fixture): number {
   return (f.get("TubeNO2Headspace").material as THREE.ShaderMaterial).uniforms.uDensity.value;
 }
+function front(f: Fixture): number {
+  return (f.get("TubeNO2Headspace").material as THREE.ShaderMaterial).uniforms.uFront.value;
+}
 function residue(f: Fixture): number {
   return (f.get("TubeNO2Headspace").material as THREE.ShaderMaterial).uniforms.uResidue.value;
 }
@@ -104,7 +107,8 @@ describe("tube reaction rendering contract", () => {
       expect(resource.mesh.geometry).toBe(resource.geometry);
       if (resource.mesh.name !== "TubeLiquidSurface") expect(resource.mesh.material).toBe(resource.material);
       if (resource.mesh instanceof THREE.InstancedMesh) expect(resource.mesh.instanceMatrix.array).toBe(resource.array);
-      expect(resource.mesh.visible).toBe(resource.mesh.name === "TubeLiquidSurface");
+      expect(resource.mesh.visible).toBe(resource.mesh.name === "TubeLiquidSurface"
+        || kind === "copper-nitric" && resource.mesh.name === "TubeNO2Headspace");
     }
     expect(f.get("TubeLiquidSurface").material).toBe(held);
     f.update(chemistry(0.5));
@@ -165,7 +169,13 @@ describe("tube reaction rendering contract", () => {
     const head = f.get("TubeNO2Headspace");
     const plume = f.get<THREE.InstancedMesh>("TubeNO2");
     expect(head.visible).toBe(true);
+    expect(plume.visible).toBe(false);
+    expect(front(f)).toBeGreaterThan(0.5);
+    expect(front(f)).toBeLessThan(0.7);
+    f.advance(4, chemistry(0.5, 1), quality);
+    expect(front(f)).toBe(1);
     expect(plume.visible).toBe(true);
+    const atLip = density(f);
     head.geometry.computeBoundingBox();
     // The interior gas volume spans the air column; its material clips at water.
     expect(head.geometry.boundingBox!.max.y).toBeCloseTo(0.15, 6);
@@ -181,14 +191,14 @@ describe("tube reaction rendering contract", () => {
     const plumeBottom = matrix.elements[13] - Math.hypot(matrix.elements[4], matrix.elements[5], matrix.elements[6]);
     expect(plumeBottom).toBeCloseTo(0.15, 4);
     f.advance(1, chemistry(1, 0), quality);
-    expect(density(f)).toBeLessThan(accumulated);
-    expect(density(f)).toBeGreaterThan(accumulated * 0.8);
+    expect(density(f)).toBeLessThan(atLip);
+    expect(density(f)).toBeGreaterThan(atLip * 0.8);
     expect(head.visible).toBe(true);
     expect(plume.visible).toBe(false);
     expect(f.get("TubeNOBubbles").visible).toBe(false);
     f.advance(30, chemistry(1, 0), quality);
     expect(density(f)).toBeGreaterThan(0);
-    expect(density(f)).toBeLessThan(accumulated * 0.3);
+    expect(density(f)).toBeLessThan(atLip * 0.3);
     const atThirty = residue(f);
     expect(atThirty).toBeGreaterThan(0.1);
     f.advance(30, chemistry(1, 0), quality);
@@ -211,15 +221,37 @@ describe("tube reaction rendering contract", () => {
     expect(liquid(f).uniforms.uOpacity.value).toBeLessThan(0.5);
   });
 
-  it("clears accumulated gas on reverse progress seek", () => {
+  it("keeps accumulated gas continuous across progress and rate override jumps", () => {
     const f = fixture("copper-nitric");
     f.update(chemistry(0.8, 1));
     f.advance(3, chemistry(0.8, 1));
-    expect(density(f)).toBeGreaterThan(0.1);
+    const before = density(f), risen = front(f);
+    expect(before).toBeGreaterThan(0.1);
     f.update(chemistry(0.2));
-    expect(density(f)).toBe(0);
-    expect(f.get("TubeNO2Headspace").visible).toBe(false);
+    expect(density(f)).toBe(before);
+    expect(front(f)).toBe(risen);
+    f.advance(1, chemistry(0.2));
+    expect(density(f)).toBeLessThan(before);
+    expect(f.get("TubeNO2Headspace").visible).toBe(true);
     expect(f.get("TubeNO2").visible).toBe(false);
+  });
+
+  it("rises from the water over seconds and delays the outlet at low rate", () => {
+    const fast = fixture("copper-nitric");
+    const slow = fixture("copper-nitric");
+    fast.update(chemistry(0.1, 1));
+    slow.update(chemistry(0.1, 0.25));
+    expect(front(fast)).toBe(0);
+    expect(density(fast)).toBe(0);
+    fast.advance(2, chemistry(0.1, 1));
+    slow.advance(2, chemistry(0.1, 0.25));
+    expect(front(fast)).toBeGreaterThan(front(slow) * 3.9);
+    expect(front(fast)).toBeLessThan(0.3);
+    expect(fast.get("TubeNO2").visible).toBe(false);
+    fast.advance(8, chemistry(0.1, 1));
+    expect(front(fast)).toBe(1);
+    expect(fast.get("TubeNO2").visible).toBe(true);
+    expect(slow.get("TubeNO2").visible).toBe(false);
   });
 
   it("clears accumulated gas on reverse time seek even at the same progress", () => {
@@ -301,6 +333,7 @@ describe("tube reaction rendering contract", () => {
     const f = fixture("copper-nitric", true);
     f.update(chemistry(0));
     const grains = f.copper!.children;
+    expect(grains).toHaveLength(1);
     const initial = grains.map(grain => ({ scale: grain.scale.x, y: grain.position.y }));
     f.update(chemistry(0.5));
     grains.forEach((grain, i) => {

@@ -24,9 +24,7 @@ const COPPER_GRANULE_MATERIAL = new THREE.MeshStandardMaterial({
  * How far above its final resting spot a granule starts, in the tube
  * cavity's own local units. Was 0.05 — a THIRD of this tube's whole 0.15
  * cavity height, so a granule's lifted start sat at roughly the tube's own
- * midpoint. Anyone glancing at the tube before a granule's own staggered
- * delay elapsed (the last piece doesn't even start falling until
- * `3 * GRANULE_DROP_STAGGER_MS` in) saw copper sitting in the MIDDLE of the
+ * midpoint. Anyone glancing at the tube before its drop began saw copper sitting in the MIDDLE of the
  * tube, not "about to drop the last few centimeters" — read as "the copper
  * is in the center, not at the bottom" even though the settled position was
  * always correct. Now sized relative to one granule's own radius instead of
@@ -34,8 +32,6 @@ const COPPER_GRANULE_MATERIAL = new THREE.MeshStandardMaterial({
  * above where it lands."
  */
 const GRANULE_DROP_HEIGHT = 0.012;
-/** Stagger between one granule starting its fall and the next, ms — lets the stack read as pieces landing one after another (biggest/bottom first, same order they're built in) rather than the whole pile dropping as one rigid block. */
-const GRANULE_DROP_STAGGER_MS = 70;
 /** How long a single granule's own fall takes once it starts, ms — shorter than before now that it's a much smaller hop, not a long fall. */
 const GRANULE_DROP_DURATION_MS = 170;
 
@@ -46,14 +42,8 @@ function easeOutCubic(t: number): number {
 }
 
 /**
- * A small stack of copper granules inside a test tube's cavity, LARGEST at
- * the bottom, decreasing going up — the player's own explicit call for how
- * Cu should look in a tube. Deliberately NOT `createCopperPile` (the jar's
- * 56-fragment, raycast-settled heap): that algorithm is tuned for a wide,
- * squat jar cavity, and a tube only ever needs a believable handful of
- * pieces in a narrow column, not a physically-settled pile. A softly
- * irregular sphere keeps the silhouette rounded and the copper specular
- * response continuous at close range.
+ * One rounded, irregular copper granule inside the tube cavity. Its small
+ * drop animation and metallic response remain visible at close range.
  */
 export function createTubeCopperGranules(cavityGeometry: THREE.BufferGeometry): THREE.Group {
   cavityGeometry.computeBoundingBox();
@@ -65,53 +55,35 @@ export function createTubeCopperGranules(cavityGeometry: THREE.BufferGeometry): 
   const group = new THREE.Group();
   group.name = "TubeCopperGranules";
 
-  // Largest first — each one sits on top of the last, so the biggest ends
-  // up at the bottom of the stack. Also the order they DROP in (see
-  // `stepCopperGranuleDrop`) — the bottom piece lands first, each next one
-  // staggered slightly after, same as a handful actually settling in.
-  const relativeSizes = [0.85, 0.65, 0.5, 0.38];
-  let seed = 24601;
-  const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
-  let y = bounds.min.y;
-
-  let dropIndex = 0;
-  for (const relativeSize of relativeSizes) {
-    const unit = radius * 1.15 * relativeSize;
-    const geometry = new THREE.SphereGeometry(unit, 20, 14);
-    const position = geometry.getAttribute("position");
-    for (let i = 0; i < position.count; i++) {
-      const x = position.getX(i), yPos = position.getY(i), z = position.getZ(i);
-      const jitter = 1 + 0.055 * Math.sin(x / unit * 5 + z / unit * 3)
-        * Math.cos(yPos / unit * 4 - x / unit * 2);
-      position.setXYZ(i, x * jitter, yPos * jitter * 0.82, z * jitter);
-    }
-    geometry.computeVertexNormals();
-    const mesh = new THREE.Mesh(geometry, COPPER_GRANULE_MATERIAL.clone());
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    const offsetX = (random() - 0.5) * radius * 0.3;
-    const offsetZ = (random() - 0.5) * radius * 0.3;
-    const targetY = y + unit * 0.75;
-    // Starts lifted above its resting spot — `stepCopperGranuleDrop` drops it
-    // back down to `targetY` once the fill animation actually begins.
-    mesh.position.set(center.x + offsetX, targetY + GRANULE_DROP_HEIGHT, center.z + offsetZ);
-    mesh.rotation.set(random() * Math.PI, random() * Math.PI, random() * Math.PI);
-    mesh.userData.dropTargetY = targetY;
-    mesh.userData.dropDelayMs = dropIndex * GRANULE_DROP_STAGGER_MS;
-    group.add(mesh);
-    y += unit * 1.15;
-    dropIndex += 1;
+  const unit = radius * 0.78;
+  const geometry = new THREE.SphereGeometry(unit, 20, 14);
+  const position = geometry.getAttribute("position");
+  for (let i = 0; i < position.count; i++) {
+    const x = position.getX(i), yPos = position.getY(i), z = position.getZ(i);
+    const jitter = 1 + 0.10 * Math.sin(x / unit * 5 + z / unit * 3)
+      * Math.cos(yPos / unit * 4 - x / unit * 2);
+    position.setXYZ(i, x * jitter, yPos * jitter * 0.78, z * jitter);
   }
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, COPPER_GRANULE_MATERIAL.clone());
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  const targetY = bounds.min.y + unit * 1.1;
+  // Starts lifted above its resting spot — `stepCopperGranuleDrop` drops it
+  // back down to `targetY` once the fill animation actually begins.
+  mesh.position.set(center.x, targetY + GRANULE_DROP_HEIGHT, center.z);
+  mesh.rotation.set(0.4, 1.1, 0.25);
+  mesh.userData.dropTargetY = targetY;
+  mesh.userData.dropDelayMs = 0;
+  group.add(mesh);
 
   return group;
 }
 
 /**
- * Advances the falling-in animation for a copper granule stack built by
+ * Advances the falling-in animation for the copper granule built by
  * `createTubeCopperGranules` — call every frame with the total elapsed time
- * since the fill started. Each granule waits out its own `dropDelayMs`
- * (staggered so pieces read as landing one after another, biggest/bottom
- * first), then eases down from its lifted start to `dropTargetY` over
+ * since the fill started. It eases down from its lifted start to `dropTargetY` over
  * `GRANULE_DROP_DURATION_MS`. Returns `true` while any granule is still
  * mid-drop (keep calling), `false` once every granule has settled (safe to
  * stop).
@@ -143,7 +115,7 @@ function colourStrength(config: ReagentContainerConfig): number {
 
 export interface TestTubeContentsBinding {
   dispose: () => void;
-  /** The copper granule stack just created, if this fill was solid Cu — `null` for every other reagent/contents kind. Callers that want the drop-in animation (`stepCopperGranuleDrop`) drive it themselves per frame using this reference. */
+  /** The copper granule just created, if this fill was solid Cu — `null` for every other reagent/contents kind. Callers that want the drop-in animation (`stepCopperGranuleDrop`) drive it themselves per frame using this reference. */
   readonly granules: THREE.Group | null;
 }
 
