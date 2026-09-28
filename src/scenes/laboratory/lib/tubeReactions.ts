@@ -21,6 +21,13 @@ interface ReactionDef {
    * cold is slow, not stopped; heating makes it go several times faster.
    */
   readonly coldRate: number;
+  /**
+   * Seconds the freshly mixed tube shows its starting state before the
+   * reaction visibly moves. Only for the permanganate: the real thing fades
+   * so fast that the raspberry — the very sign the tablet asks about — was
+   * gone before the player registered it.
+   */
+  readonly holdSeconds?: number;
 }
 
 const REACTIONS: readonly ReactionDef[] = [
@@ -34,9 +41,16 @@ const REACTIONS: readonly ReactionDef[] = [
   // BaSO₄'s fine crystals stay a milky suspension far longer — on video
   // hardly settling at all in the ten seconds after mixing.
   { kind: "barium-sulfate", reagents: ["bacl2", "k2so4"], trigger: "mix", seconds: 45, coldRate: 1 },
-  // In acid the colour goes almost at once (1–2 s on video); a little
-  // slower here so the raspberry is seen to fade rather than just vanish.
-  { kind: "permanganate-redox", reagents: ["kmno4", "h2so4", "na2so3"], trigger: "mix", seconds: 3, coldRate: 1 },
+  // In acid the colour goes almost at once (1–2 s on video); here the
+  // raspberry holds for a moment and then fades over ~3 s, so it is seen.
+  {
+    kind: "permanganate-redox",
+    reagents: ["kmno4", "h2so4", "na2so3"],
+    trigger: "mix",
+    seconds: 3,
+    coldRate: 1,
+    holdSeconds: 1.5,
+  },
 ];
 
 const findReaction = (contents: readonly string[]) =>
@@ -62,9 +76,11 @@ export interface TubeChemistry {
   readonly rate: number;
   /** 0..1, contents temperature: 0 room, 1 near boiling. */
   readonly temperature: number;
+  /** Seconds since the tube's reagents first made a reaction — for `holdSeconds`. */
+  readonly age?: number;
 }
 
-export const ROOM_TEMPERATURE_CHEMISTRY: TubeChemistry = { progress: 0, rate: 0, temperature: 0 };
+export const ROOM_TEMPERATURE_CHEMISTRY: TubeChemistry = { progress: 0, rate: 0, temperature: 0, age: 0 };
 
 /**
  * Seconds of holding the tube in the flame to bring cold contents near
@@ -99,13 +115,16 @@ export const advanceChemistry = (
       (inFlame ? deltaSeconds / TEMPERATURE_RISE_SECONDS : -deltaSeconds / TEMPERATURE_COOL_SECONDS),
   );
   const reaction = findReaction(contents);
-  if (!reaction) return { progress: 0, rate: 0, temperature };
+  if (!reaction) return { progress: 0, rate: 0, temperature, age: 0 };
+
+  const age = (state.age ?? 0) + deltaSeconds;
+  if (age < (reaction.holdSeconds ?? 0)) return { progress: 0, rate: 0, temperature, age };
 
   const drive = reaction.coldRate + (1 - reaction.coldRate) * temperature;
   const remaining = 1 - state.progress;
   const rate = reaction.trigger === "heat" ? drive * Math.sqrt(remaining) : remaining > 0 ? drive : 0;
   const progress = clamp01(state.progress + (rate * deltaSeconds) / reaction.seconds);
-  return { progress, rate: progress >= 1 ? 0 : rate, temperature };
+  return { progress, rate: progress >= 1 ? 0 : rate, temperature, age };
 };
 
 interface TubeReactionState {
