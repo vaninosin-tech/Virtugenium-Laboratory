@@ -36,6 +36,7 @@ const iteration13 = process.env.VISUAL_ITERATION_13 === "1";
 const iteration14 = process.env.VISUAL_ITERATION_14 === "1";
 const iteration15 = process.env.VISUAL_ITERATION_15 === "1";
 const iteration16 = process.env.VISUAL_ITERATION_16 === "1";
+const iteration17 = process.env.VISUAL_ITERATION_17 === "1";
 for (const kind of selectedCases) if (!(kind in cases)) throw new Error(`Unknown VISUAL_CASE: ${kind}`);
 for (const quality of qualities) if (!["HIGH", "LOW"].includes(quality)) throw new Error(`Unknown VISUAL_QUALITY: ${quality}`);
 const angle = process.env.VISUAL_ANGLE ?? (process.platform === "win32" ? "d3d11" : "swiftshader");
@@ -76,7 +77,7 @@ async function shot(name, group, timing = {}) {
   await writeFile(resolve(out, `${name}.png`), Buffer.from(data, "base64"));
   // Native Chromium clipping keeps the fine detail in the tube without
   // enlarging a downsampled contact sheet.
-  if (iteration16 || iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
+  if (iteration17 || iteration16 || iteration15 || iteration14 || iteration13 || iteration12 || iteration12GasOnly || precipitates || gasResidue || reference || permanganateColor || (name.includes("-HIGH-") || name.includes("-LOW-")) && (name.endsWith("-3s") || name.endsWith("-6s")
     || name.endsWith("-12s") || name.endsWith("-20s") || name.endsWith("-0")
     || name.endsWith("-before") || name.endsWith("-peak"))) {
     const close = await captureSession.send("Page.captureScreenshot", {
@@ -84,6 +85,13 @@ async function shot(name, group, timing = {}) {
       clip: { ...tubeCrop, scale: 1 },
     });
     await writeFile(resolve(out, `${name}-tube.png`), Buffer.from(close.data, "base64"));
+    if (iteration17) {
+      const mouth = await captureSession.send("Page.captureScreenshot", {
+        format: "png", fromSurface: true, captureBeyondViewport: false,
+        clip: { x: 700, y: 0, width: 200, height: 330, scale: 1 },
+      });
+      await writeFile(resolve(out, `${name}-mouth.png`), Buffer.from(mouth.data, "base64"));
+    }
     if (iteration15) {
       const detail = name.includes("-cling-") ? { x: 730, y: 620, width: 140, height: 190 }
         : name.includes("-plume-") ? { x: 730, y: 0, width: 140, height: 260 }
@@ -138,6 +146,79 @@ async function series(group, originMs, targets = times) {
   }
 }
 
+async function mouthVideoSeries(quality, stage, originMs, targets) {
+  const captured = await page.evaluate(async ({ originMs, targets }) => {
+    const waitUntil = deadline => new Promise(resolve => {
+      const tick = now => now >= deadline ? resolve() : requestAnimationFrame(tick);
+      requestAnimationFrame(tick);
+    });
+    await waitUntil(originMs + targets[0] * 1000 - 350);
+    const source = [...document.querySelectorAll("canvas")].find(canvas => canvas.getBoundingClientRect().width > 1000);
+    if (!source) throw new Error("Scene canvas not found");
+    const rect = source.getBoundingClientRect();
+    const sceneStream = source.captureStream(20);
+    const live = document.createElement("video");
+    live.srcObject = sceneStream;
+    live.muted = true;
+    await live.play();
+    const cropCanvas = document.createElement("canvas");
+    cropCanvas.width = 200; cropCanvas.height = 330;
+    const cropContext = cropCanvas.getContext("2d");
+    if (!cropContext) throw new Error("2D capture context unavailable");
+    let drawing = true;
+    const draw = () => {
+      if (!drawing) return;
+      cropContext.drawImage(live, (700 - rect.left) * live.videoWidth / rect.width,
+        (0 - rect.top) * live.videoHeight / rect.height, 200 * live.videoWidth / rect.width,
+        330 * live.videoHeight / rect.height, 0, 0, 200, 330);
+      requestAnimationFrame(draw);
+    };
+    requestAnimationFrame(draw);
+    const stream = cropCanvas.captureStream(20);
+    const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp8", videoBitsPerSecond: 2_000_000 });
+    const chunks = [];
+    recorder.ondataavailable = event => chunks.push(event.data);
+    const started = new Promise(resolve => { recorder.onstart = resolve; });
+    recorder.start();
+    await started;
+    const recordStartMs = performance.now();
+    await waitUntil(originMs + targets.at(-1) * 1000 + 250);
+    const stopped = new Promise(resolve => { recorder.onstop = resolve; });
+    recorder.stop();
+    await stopped;
+    drawing = false;
+    stream.getTracks().forEach(track => track.stop());
+    sceneStream.getTracks().forEach(track => track.stop());
+    live.srcObject = null;
+    const blob = new Blob(chunks, { type: "video/webm" });
+    const videoUrl = URL.createObjectURL(blob);
+    try {
+      const video = document.createElement("video");
+      video.src = videoUrl;
+      await new Promise(resolve => { video.onloadedmetadata = resolve; });
+      const output = document.createElement("canvas"); output.width = 200; output.height = 330;
+      const context = output.getContext("2d");
+      if (!context) throw new Error("2D capture context unavailable");
+      const images = [];
+      for (const targetSeconds of targets) {
+        video.currentTime = (originMs + targetSeconds * 1000 - recordStartMs) / 1000;
+        await new Promise(resolve => { video.onseeked = resolve; });
+        context.drawImage(video, 0, 0);
+        images.push(output.toDataURL("image/png").split(",")[1]);
+      }
+      return { images, recordStartMs, bytes: blob.size };
+    } finally { URL.revokeObjectURL(videoUrl); }
+  }, { originMs, targets });
+  for (let index = 0; index < targets.length; index++) {
+    const name = `copper-nitric-${quality}-${stage}-${index}`;
+    await writeFile(resolve(out, `${name}-mouth.png`), Buffer.from(captured.images[index], "base64"));
+    frames.push({ name, group: `copper-nitric-${quality}-${stage}`, videoFrame: true,
+      targetSeconds: targets[index], elapsedSeconds: targets[index],
+      recordStartMs: captured.recordStartMs, videoBytes: captured.bytes });
+    console.log(`${name}: video frame at ${targets[index].toFixed(2)}s`);
+  }
+}
+
 async function warmupShaders(quality) {
   console.log(`Warming all four reaction materials at ${quality}`);
   await page.evaluate(quality => {
@@ -150,7 +231,7 @@ async function warmupShaders(quality) {
     h.closeUp.getState().setViewing(true);
   }, quality);
   try {
-    for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => !(iteration15 || iteration16) || kind === "copper-nitric")) {
+    for (const [kind, reagents] of Object.entries(cases).filter(([kind]) => !(iteration15 || iteration16 || iteration17) || kind === "copper-nitric")) {
       await page.getByRole("button", { name: "Новая пробирка", exact: true }).click();
       await page.evaluate(reagents => {
         window.__tubeVisualTuningStore.setState({ enabled: true,
@@ -388,6 +469,26 @@ try {
 
   for (const quality of qualities) {
     await warmupShaders(quality);
+    if (iteration17) {
+      await prepare("copper-nitric", quality);
+      const startedAt = await page.evaluate(() => {
+        window.__tubeVisualTuningStore.setState({
+          enabled: true, progress: 0.5, rate: 1, temperature: 1, tiltDegrees: 0,
+        });
+        return performance.now();
+      });
+      await mouthVideoSeries(quality, "onset", startedAt,
+        Array.from({ length: 8 }, (_, index) => 2.65 + index * 0.25));
+      await page.evaluate(startedAt => new Promise(resolve => {
+        const tick = now => now >= startedAt + 7200 ? resolve() : requestAnimationFrame(tick);
+        requestAnimationFrame(tick);
+      }), startedAt);
+      await shot(`copper-nitric-${quality}-peak-full`, `copper-nitric-${quality}-peak`);
+      const peakAt = await page.evaluate(() => performance.now());
+      await mouthVideoSeries(quality, "peak", peakAt, [0.45, 0.75, 1.05]);
+      await page.evaluate(() => window.__tubeVisualTuningStore.setState({ enabled: false }));
+      continue;
+    }
     if (iteration16) {
       await prepare("copper-nitric", quality);
       await page.evaluate(() => window.__tubeVisualTuningStore.setState({
@@ -767,10 +868,10 @@ try {
       events.push(...data.events);
     } catch (error) { errors.push(`Collect trace: ${error.message}`); process.exitCode = 1; }
   }
-  try { if (!iteration16) await contactSheets(); }
+  try { if (!iteration16 && !iteration17) await contactSheets(); }
   catch (error) { errors.push(`Contact sheets: ${error.message}`); process.exitCode = 1; }
   try {
-    await writeFile(resolve(out, iteration16 ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
+    await writeFile(resolve(out, iteration16 || iteration17 ? `capture-${qualities.join("-")}.json` : "capture.json"), JSON.stringify({
       status: failure || errors.length ? "failed" : "complete", failure: failure ? String(failure.stack ?? failure) : null,
       frames, traces, events, errors, performanceSamples, browser: browser?.version(), angle, viewport, crop,
       selection: { cases: selectedCases, qualities, quick },

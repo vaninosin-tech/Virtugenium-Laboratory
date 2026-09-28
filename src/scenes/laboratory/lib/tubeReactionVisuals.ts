@@ -144,9 +144,9 @@ outgoingLight = vec3(0.16, 0.25, 0.27) + edge * vec3(1.05, 1.12, 1.15) + totalSp
   const foamMaterial = new THREE.MeshBasicMaterial({ color: "#d9e9e5", transparent: true, opacity: 0.43, depthWrite: false });
   const gasGeometry = new THREE.PlaneGeometry(2, 2);
   const gasMaterial = new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, toneMapped: false,
+    transparent: true, depthWrite: false, depthTest: false, toneMapped: false,
     uniforms: { uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) },
-      uOpacity: { value: 0 }, uTime: { value: 0 }, uLip: { value: lip.y }, uHeight: { value: radius * 4 } },
+      uOpacity: { value: 0 }, uTime: { value: 0 }, uLip: { value: lip.y } },
     vertexShader: `varying vec2 vP; varying float vGasHeight;
 void main() {
   vP = position.xy;
@@ -157,17 +157,16 @@ void main() {
   gl_Position = projectionMatrix * mv;
 }`,
     fragmentShader: `uniform vec3 uColor; uniform float uOpacity; uniform float uTime;
-uniform float uLip; uniform float uHeight;
+uniform float uLip;
 varying vec2 vP; varying float vGasHeight;
 void main() {
   if (vGasHeight < uLip - 0.0005) discard;
   float rise = clamp((vP.y + 1.0) * 0.5, 0.0, 1.0);
-  float flow = sin(uTime * 0.28 + rise * 2.8) * 0.025 * rise;
-  float width = mix(0.39, 0.53, smoothstep(0.0, 1.0, rise));
-  float edge = 1.0 - smoothstep(width * 0.4, width, abs(vP.x - flow));
-  float bottom = smoothstep(0.0, 0.12, rise);
-  float top = 1.0 - smoothstep(0.5, 1.0, rise);
-  gl_FragColor = vec4(uColor, uOpacity * edge * bottom * top);
+  float flow = sin(uTime * 0.28 + rise * 2.8) * 0.025 * rise * rise;
+  float width = mix(0.52, 0.63, smoothstep(0.0, 1.0, rise));
+  float edge = 1.0 - smoothstep(width * 0.45, width, abs(vP.x - flow));
+  float top = 1.0 - smoothstep(0.3, 1.0, rise);
+  gl_FragColor = vec4(uColor, uOpacity * edge * top);
   #include <colorspace_fragment>
 }`,
   });
@@ -176,12 +175,12 @@ void main() {
   headGeometry.translate(center.x, (lip.y + box.min.y) / 2, center.z);
   const headMaterial = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.FrontSide, toneMapped: false,
-    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uFront: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
+    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uFront: { value: 0 }, uMouth: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
       uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) } },
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 void main() { vP = position; vN = normalize(normalMatrix * normal);
 vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uFront; uniform float uResidue; uniform float uTime; uniform float uDetail;
+    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uFront; uniform float uMouth; uniform float uResidue; uniform float uTime; uniform float uDetail;
 uniform float uLip; uniform float uRadius; uniform vec3 uColor;
 varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 float gasNoise(vec3 p) {
@@ -203,15 +202,16 @@ if (uDetail > 0.5) {
   float cloud = gasNoise(q) * 0.7 + gasNoise(q * 0.9 + vec3(4.7, 0.0, 1.9)) * 0.3;
   motion = clamp(1.0 + (cloud - 0.5) * 1.25, 0.72, 1.28);
 }
-float heightDensity = mix(1.0, 0.48, smoothstep(0.05, 0.95, h));
+motion = mix(motion, 1.0, smoothstep(0.78, 1.0, h));
+float heightDensity = mix(1.0, 0.62, smoothstep(0.05, 0.95, h));
 float facing = abs(dot(normalize(vN), normalize(vEye)));
 float edgeFade = smoothstep(0.0, 0.3, facing);
-float lipFade = 1.0 - 0.15 * smoothstep(uLip - 0.008, uLip, vP.y);
 float wallBand = (0.55 + 0.55 * pow(1.0 - facing, 0.55))
   * smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.34, 0.72, h));
 float lowerFade = smoothstep(-0.012, 0.03, h);
-float rise = 1.0 - smoothstep(uFront - 0.12, uFront + 0.08, h);
-float mist = (1.0 - exp(-uDensity * 1.55 * heightDensity)) * edgeFade * lipFade
+float rise = mix(1.0 - smoothstep(uFront - 0.12, uFront + 0.08, h),
+  uMouth, smoothstep(0.76, 1.0, h));
+float mist = (1.0 - exp(-uDensity * 1.55 * heightDensity)) * edgeFade
   * lowerFade * rise * motion;
 gl_FragColor = vec4(uColor, min(0.9, mist + uResidue * wallBand * smoothstep(0.0, 0.12, facing)));
 #include <colorspace_fragment>
@@ -292,6 +292,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   let lastTime: number | undefined;
   let gasDensity = 0;
   let gasFront = 0;
+  let mouthFill = 0;
   let wallResidue = 0;
   let bubblePhase = 0;
   let surfaceActivity = 0;
@@ -358,7 +359,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       // A visual reservoir outlives the instantaneous chemical rate. Seeking
       // backwards resets it; wall residue clears over several minutes.
       if (reverseTime) {
-        gasDensity = 0; gasFront = 0; wallResidue = 0; bubblePhase = 0; surfaceActivity = 0;
+        gasDensity = 0; gasFront = 0; mouthFill = 0; wallResidue = 0; bubblePhase = 0; surfaceActivity = 0;
         residueAge = 0; residueAtStop = 0; bubbleStopAge = Infinity; wasProducingBubbles = false;
         releasedBubbles.length = 0; releasedAttached.length = 0;
       }
@@ -378,6 +379,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       if (!producingBubbles && bubbleStopAge < Infinity) bubbleStopAge += dt;
       gasDensity = THREE.MathUtils.clamp(gasDensity + dt * (drive / TUBE_VISUALS.gasBuildSeconds - gasDensity / TUBE_VISUALS.gasDecaySeconds), 0, 1);
       gasFront = THREE.MathUtils.clamp(gasFront + dt * drive / 3, 0, 1);
+      const mouthTarget = drive > 0.005 ? THREE.MathUtils.smoothstep(gasFront, 0.84, 1) : 0;
+      mouthFill = THREE.MathUtils.lerp(mouthFill, mouthTarget, 1 - Math.exp(-dt * 1.5));
       const targetActivity = producingBubbles ? Math.sqrt(drive) : 0;
       surfaceActivity = producingBubbles
         ? THREE.MathUtils.lerp(surfaceActivity, targetActivity, 1 - Math.exp(-dt * 7)) : 0;
@@ -447,13 +450,14 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       attachedBubbles.count = producingBubbles
         ? Math.min(72, Math.floor((quality === "LOW" ? 24 : quality === "MEDIUM" ? 32 : quality === "HIGH" ? 42 : 50) * surfaceActivity))
         : releasedAttached.length;
-      gas.visible = drive > 0.005 && gasDensity > 0.008 && gasFront > 0.98;
+      gas.visible = gasDensity > 0.008 && mouthFill > 0.005;
       headspace.visible = gasDensity > 0.008 || wallResidue > 0.008;
       gas.count = 1;
-      gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * gasDensity;
+      gasMaterial.uniforms.uOpacity.value = (1 - Math.exp(-gasDensity * 1.55 * 0.62)) * mouthFill;
       gasMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDensity.value = gasDensity;
       headMaterial.uniforms.uFront.value = gasFront;
+      headMaterial.uniforms.uMouth.value = mouthFill;
       headMaterial.uniforms.uResidue.value = Math.pow(wallResidue, 0.85) * (1 - gasDensity);
       headMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDetail.value = quality === "LOW" ? 0 : 1;
