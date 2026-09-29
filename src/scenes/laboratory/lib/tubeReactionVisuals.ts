@@ -18,7 +18,7 @@ export const TUBE_VISUALS = {
   settlingEnd: 0.94,
 };
 
-const MENISCUS_RISE = 0.0016;
+const MENISCUS_RISE = 0.0008;
 
 /** Small damped height field shared by the cap vertices; no waves at rest. */
 class TubeSurfaceWaves {
@@ -176,17 +176,18 @@ function createWaterBackdropMaterial(radius: number) {
   material.onBeforeCompile = shader => {
     shader.uniforms.uBackdropUp = up;
     shader.uniforms.uBackdropLevel = level;
-    shader.vertexShader = `attribute float tubeSurface; attribute float tubeWave;
+    shader.vertexShader = `attribute float tubeSurface; attribute float tubeWave; attribute float tubeWaveSlope;
 uniform vec3 uBackdropUp; uniform float uBackdropLevel;
-varying vec3 vBackdropPoint; varying float vBackdropCap;
+varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
 ${shader.vertexShader}`.replace("#include <begin_vertex>", `#include <begin_vertex>
 vBackdropCap = tubeSurface;
+vBackdropWave = tubeWaveSlope;
 if (tubeSurface > 0.5) transformed.y =
   (uBackdropLevel - dot(uBackdropUp.xz, position.xz)) / max(uBackdropUp.y, 0.2)
-  + 0.0016 * pow(clamp((length(position.xz) / ${radius.toFixed(7)} - 0.67) / 0.33, 0.0, 1.0), 2.0) + tubeWave;
+  + 0.0008 * pow(clamp((length(position.xz) / ${radius.toFixed(7)} - 0.67) / 0.33, 0.0, 1.0), 2.0) + tubeWave;
 vBackdropPoint = transformed;`);
     shader.fragmentShader = `uniform vec3 uBackdropUp; uniform float uBackdropLevel;
-varying vec3 vBackdropPoint; varying float vBackdropCap;
+varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
 if (vBackdropCap < 0.5 && dot(uBackdropUp, vBackdropPoint) > uBackdropLevel + 0.0004) discard;`)
       .replace("#include <opaque_fragment>", `
@@ -195,6 +196,11 @@ vec2 bend = vBackdropCap > 0.5 ? vec2(vNormal.x * 14.0, vNormal.z * 8.0)
   : vec2(vNormal.x * 24.0, 0.0);
 vec3 backdrop = texture2D(transmissionSamplerMap,
   clamp(screenUv + bend / transmissionSamplerSize, vec2(0.001), vec2(0.999))).rgb * 1.32;
+vec3 straight = texture2D(transmissionSamplerMap, clamp(screenUv, vec2(0.001), vec2(0.999))).rgb;
+float edgeSoft = vBackdropCap > 0.5
+  ? clamp(abs(vBackdropWave) * 8.0, 0.0, 1.0)
+  : mix(0.25, 1.0, smoothstep(0.0, 0.03, uBackdropLevel - dot(uBackdropUp, vBackdropPoint)));
+backdrop = mix(straight, backdrop, edgeSoft);
 gl_FragColor = vec4(backdrop, 1.0);`);
   };
   material.customProgramCacheKey = () => "tube-water-backdrop-v1";
@@ -408,13 +414,14 @@ void main() {
 uniform float uLip;
 varying vec2 vP; varying float vGasHeight;
 void main() {
-  if (vGasHeight < uLip - 0.0005) discard;
+  if (vGasHeight < uLip - 0.006) discard;
   float rise = clamp((vP.y + 1.0) * 0.5, 0.0, 1.0);
   float flow = sin(uTime * 0.28 + rise * 2.8) * 0.025 * rise * rise;
   float width = mix(0.52, 0.63, smoothstep(0.0, 1.0, rise));
   float edge = 1.0 - smoothstep(width * 0.45, width, abs(vP.x - flow));
   float top = 1.0 - smoothstep(0.3, 1.0, rise);
-  gl_FragColor = vec4(uColor, uOpacity * edge * top);
+  float bridge = smoothstep(uLip - 0.006, uLip + 0.001, vGasHeight);
+  gl_FragColor = vec4(uColor, uOpacity * edge * top * bridge);
   #include <colorspace_fragment>
 }`,
   });
@@ -441,7 +448,7 @@ float gasNoise(vec3 p) {
 }
 void main() {
 float aboveWater = dot(uUp, vP) - uLevel;
-if (aboveWater < 0.0) discard;
+if (aboveWater < -0.005) discard;
 float h = clamp(aboveWater / max(uLip - uLevel, 0.005), 0.0, 1.0);
 float motion = 1.0 + 0.10 * sin(h * 2.4 - uTime * 0.3);
 if (uDetail > 0.5) {
@@ -451,12 +458,12 @@ if (uDetail > 0.5) {
   motion = clamp(1.0 + (cloud - 0.5) * 1.25, 0.72, 1.28);
 }
 motion = mix(motion, 1.0, smoothstep(0.78, 1.0, h));
-float heightDensity = mix(1.0, 0.62, smoothstep(0.05, 0.95, h));
+float heightDensity = mix(1.0, 0.92, smoothstep(0.05, 0.95, h));
 float facing = abs(dot(normalize(vN), normalize(vEye)));
 float edgeFade = smoothstep(0.0, 0.3, facing);
 float wallBand = (0.55 + 0.55 * pow(1.0 - facing, 0.55))
   * smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.34, 0.72, h));
-float lowerFade = smoothstep(-0.012, 0.03, h);
+float lowerFade = smoothstep(-0.002, 0.018, aboveWater);
 float rise = mix(1.0 - smoothstep(uFront - 0.12, uFront + 0.08, h),
   uMouth, smoothstep(0.76, 1.0, h));
 float mist = (1.0 - exp(-uDensity * 1.55 * heightDensity)) * edgeFade
@@ -604,7 +611,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       if (backdrop && backdropWall && backdropCap) {
         backdrop.up.value.copy(up.value);
         backdrop.level.value = level.value;
-        backdropWall.visible = backdropCap.visible = refraction && quality !== "LOW";
+        backdropWall.visible = refraction && quality !== "LOW";
+        // Its flat transmission pass draws an opaque line in the player's
+        // near-horizontal view. The physical liquid cap still carries waves.
+        backdropCap.visible = false;
       }
       inverse.copy(volume.matrixWorld).invert();
       gravity.set(0, 1, 0).transformDirection(inverse);
@@ -649,8 +659,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       wasProducingBubbles = producingBubbles;
       if (!producingBubbles && bubbleStopAge < Infinity) bubbleStopAge += dt;
       gasDensity = THREE.MathUtils.clamp(gasDensity + dt * (drive / TUBE_VISUALS.gasBuildSeconds - gasDensity / TUBE_VISUALS.gasDecaySeconds), 0, 1);
-      gasFront = THREE.MathUtils.clamp(gasFront + dt * drive / 3, 0, 1);
-      const mouthTarget = drive > 0.005 ? THREE.MathUtils.smoothstep(gasFront, 0.84, 1) : 0;
+      gasFront = THREE.MathUtils.clamp(gasFront + dt * drive / 1.8, 0, 1);
+      const mouthTarget = drive > 0.005 ? THREE.MathUtils.smoothstep(gasFront, 0.62, 0.92) : 0;
       mouthFill = THREE.MathUtils.lerp(mouthFill, mouthTarget, 1 - Math.exp(-dt * 1.5));
       const targetActivity = producingBubbles ? Math.sqrt(drive) : 0;
       surfaceActivity = producingBubbles
@@ -727,7 +737,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       gas.visible = gasDensity > 0.008 && mouthFill > 0.005;
       headspace.visible = gasDensity > 0.008 || wallResidue > 0.008;
       gas.count = 1;
-      gasMaterial.uniforms.uOpacity.value = (1 - Math.exp(-gasDensity * 1.55 * 0.62)) * mouthFill;
+      // One billboard layer needs a little more opacity than the two visible
+      // sides of the headspace cylinder to meet it at the lip.
+      gasMaterial.uniforms.uOpacity.value = Math.min(0.9,
+        (1 - Math.exp(-gasDensity * 1.55 * 0.92)) * mouthFill * 1.25);
       gasMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDensity.value = gasDensity;
       headMaterial.uniforms.uFront.value = gasFront;
@@ -858,9 +871,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           place(bubbles, i, bubblePoint.x, bubblePoint.y, bubblePoint.z, bubbleSize, bubbleSize * (bubbleSize > radius * 0.1 ? 0.82 : 1), bubbleSize);
         }
         if (gas.visible && i < gas.count) {
-          place(gas, i, lip.x + gravity.x * radius * 2.4,
-            lip.y + gravity.y * radius * 2.4, lip.z + gravity.z * radius * 2.4,
-            radius * 2.4, radius * 2.4, radius * 2.4);
+          // Overlap the interior column by 6 mm so the glass rim cannot
+          // reveal a slit between the headspace and the external stream.
+          const plumeHalfHeight = radius * 2.4 + 0.003;
+          const plumeCenter = radius * 2.4 - 0.003;
+          place(gas, i, lip.x + gravity.x * plumeCenter,
+            lip.y + gravity.y * plumeCenter, lip.z + gravity.z * plumeCenter,
+            radius * 2.4, plumeHalfHeight, radius * 2.4);
         }
         if (condensate.visible && i < condensate.count) {
           place(condensate, i, Math.cos(angle) * radius * 0.99,

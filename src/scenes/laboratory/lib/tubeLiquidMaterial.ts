@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { LiquidMaterial, type LiquidOptions } from "./reagentMaterials";
 
-export const TUBE_LIQUID = { clearAlpha: 0.10, edgeAlpha: 0.42, meniscusAlpha: 0.48, clearHighlight: 0.25 };
+export const TUBE_LIQUID = { clearAlpha: 0.10, edgeAlpha: 0.42, meniscusAlpha: 0.12, clearHighlight: 0.25 };
 
 /** Tube-only optics: no framebuffer copy or change to the reagent bottles. */
 export class TubeLiquidMaterial extends LiquidMaterial {
@@ -32,9 +32,9 @@ if (tubeSurface > 0.5) objectNormal = normalize(uUp + vec3(normal.x, 0.0, normal
 vCap = tubeSurface;
 if (tubeSurface > 0.5) {
   transformed.y = (uLevel - dot(uUp.xz, position.xz)) / max(uUp.y, 0.2);
-  // A wetting rim rises 1.6 mm along the glass.
+  // A shallow wetting rim rises along the glass without outlining the disk.
   float radial = length((position.xz - uBoundsMin.xz - uBoundsSize.xz * 0.5) / (uBoundsSize.xz * 0.5));
-  transformed.y += 0.0016 * pow(clamp((radial - 0.67) / 0.33, 0.0, 1.0), 2.0);
+  transformed.y += 0.0008 * pow(clamp((radial - 0.67) / 0.33, 0.0, 1.0), 2.0);
   transformed.y += tubeWave;
 }
 vTubePoint = transformed;`);
@@ -96,9 +96,8 @@ float endChroma = max(max(uReactionColor.r, uReactionColor.g), uReactionColor.b)
 float pigment = mix(smoothstep(0.15, 0.3, baseChroma), smoothstep(0.15, 0.3, endChroma), localMix);
 diffuseColor.rgb = tubeColor;
 float waterEdge = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.4);
-float meniscus = (1.0 - smoothstep(0.00015, 0.0007, abs(surfaceDistance))) * (1.0 - vCap);
-float capRim = smoothstep(0.43, 0.50, length(radial)) * vCap;
-float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + max(meniscus, capRim) * uMeniscusAlpha;
+float meniscus = (1.0 - smoothstep(0.0003, 0.0015, abs(surfaceDistance))) * (1.0 - vCap);
+float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + meniscus * uMeniscusAlpha;
 waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
 float milk = uReactionKind > 2.5 && uReactionKind < 3.5 ? 1.0 : 0.0;
 float raspberry = uReactionKind > 3.5 ? 1.0 - localMix : 0.0;
@@ -113,6 +112,9 @@ diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
   + cloud * mix(1.25, 0.72, milk) + raspberry * 0.28 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
+float edgeSoft = vCap > 0.5 ? max(0.10, clamp(abs(vTubeWaveSlope) * 8.0, 0.0, 1.0))
+  : smoothstep(0.0, 0.009, -surfaceDistance);
+diffuseColor.a *= edgeSoft;
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
 vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
 // Neutral scattering keeps a white precipitate white next to the warm burner.
@@ -130,11 +132,6 @@ float waveBright = vCap * clamp(vTubeWaveSlope * 10.0, 0.0, 1.0);
 float waveDark = vCap * clamp(-vTubeWaveSlope * 10.0, 0.0, 1.0);
 outgoingLight = mix(outgoingLight, vec3(0.90, 0.97, 1.0), waveBright * 0.85);
 outgoingLight *= 1.0 - waveDark * 0.55;
-float wetRim = vCap * smoothstep(0.432, 0.465, length(radial))
-  * (1.0 - smoothstep(0.482, 0.505, length(radial)));
-float reflectedWindow = 0.42 + 0.35 * clamp(vTubeWaveSlope * 2.5 + 0.5, 0.0, 1.0);
-outgoingLight = mix(outgoingLight, vec3(0.82, 0.94, 1.0), wetRim * reflectedWindow);
-diffuseColor.a = max(diffuseColor.a, wetRim * reflectedWindow * 0.65);
 #include <opaque_fragment>`);
     };
   }

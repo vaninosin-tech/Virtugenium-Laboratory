@@ -131,7 +131,7 @@ describe("tube reaction rendering contract", () => {
     const f = fixture(null);
     f.update(chemistry(0), "HIGH", Infinity, true);
     expect(f.get("TubeRefractedBackdrop").visible).toBe(true);
-    expect(f.get("TubeRefractedSurface").visible).toBe(true);
+    expect(f.get("TubeRefractedSurface").visible).toBe(false);
     expect(f.volume.material).toBe(f.baseline);
     expect(f.get("TubeLiquidSurface").material).toBe(f.baseline);
     f.update(chemistry(0), "LOW", Infinity, true);
@@ -256,9 +256,8 @@ describe("tube reaction rendering contract", () => {
     const head = f.get("TubeNO2Headspace");
     const plume = f.get<THREE.InstancedMesh>("TubeNO2");
     expect(head.visible).toBe(true);
-    expect(plume.visible).toBe(false);
-    expect(front(f)).toBeGreaterThan(0.5);
-    expect(front(f)).toBeLessThan(0.7);
+    expect(plume.visible).toBe(true);
+    expect(front(f)).toBeGreaterThan(0.9);
     f.advance(4, chemistry(0.5, 1), quality);
     expect(front(f)).toBe(1);
     expect(plume.visible).toBe(true);
@@ -273,14 +272,15 @@ describe("tube reaction rendering contract", () => {
     expect(headUniforms.uDetail.value).toBe(quality === "LOW" ? 0 : 1);
     expect(headUniforms.uMouth.value).toBeGreaterThan(0.9);
     expect(plumeUniforms.uOpacity.value).toBeCloseTo(
-      (1 - Math.exp(-density(f) * 1.55 * 0.62)) * headUniforms.uMouth.value, 6);
+      Math.min(0.9, (1 - Math.exp(-density(f) * 1.55 * 0.92)) * headUniforms.uMouth.value * 1.25), 6);
     expect(headUniforms.uLevel.value).toBeCloseTo(liquid(f).uniforms.uLevel.value);
     expect(headUniforms.uUp.value.equals(liquid(f).uniforms.uUp.value)).toBe(true);
     const matrix = new THREE.Matrix4();
     plume.getMatrixAt(0, matrix);
     expect(plume.count).toBe(1);
     const plumeBottom = matrix.elements[13] - Math.hypot(matrix.elements[4], matrix.elements[5], matrix.elements[6]);
-    expect(plumeBottom).toBeCloseTo(0.15, 4);
+    expect(plumeBottom).toBeCloseTo(0.144, 4);
+    expect(plumeBottom).toBeLessThan(head.geometry.boundingBox!.max.y);
     f.advance(1, chemistry(1, 0), quality);
     expect(density(f)).toBeLessThan(atLip);
     expect(density(f)).toBeGreaterThan(atLip * 0.8);
@@ -344,10 +344,9 @@ describe("tube reaction rendering contract", () => {
     expect(density(fast)).toBe(0);
     fast.advance(2, chemistry(0.1, 1));
     slow.advance(2, chemistry(0.1, 0.25));
-    expect(front(fast)).toBeGreaterThan(front(slow) * 3.9);
-    expect(front(fast)).toBeGreaterThan(0.5);
-    expect(front(fast)).toBeLessThan(0.7);
-    expect(fast.get("TubeNO2").visible).toBe(false);
+    expect(front(fast)).toBeGreaterThan(front(slow) * 3);
+    expect(front(fast)).toBeGreaterThan(0.9);
+    expect(fast.get("TubeNO2").visible).toBe(true);
     fast.advance(8, chemistry(0.1, 1));
     expect(front(fast)).toBe(1);
     expect(fast.get("TubeNO2").visible).toBe(true);
