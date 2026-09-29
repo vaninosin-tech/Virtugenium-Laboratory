@@ -338,7 +338,8 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   bottomCaustic.raycast = standCaustic.raycast = () => {};
   group.add(bottomCaustic, standCaustic);
   const geometry = new THREE.IcosahedronGeometry(1, 1);
-  const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1, envMapIntensity: 0.15 });
+  const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1,
+    envMapIntensity: 0.15, transparent: true, depthWrite: true });
   white.onBeforeCompile = (shader) => {
     shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 0.92 : 0.96 };
     shader.uniforms.uPowder = { value: kind === "barium-sulfate" ? 1 : 0 };
@@ -487,6 +488,7 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uResidue * wallBand * smoothstep(0.0
     return mesh;
   };
   const flakes = makePool(white);
+  flakes.renderOrder = 1;
   if (kind === "silver-chloride") flakes.geometry = curdGeometry;
   flakes.name = "TubePrecipitate";
   const bubbles = makePool(bubbleMaterial);
@@ -522,6 +524,7 @@ vec2 radial = position.xz - uSedimentCenter.xz;
 transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(length(radial), 0.000001));`);
   };
   const bed = new THREE.Mesh(originalGeometry, bedMaterial);
+  bed.renderOrder = 1;
   bed.name = "TubeSediment";
   bed.visible = false;
   bed.raycast = () => {};
@@ -663,8 +666,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const mouthTarget = drive > 0.005 ? THREE.MathUtils.smoothstep(gasFront, 0.62, 0.92) : 0;
       mouthFill = THREE.MathUtils.lerp(mouthFill, mouthTarget, 1 - Math.exp(-dt * 1.5));
       const targetActivity = producingBubbles ? Math.sqrt(drive) : 0;
-      surfaceActivity = producingBubbles
-        ? THREE.MathUtils.lerp(surfaceActivity, targetActivity, 1 - Math.exp(-dt * 7)) : 0;
+      surfaceActivity = THREE.MathUtils.lerp(surfaceActivity, targetActivity, 1 - Math.exp(-dt * 4));
       if (drive > 0.005) {
         wallResidue = Math.min(1, wallResidue + dt * drive / TUBE_VISUALS.gasBuildSeconds);
         residueAtStop = wallResidue;
@@ -676,7 +678,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const count = TUBE_VISUALS.particleCounts[quality];
       const precipitate = kind === "silver-chloride" || kind === "barium-sulfate";
       const curds = kind === "silver-chloride";
-      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.012 : 0.004);
+      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.10 : 0.018);
       const settled = precipitate ? THREE.MathUtils.smoothstep(p,
         curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
       if (kind === "barium-sulfate") bariumCompletionAge = p >= 0.999
@@ -728,11 +730,11 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       flakes.visible = curds && p > 0;
       flakes.count = count;
       bubbles.visible = producingBubbles || bubbleStopAge < 1.8 && releasedBubbles.length > 0;
-      bubbles.count = producingBubbles ? Math.min(count, Math.floor(count * Math.sqrt(rate))) : releasedBubbles.length;
+      bubbles.count = producingBubbles ? count : releasedBubbles.length;
       attachedBubbles.visible = producingBubbles && surfaceActivity > 0.02
         || bubbleStopAge < 1.8 && releasedAttached.length > 0;
       attachedBubbles.count = producingBubbles
-        ? Math.min(72, Math.floor((quality === "LOW" ? 24 : quality === "MEDIUM" ? 32 : quality === "HIGH" ? 42 : 50) * surfaceActivity))
+        ? (quality === "LOW" ? 24 : quality === "MEDIUM" ? 32 : quality === "HIGH" ? 42 : 50)
         : releasedAttached.length;
       gas.visible = gasDensity > 0.008 && mouthFill > 0.005;
       headspace.visible = gasDensity > 0.008 || wallResidue > 0.008;
@@ -748,17 +750,18 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       headMaterial.uniforms.uResidue.value = Math.pow(wallResidue, 0.85) * (1 - gasDensity);
       headMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDetail.value = quality === "LOW" ? 0 : 1;
-      condensate.visible = kind === "copper-nitric" && temperature > 0.6;
+      condensate.visible = kind === "copper-nitric" && temperature > 0.01;
       condensate.count = Math.floor(count / 3);
-      dropletMaterial.opacity = 0.15 + temperature * 0.25;
+      dropletMaterial.opacity = (0.15 + temperature * 0.25)
+        * THREE.MathUtils.smoothstep(temperature, 0.45, 0.72);
       if (copper) {
         const shrink = Math.cbrt(Math.max(0, 1 - p));
         copper.children.forEach((child, i) => {
           const etch = THREE.MathUtils.smoothstep(p * (0.8 + random(i + 150) * 0.38), 0.02, 0.9);
           if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-            child.material.color.set("#d58b68").lerp(new THREE.Color("#59463f"), etch * 0.9);
-            child.material.roughness = THREE.MathUtils.lerp(0.27, 0.84, etch);
-            child.material.metalness = THREE.MathUtils.lerp(0.96, 0.42, etch);
+            child.material.color.set("#d58b68").lerp(new THREE.Color("#bd785b"), etch * 0.45);
+            child.material.roughness = THREE.MathUtils.lerp(0.32, 0.68, etch);
+            child.material.metalness = THREE.MathUtils.lerp(0.62, 0.40, etch);
           }
           // A bounding sphere encloses every rotated, irregular grain. Fit
           // that sphere inside the bowl instead of trusting its drop target.
@@ -792,7 +795,11 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           const cycle = (bubblePhase * (0.42 + rate * 0.42) + random(i + 307)) % 1;
           const growth = THREE.MathUtils.smoothstep(cycle, 0.02, 0.77);
           const release = 1 - THREE.MathUtils.smoothstep(cycle, 0.78, 1);
-          const sizeBubble = radius * (0.05 + 0.08 * growth) * release * copperGrain.scale.x;
+          const siteFade = THREE.MathUtils.smoothstep(surfaceActivity,
+            i / attachedBubbles.count, (i + 3) / attachedBubbles.count);
+          const sizeBubble = radius * (0.05 + 0.08 * growth) * release
+            * THREE.MathUtils.smoothstep(cycle, 0, 0.08) * siteFade
+            * THREE.MathUtils.smoothstep(surfaceActivity, 0, 0.18) * copperGrain.scale.x;
           source.set(Math.cos(angle) * radial, elevation, Math.sin(angle) * radial)
             .multiplyScalar(grainBound * 1.03).add(copperGrain.position);
           place(attachedBubbles, i, source.x, source.y + radius * 0.22 * (1 - release), source.z,
@@ -813,9 +820,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       splash.visible = splashAge >= 0 && splashAge < 1;
       splash.count = Math.max(6, Math.floor(count / 2));
-      foam.visible = kind === "copper-nitric" && rate > 0.55;
+      foam.visible = kind === "copper-nitric" && rate > 0.01;
       foam.count = Math.floor(count / 4);
-      foamMaterial.opacity = 0.16 + rate * 0.3;
+      const foamFade = THREE.MathUtils.smoothstep(rate, 0.45, 0.7);
+      foamMaterial.opacity = (0.16 + rate * 0.3) * foamFade;
       const activeCount = Math.max(flakes.visible ? count : 0, bubbles.visible ? bubbles.count : 0,
         gas.visible ? gas.count : 0, condensate.visible ? condensate.count : 0, splash.visible ? splash.count : 0,
         foam.visible ? foam.count : 0);
@@ -827,7 +835,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         const grain = radius * (curds ? (0.34 + random(i + 31) * 0.13) * (0.45 + settled * 0.55) : 0.06);
         const floor = box.min.y + size.y * (curds ? 0.10 + random(i + 14) * (TUBE_VISUALS.curdLayerHeight - 0.13) : 0.07 + random(i + 14) * 0.025);
         const drift = Math.sin(time * 0.75 + i * 2.4) * radius * 0.07 * (1 - settled);
-        const ingress = curds ? THREE.MathUtils.smoothstep(p * 80, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
+        const ingress = curds ? THREE.MathUtils.smoothstep(p * 8, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
         if (flakes.visible) place(flakes, i, x + drift - gravity.x * radius * settled * 0.6, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), floor - gravity.z * z, settled), z - gravity.z * radius * settled * 0.6,
           grain * onset * ingress, grain * onset * ingress * (curds ? 1.5 : 0.65), grain * onset * ingress);
         if (bubbles.visible && !producingBubbles && i < bubbles.count) {
@@ -842,7 +850,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           const site = i % 8;
           const chain = Math.floor(i / 8);
           const rise = (bubblePhase * (0.7 + random(site + 180) * 0.35)
-            + (rate > 0.1 ? chain * 0.23 : random(i + 42))) % 1;
+            + chain * 0.23) % 1;
           const grainMesh = copper?.children[site % Math.max(1, copper.children.length)];
           if (grainMesh instanceof THREE.Mesh && p < 0.999) {
             const azimuth = site * 2.39996;
@@ -859,8 +867,12 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           // A rising bubble hits the wall and slides along it, never exits sideways.
           const radialDistance = Math.hypot(bubblePoint.x, bubblePoint.z);
           if (radialDistance > radius * 0.84) { bubblePoint.x *= radius * 0.84 / radialDistance; bubblePoint.z *= radius * 0.84 / radialDistance; }
-          const coldGate = rate > 0.05 || (time + random(i + 14) * 5) % 4 < 1.5;
-          const bubbleSize = coldGate ? radius * (0.095 + Math.pow(random(i + 241), 2) * 0.21) : 0;
+          const bubbleFade = THREE.MathUtils.smoothstep(Math.sqrt(drive),
+            i / count, (i + 3) / count);
+          const cycleFade = THREE.MathUtils.smoothstep(rise, 0, 0.08)
+            * (1 - THREE.MathUtils.smoothstep(rise, 0.90, 1));
+          const bubbleSize = radius * (0.095 + Math.pow(random(i + 241), 2) * 0.21)
+            * bubbleFade * cycleFade * THREE.MathUtils.smoothstep(drive, 0, 0.06);
           if (waveSurface && producingBubbles && bubbleSize > 0 && previousBubbleRise[i] >= 0
               && (rise > 0.97 && previousBubbleRise[i] <= 0.97
                 || rise < previousBubbleRise[i] && previousBubbleRise[i] > 0.9)) {
@@ -888,14 +900,17 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           const age = Math.max(0, splashAge);
           const speed = size.y * (0.8 + random(i + 4));
           place(splash, i, lip.x + Math.cos(angle) * speed * age, lip.y + speed * age * 2 - size.y * 4 * age * age,
-            lip.z + Math.sin(angle) * speed * age, radius * 0.16 * (1 - Math.min(age, 1)));
+            lip.z + Math.sin(angle) * speed * age,
+            radius * 0.16 * THREE.MathUtils.smoothstep(age, 0, 0.12)
+              * (1 - THREE.MathUtils.smoothstep(age, 0.7, 1)));
         }
         if (foam.visible && i < foam.count) {
           const localX = center.x + Math.cos(angle) * radius * (0.52 + 0.32 * random(i + 54));
           const localZ = center.z + Math.sin(angle) * radius * (0.52 + 0.32 * random(i + 54));
           const localY = (level.value - up.value.x * localX - up.value.z * localZ) / Math.max(up.value.y, 0.3);
           const pulse = 0.72 + 0.28 * Math.sin(time * 3.1 + i * 2.3);
-          place(foam, i, localX, localY + 0.0002, localZ, radius * (0.04 + random(i + 73) * 0.05) * pulse);
+          place(foam, i, localX, localY + 0.0002, localZ,
+            radius * (0.04 + random(i + 73) * 0.05) * pulse * foamFade);
         }
       }
       for (const mesh of [flakes, bubbles, gas, splash, condensate, foam]) if (mesh.visible) mesh.instanceMatrix.needsUpdate = true;

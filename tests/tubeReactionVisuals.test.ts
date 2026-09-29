@@ -390,19 +390,27 @@ describe("tube reaction rendering contract", () => {
     expect(f.get("TubeNO2Headspace").visible).toBe(false);
   });
 
-  it.each<RuntimeQuality>(["LOW", "HIGH"])("uses rate for bubble counts independently of progress at %s", quality => {
+  it.each<RuntimeQuality>(["LOW", "HIGH"])("fades bubble sizes with rate without changing the pool at %s", quality => {
     const f = fixture("copper-nitric", true);
     const bubbles = f.get<THREE.InstancedMesh>("TubeNOBubbles");
+    const matrix = new THREE.Matrix4();
+    const visibleSize = () => {
+      let sum = 0;
+      for (let i = 0; i < bubbles.count; i++) {
+        bubbles.getMatrixAt(i, matrix);
+        sum += new THREE.Vector3().setFromMatrixScale(matrix).x;
+      }
+      return sum;
+    };
     f.update(chemistry(0.4, 0.05), quality);
-    const slow = bubbles.count;
+    const slow = visibleSize();
     expect(bubbles.visible).toBe(true);
     f.update(chemistry(0.4, 0.25), quality);
-    const cold = bubbles.count;
-    expect(cold).toBeGreaterThanOrEqual(quality === "LOW" ? 12 : 27);
+    const cold = visibleSize();
     f.update(chemistry(0.4, 0.9), quality);
-    expect(bubbles.count).toBeGreaterThan(cold);
+    expect(visibleSize()).toBeGreaterThan(cold);
     expect(cold).toBeGreaterThan(slow);
-    expect(bubbles.count).toBeLessThanOrEqual(bubbles.instanceMatrix.count);
+    expect(bubbles.count).toBe(quality === "LOW" ? 24 : 54);
     f.advance(0.3, chemistry(0.4, 0.9), quality);
     f.update(chemistry(0.4), quality);
     expect(bubbles.visible).toBe(true);
@@ -436,7 +444,8 @@ describe("tube reaction rendering contract", () => {
     const activeCount = attached.count;
     f.advance(1, chemistry(0.6), quality);
     expect(attached.visible).toBe(true);
-    expect(attached.count).toBe(activeCount);
+    expect(attached.count).toBeGreaterThan(0);
+    expect(attached.count).toBeLessThanOrEqual(activeCount);
     f.advance(1, chemistry(0.6), quality);
     expect(attached.visible).toBe(false);
     f.advance(10, chemistry(0.6), quality);
@@ -586,16 +595,22 @@ describe("tube reaction rendering contract", () => {
     expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
   });
 
-  it("makes AgCl opaque with flocs within 0.1 s and BaSO4 milky within 0.2 s", () => {
+  it("brings AgCl flocs and BaSO4 milk in gradually over their first second", () => {
     const silver = fixture("silver-chloride");
     silver.update(chemistry(0.1 / 12));
-    expect(liquid(silver).uniforms.uCloudiness.value).toBeGreaterThan(0.7);
+    expect(liquid(silver).uniforms.uCloudiness.value).toBeGreaterThan(0);
+    expect(liquid(silver).uniforms.uCloudiness.value).toBeLessThan(0.5);
     const flocs = silver.get<THREE.InstancedMesh>("TubePrecipitate");
     expect(flocs.visible).toBe(true);
     expect(particleBounds(flocs).max.y).toBeGreaterThan(0);
+    silver.update(chemistry(1.2 / 12));
+    expect(liquid(silver).uniforms.uCloudiness.value).toBeCloseTo(1);
 
     const barium = fixture("barium-sulfate");
     barium.update(chemistry(0.2 / 45));
+    expect(liquid(barium).uniforms.uCloudiness.value).toBeGreaterThan(0);
+    expect(liquid(barium).uniforms.uCloudiness.value).toBeLessThan(0.5);
+    barium.update(chemistry(0.9 / 45));
     expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);
     barium.update(chemistry(15 / 45));
     expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);

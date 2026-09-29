@@ -101,13 +101,10 @@ float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + meniscus * uMeniscusAl
 waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
 float milk = uReactionKind > 2.5 && uReactionKind < 3.5 ? 1.0 : 0.0;
 float raspberry = uReactionKind > 3.5 ? 1.0 - localMix : 0.0;
-// Chalky particles cling to the cylindrical wall, independent of moving
-// liquid noise. Broader side bands keep the residue visible at tube scale.
-float wallSide = smoothstep(0.001, 0.04, waterEdge);
-float filmGrain = tubeNoise(vec3(radial.x * 20.0 + 8.0, h * 22.0, radial.y * 20.0 + 3.0));
-float filmPatch = smoothstep(0.42, 0.67, filmGrain);
+// A stationary chalky veil. No animated or high-frequency patch mask: only
+// the filtered film amount changes, so the wall cannot develop crawling marks.
 float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
-  * (0.10 + 0.55 * filmPatch) * mix(0.55, 1.0, wallSide);
+  * 0.45;
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity)
   + cloud * mix(1.25, 0.72, milk) + raspberry * 0.28 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)

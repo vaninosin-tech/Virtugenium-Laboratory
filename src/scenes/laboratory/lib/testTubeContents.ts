@@ -16,8 +16,10 @@ export function resolveTubeContents(
 const COPPER_GRANULE_MATERIAL = new THREE.MeshStandardMaterial({
   name: "TubeCopperGranule",
   color: "#d58b68",
-  metalness: 0.92,
+  metalness: 0.62,
   roughness: 0.32,
+  transparent: true,
+  depthWrite: true,
 });
 
 /**
@@ -66,6 +68,10 @@ export function createTubeCopperGranules(cavityGeometry: THREE.BufferGeometry): 
   }
   geometry.computeVertexNormals();
   const mesh = new THREE.Mesh(geometry, COPPER_GRANULE_MATERIAL.clone());
+  // Draw submerged solids after the refractive transmission passes. Those
+  // passes sample the opaque scene and otherwise paint dark background bands
+  // over both copper and white precipitate.
+  mesh.renderOrder = 1;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   const targetY = bounds.min.y + unit * 1.1;

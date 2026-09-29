@@ -82,6 +82,7 @@ export function LabTestTubeInstance({
   }, [instance, inStand]);
 
   const visuals = useRef<ReturnType<typeof createTubeReactionVisuals>>(null);
+  const displayedChemistry = useRef({ progress: 0, rate: 0, temperature: 0, age: 0 });
   const splashStart = useRef(-Infinity);
   useEffect(() => {
     if (!inStand) return;
@@ -95,6 +96,7 @@ export function LabTestTubeInstance({
   }, [inStand]);
 
   useEffect(() => {
+    displayedChemistry.current = { progress: 0, rate: 0, temperature: 0, age: 0 };
     const configs = resolveTubeContents(contents);
     const binding = fillTestTubeContents(instance, configs);
     const kind = reactionKindFor(contents ?? []);
@@ -112,7 +114,7 @@ export function LabTestTubeInstance({
 
   const groupRef = useRef<THREE.Group>(null);
   const parentWorldScale = useMemo(() => new THREE.Vector3(), []);
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const tuning = useTubeVisualTuningStore.getState();
     const group = groupRef.current;
     const parent = group?.parent;
@@ -131,11 +133,22 @@ export function LabTestTubeInstance({
     const chemistry =
       (chemistryId && useTubeReactionStore.getState().chemistryById[chemistryId]) || ROOM_TEMPERATURE_CHEMISTRY;
     const visualChemistry = import.meta.env.DEV && inStand && tuning.enabled ? tuning : chemistry;
+    // One displayed state drives every tube effect. Raw chemistry can jump
+    // when pouring, heating, seeking or replacing the tube; its image follows
+    // continuously with a half-second response instead of changing in a frame.
+    const displayed = displayedChemistry.current;
+    const follow = 1 - Math.exp(-Math.min(delta, 0.1) / 0.5);
+    for (const key of ["progress", "rate", "temperature"] as const) {
+      const raw = visualChemistry[key];
+      const target = Number.isFinite(raw) ? THREE.MathUtils.clamp(raw, 0, 1) : 0;
+      displayed[key] += (target - displayed[key]) * follow;
+    }
+    displayed.age = chemistry.age ?? 0;
     const quality = useRuntimeQualityStore.getState().quality;
     const refraction = inStand && quality !== "LOW"
       && (useTubeCloseUpStore.getState().viewing || useHeatingStore.getState().active);
     for (const mesh of glassBackdrops.current) mesh.visible = refraction;
-    visuals.current?.update(visualChemistry, clock.elapsedTime, quality,
+    visuals.current?.update(displayed, clock.elapsedTime, quality,
       performance.now() / 1000 - splashStart.current, refraction);
     if (inStand) {
       for (const uniform of crackUniforms.current) uniform.value.set(crackSpot?.side ?? 0, crackSpot?.height ?? -1);
