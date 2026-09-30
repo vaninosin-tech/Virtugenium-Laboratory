@@ -36,9 +36,14 @@ await page.evaluate(async () => {
 });
 await wait(3); await shot("04-closeup-lit");
 await page.evaluate(() => {
-  const hs = window.__heatingStore; hs.getState().reset(); hs.getState().enter(); hs.getState().grab();
-  hs.getState().setSweep(1);
+  const hs = window.__heatingStore; hs.getState().reset(); hs.getState().enter(() => 0.1); hs.getState().grab();
 });
-await wait(2); await shot("05-heating-tilted");
-await burner(false); await wait(2); await shot("06-capped-again");
+await wait(1.5); await shot("05-held-left-top");
+for (const [name, sweep] of [["06-held-left-mid", -0.5], ["07-held-vertex", 0], ["08-held-right-mid", 0.5], ["09-held-right-top", 1]]) {
+  await page.evaluate((v) => window.__heatingStore.getState().setSweep(v), sweep);
+  await wait(0.6); await shot(name);
+}
+await page.evaluate(() => window.__heatingStore.getState().exit());
+await wait(1.5); await shot("10-back-in-stand");
+await burner(false); await wait(2); await shot("11-capped-again");
 await browser.close();

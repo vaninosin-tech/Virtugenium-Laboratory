@@ -1,11 +1,14 @@
+import { useGLTF } from "@react-three/drei";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
 import * as THREE from "three";
 
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
 import { applyErrorRule } from "../../../features/tablet/lib/penalties";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
-import { TUBE_CLAMP_PIVOT, useBunsenStandScene } from "../lib/bunsenStandAssembly";
+import { TUBE_CLAMP_MODEL_PATH, TUBE_CLAMP_PIVOT, useBunsenStandScene } from "../lib/bunsenStandAssembly";
+import { CLAMP_TUBE_AXIS_X } from "../lib/bunsenStandGeometry";
+import { heldClampPose } from "../lib/heldClampPose";
 import { EQUIPMENT, type Position3 } from "../lib/layout";
 import { tryAddToTube, tryPourBetweenTubes } from "../lib/pourIntoTube";
 import {
@@ -15,7 +18,7 @@ import {
 } from "../lib/useBunsenStandStorageStore";
 import { useBurnerStore } from "../lib/useBurnerStore";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
-import { FLAME_HALF_WIDTH, crackSpotForZone, useHeatingStore } from "../lib/useHeatingStore";
+import { bottomInFlame, crackSpotForZone, useHeatingStore } from "../lib/useHeatingStore";
 import { useLabNoticeStore } from "../lib/useLabNoticeStore";
 import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
@@ -28,7 +31,7 @@ import {
 import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
-import { SpiritBurner } from "./SpiritBurner";
+import { FLAME_BASE_Y, FLAME_HEIGHT, SpiritBurner } from "./SpiritBurner";
 
 const DEF = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
 
@@ -66,16 +69,28 @@ const STAND_TURN_ASIDE = 0.5;
  */
 const STAND_ROTATION_Y = -Math.PI / 2 + STAND_TURN_ASIDE;
 
+/** "Away from the player" (the hood's back wall, hood -Z) in the stand's own turned space. */
+const AWAY_FROM_PLAYER = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), -STAND_ROTATION_Y);
+/** The player's right in the stand's own turned space. */
+const PLAYER_RIGHT = new THREE.Vector3().crossVectors(AWAY_FROM_PLAYER, new THREE.Vector3(0, 1, 0)).normalize();
 /**
- * Heating tilts the tube instead of sliding it: the tube stays in the clamp
- * and the clamp turns about its own handle (the notes' `Rx(tilt)`), swinging
- * the hanging tube's bottom through the flame. At full throw the bottom,
- * `TUBE_RING_INSERT_DEPTH` below the jaws, moves about ±3.5 cm sideways.
+ * How far to the player's right of the clamp's resting spot the lamp stands.
+ * On the V's left arm the held tube leans its mouth up-left, towards the
+ * stand's rod; this much room keeps the glass off the rod.
  */
-const MAX_TILT = Math.asin(0.035 / TUBE_RING_INSERT_DEPTH);
+const LAMP_ASIDE = 0.08;
+const LAMP_LOCAL: Position3 = [
+  TUBE_RING_LOCAL_OFFSET[0] + PLAYER_RIGHT.x * LAMP_ASIDE,
+  0,
+  TUBE_RING_LOCAL_OFFSET[2] + PLAYER_RIGHT.z * LAMP_ASIDE,
+];
+/** The flame's hot zone — its upper third (flame logic, section 3) — in the stand's space. */
+const FLAME_HOT_SPOT = new THREE.Vector3(LAMP_LOCAL[0], FLAME_BASE_Y + FLAME_HEIGHT * 0.7, LAMP_LOCAL[2]);
+/** Seconds to take the clamp off the boss and bring the tube to the flame, and back. */
+const CLAMP_MOVE_SECONDS = 0.7;
+/** How high the clamp lifts clear of the boss on its way. */
+const CLAMP_MOVE_LIFT = 0.03;
 
-/** Current tilt of the clamp arm, radians — shared by the stand model and the clamped tube. */
-const clampTilt = () => useHeatingStore.getState().sweep * MAX_TILT;
 /** Experiment 1's «пробирка нагрета без предварительного прогрева» — what a crack costs. */
 const HEAT_ERROR_RULE_ID = "error-1-heat";
 const HOLDER_ITEM_ID = "equipment-holder";
@@ -85,7 +100,7 @@ const reagentConfig = (id: string): ReagentContainerConfig | undefined =>
 
 function StandInFumeHood({ onActivate }: { readonly onActivate: () => void }) {
   const scene = useBunsenStandScene();
-  const { instance, clampPivot } = useMemo(() => {
+  const { instance } = useMemo(() => {
     const clone = scene.clone(true);
     clone.traverse((object) => {
       if (object instanceof THREE.Mesh) {
@@ -93,12 +108,11 @@ function StandInFumeHood({ onActivate }: { readonly onActivate: () => void }) {
         object.receiveShadow = true;
       }
     });
-    return { instance: clone, clampPivot: clone.getObjectByName(TUBE_CLAMP_PIVOT) };
+    // The clamp is drawn by `HeldClampRig`, which can take it off the boss.
+    const clampPivot = clone.getObjectByName(TUBE_CLAMP_PIVOT);
+    if (clampPivot) clampPivot.visible = false;
+    return { instance: clone };
   }, [scene]);
-
-  useFrame(() => {
-    if (clampPivot) clampPivot.rotation.x = clampTilt();
-  });
 
   return (
     <primitive
@@ -145,10 +159,8 @@ function HeatingRuntime() {
 
 /**
  * Runs the clamped tube's chemistry — see `advanceChemistry`. The contents
- * are in the flame whenever the burner is lit and the tube hangs over it:
- * that is a fact about where the tube is, not about the heating panel being
- * open, so a tube left over the flame keeps heating after «Отойти от штатива».
- * `started` keeps an untouched stand (knob at rest, never grabbed) cold.
+ * are in the flame only while the player holds the clamp with the tube's
+ * bottom in it: back on the stand the tube hangs well above the flame.
  */
 function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefined }) {
   useFrame((_, delta) => {
@@ -157,10 +169,11 @@ function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefin
     const inFlame =
       useBurnerStore.getState().lit &&
       heating.started &&
+      heating.active &&
       heating.phase !== "cracked" &&
-      // The contents heat only with the bottom right over the flame; the
-      // flame's edges during the preheat swing warm the glass, not the liquid.
-      Math.abs(heating.sweep) < FLAME_HALF_WIDTH / 2;
+      // The contents heat only with the bottom in the flame; the rest of the
+      // V warms the glass, not the liquid.
+      bottomInFlame(heating.sweep);
     const reactions = useTubeReactionStore.getState();
     const current = reactions.chemistryById[tube.instanceId] ?? ROOM_TEMPERATURE_CHEMISTRY;
     reactions.setChemistry(
@@ -173,20 +186,67 @@ function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefin
 }
 
 /**
- * Holds the clamped tube in the clamp and tilts it with the clamp — the same
- * handle axis and angle `StandInFumeHood` gives the clamp itself, so the tube
- * never slips in the jaws. Set per frame on the object rather than through
- * React state: the knob can move every frame while heating.
+ * The removable clamp with its tube. At rest it sits in the boss exactly
+ * where the stand model has it; while heating it comes off, lifts clear and
+ * holds the tube in the lamp's still flame at the spot the ellipse on the V
+ * picks (`heldClampPose`), then goes back. Driven per frame on the object
+ * rather than through React state: the ellipse can move every frame.
+ *
+ * Also publishes the camera's close-up focus, which follows the tube down to
+ * the flame and back.
  */
-function ClampTiltGroup({ children }: { readonly children: ReactNode }) {
-  const ref = useRef<THREE.Group>(null);
-  useFrame(() => {
-    if (ref.current) ref.current.rotation.x = clampTilt();
+function HeldClampRig({ children }: { readonly children: ReactNode }) {
+  const { scene } = useGLTF(TUBE_CLAMP_MODEL_PATH);
+  const clamp = useMemo(() => {
+    const clone = scene.clone(true);
+    clone.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.castShadow = true;
+        object.receiveShadow = true;
+      }
+    });
+    return clone;
+  }, [scene]);
+
+  const rigRef = useRef<THREE.Group>(null);
+  const focusRef = useRef<THREE.Group>(null);
+  const held = useRef(0);
+  const restJaws = useMemo(() => new THREE.Vector3(...TUBE_RING_LOCAL_OFFSET), []);
+  const restQuaternion = useMemo(() => new THREE.Quaternion(), []);
+
+  useFrame((_, rawDelta) => {
+    const rig = rigRef.current;
+    if (!rig) return;
+    const heating = useHeatingStore.getState();
+    const target = heating.active ? 1 : 0;
+    held.current = THREE.MathUtils.clamp(
+      held.current + Math.sign(target - held.current) * (Math.min(rawDelta, 0.1) / CLAMP_MOVE_SECONDS),
+      0,
+      1,
+    );
+    const k = THREE.MathUtils.smoothstep(held.current, 0, 1);
+    const pose = heldClampPose(heating.sweep, FLAME_HOT_SPOT, AWAY_FROM_PLAYER, TUBE_RING_INSERT_DEPTH);
+    rig.position.lerpVectors(restJaws, pose.jaws, k);
+    rig.position.y += CLAMP_MOVE_LIFT * Math.sin(Math.PI * k);
+    rig.quaternion.slerpQuaternions(restQuaternion, pose.quaternion, k);
+
+    const focus = focusRef.current;
+    if (focus) {
+      // Halfway up the hanging tube at rest; just above the flame while
+      // heating — steadier than following every move of the ellipse.
+      focus.position.set(restJaws.x, restJaws.y - TUBE_RING_INSERT_DEPTH + TUBE_FOCUS_HEIGHT, restJaws.z);
+      focus.position.lerp(HEATING_FOCUS, k);
+    }
   });
+
   return (
-    <group ref={ref} position={[0, TUBE_RING_LOCAL_OFFSET[1], TUBE_RING_LOCAL_OFFSET[2]]}>
-      <group position={[TUBE_RING_LOCAL_OFFSET[0], 0, 0]}>{children}</group>
-    </group>
+    <>
+      <group ref={rigRef}>
+        <primitive object={clamp} position={[-CLAMP_TUBE_AXIS_X, 0, 0]} />
+        <group position={[0, -TUBE_RING_INSERT_DEPTH, 0]}>{children}</group>
+      </group>
+      <TubeFocusAnchor anchorRef={focusRef} />
+    </>
   );
 }
 
@@ -196,13 +256,14 @@ function ClampTiltGroup({ children }: { readonly children: ReactNode }) {
  * experiment 1 hinges on — at the top of the frame.
  */
 const TUBE_FOCUS_HEIGHT = 0.08;
+/** Close-up focus while heating: a little above the flame, where the tube passes through it. */
+const HEATING_FOCUS = FLAME_HOT_SPOT.clone().setY(FLAME_HOT_SPOT.y + 0.03);
 
-/** Publishes the clamped tube's rest position for `CameraRig`'s close-up — see `TUBE_FOCUS`. */
-function TubeFocusAnchor({ position }: { readonly position: Position3 }) {
-  const ref = useRef<THREE.Group>(null);
+/** Publishes the tube's focus point for `CameraRig`'s close-up — see `TUBE_FOCUS`. Positioned by its owner. */
+function TubeFocusAnchor({ anchorRef }: { readonly anchorRef: RefObject<THREE.Group | null> }) {
   useFrame(() => {
-    if (!ref.current) return;
-    ref.current.getWorldPosition(TUBE_FOCUS.point);
+    if (!anchorRef.current) return;
+    anchorRef.current.getWorldPosition(TUBE_FOCUS.point);
     TUBE_FOCUS.valid = true;
   });
   useEffect(
@@ -211,7 +272,7 @@ function TubeFocusAnchor({ position }: { readonly position: Position3 }) {
     },
     [],
   );
-  return <group ref={ref} position={position} />;
+  return <group ref={anchorRef} />;
 }
 
 /**
@@ -326,18 +387,9 @@ export function FumeHoodWorkArea() {
       {standInHood && (
         <group position={STAND_LOCAL} rotation={[0, STAND_ROTATION_Y, 0]}>
           <StandInFumeHood onActivate={handleStandClick} />
-          <SpiritBurner />
+          <SpiritBurner position={LAMP_LOCAL} />
           <HeatingRuntime />
           <TubeReactionRuntime tube={clampedIndex === null ? undefined : hoodTubes[clampedIndex]} />
-          {clampedIndex !== null && hoodTubes[clampedIndex] && (
-            <TubeFocusAnchor
-              position={[
-                TUBE_RING_LOCAL_OFFSET[0],
-                TUBE_RING_LOCAL_OFFSET[1] - TUBE_RING_INSERT_DEPTH + TUBE_FOCUS_HEIGHT,
-                TUBE_RING_LOCAL_OFFSET[2],
-              ]}
-            />
-          )}
           {clampedIndex !== null && hoodTubes[clampedIndex] && (
             <group
               onClick={(event: ThreeEvent<MouseEvent>) => {
@@ -355,16 +407,15 @@ export function FumeHoodWorkArea() {
                 document.body.style.cursor = "auto";
               }}
             >
-            <ClampTiltGroup>
+            <HeldClampRig>
             <LabTestTubeInstance
-              position={[0, -TUBE_RING_INSERT_DEPTH, 0]}
               contents={hoodTubes[clampedIndex].contents}
               key={hoodTubes[clampedIndex].instanceId}
               chemistryId={hoodTubes[clampedIndex].instanceId}
               crackSpot={crackZone === null ? null : crackSpotForZone(crackZone)}
               inStand
             />
-            </ClampTiltGroup>
+            </HeldClampRig>
             </group>
           )}
         </group>

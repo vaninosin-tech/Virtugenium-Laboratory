@@ -52,9 +52,9 @@ function prepareLampMaterials(root: THREE.Object3D): THREE.Material[] {
         opacity: spirit ? 0.28 : 0.2,
         depthWrite: false,
         side: THREE.DoubleSide,
-        clearcoat: spirit ? 0 : 1,
+        clearcoat: 0,
         clearcoatRoughness: 0.04,
-        envMapIntensity: 1.4,
+        envMapIntensity: 0.5,
       });
       object.material = material;
       object.castShadow = false;
@@ -79,7 +79,7 @@ function Flame({ strength }: { readonly strength: React.MutableRefObject<number>
     const s = strength.current;
     group.visible = s > 0.01;
     group.scale.set(s * (1 + (flicker - 1) * 0.4), s * flicker, s * (1 + (flicker - 1) * 0.4));
-    if (lightRef.current) lightRef.current.intensity = 0.4 * s * flicker;
+    if (lightRef.current) lightRef.current.intensity = 0.03 * s * flicker;
   });
 
   // A spirit-lamp flame is pale and nearly see-through. Kept dim on purpose:
@@ -116,7 +116,7 @@ function Flame({ strength }: { readonly strength: React.MutableRefObject<number>
         color="#ffb060"
         intensity={0}
         distance={0.6}
-        decay={2}
+        decay={1}
       />
     </>
   );

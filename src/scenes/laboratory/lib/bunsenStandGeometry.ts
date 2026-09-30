@@ -1,11 +1,11 @@
 /** Measurements of the three-part stand — see `bunsenStandAssembly.ts`. Kept free of loaders so stores and node tests can import them. */
 
 /**
- * Boss height on the rod. 0.196 is the notes' "tube vertical, bottom in the
- * spirit lamp's hot zone" height for a tube hanging `TUBE_RING_INSERT_DEPTH`
- * below the clamp.
+ * Boss height on the rod. The tube hanging from it has its bottom 13.5 cm up,
+ * a couple of centimetres clear of the spirit lamp's flame tip: on the stand
+ * the tube is held, not heated; heating takes the clamp off (`HeldClampRig`).
  */
-export const CLAMP_MOUNT_HEIGHT = 0.196;
+export const CLAMP_MOUNT_HEIGHT = 0.235;
 /** `ClampHandleChannel` in `ClampMount`'s own space: the handle passes beside the rod. */
 export const CLAMP_CHANNEL_OFFSET_Z = 0.018;
 /** `TubeClamp_TubeAxis` along the clamp's handle. */

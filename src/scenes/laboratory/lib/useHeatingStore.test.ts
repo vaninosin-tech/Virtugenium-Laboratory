@@ -13,10 +13,18 @@ import {
 const state = () => useHeatingStore.getState();
 const STEP = 1 / 60;
 
-/** Runs the game for `seconds`, optionally letting the knob follow the oval each frame. */
-const run = (seconds: number, follow: boolean, lit = true) => {
+/** The ellipse dragged top to top at the reference pace, one pass per `PASS_SECONDS`. */
+const pacedSweep = (t: number, from: -1 | 1) => {
+  const phase = (t / PASS_SECONDS) % 2;
+  const along = phase <= 1 ? phase : 2 - phase;
+  return from * (1 - 2 * along);
+};
+
+/** Runs the game for `seconds`, optionally dragging the ellipse at the reference pace. */
+const run = (seconds: number, paced: boolean, lit = true) => {
+  const from = state().sweep < 0 ? -1 : 1;
   for (let t = 0; t < seconds; t += STEP) {
-    if (follow) state().setSweep(state().target);
+    if (paced) state().setSweep(pacedSweep(t, from));
     state().tick(STEP, lit);
   }
 };
@@ -28,37 +36,25 @@ const startFrom = (side: "left" | "right") => {
 
 beforeEach(() => startFrom("left"));
 
-describe("the oval", () => {
-  it("starts at the side the random pick chose, knob underneath it", () => {
-    expect(state().target).toBe(-1);
+describe("the ellipse", () => {
+  it("starts at the top of the V the random pick chose", () => {
     expect(state().sweep).toBe(-1);
     startFrom("right");
-    expect(state().target).toBe(1);
     expect(state().sweep).toBe(1);
   });
 
-  it("waits for the player to grab the knob", () => {
+  it("heats nothing until the player grabs it", () => {
     run(2, false);
-    expect(state().target).toBe(-1);
     expect(Math.max(...state().zones)).toBe(0);
-  });
-
-  it("crosses the track in one pass time and turns back", () => {
-    state().grab();
-    run(PASS_SECONDS / 2, false, false);
-    expect(state().target).toBeCloseTo(0, 1);
-    run(PASS_SECONDS / 2 + 0.5, false, false);
-    expect(state().targetDirection).toBe(-1);
-    expect(state().target).toBeLessThan(1);
   });
 });
 
 describe("preheating", () => {
-  it("following the oval preheats evenly in about four passes, without cracking", () => {
+  it("dragging at the reference pace preheats evenly in about four passes, without cracking", () => {
     state().grab();
     let maxSpread = 0;
     for (let t = 0; t < PASS_SECONDS * 4.5 && state().phase === "preheat"; t += STEP) {
-      state().setSweep(state().target);
+      state().setSweep(pacedSweep(t, -1));
       state().tick(STEP, true);
       maxSpread = Math.max(maxSpread, heatSpread(state().zones));
     }
@@ -82,7 +78,8 @@ describe("preheating", () => {
     expect(state().zones[zone]).toBe(Math.max(...state().zones));
     const spot = crackSpotForZone(zone);
     expect(spot.side).toBeGreaterThan(0.5);
-    expect(spot.height).toBeGreaterThan(crackSpotForZone(HEAT_ZONE_COUNT / 2).height);
+    // Nearer the top of the V than the vertex: lower on the tube.
+    expect(spot.height).toBeLessThan(crackSpotForZone(HEAT_ZONE_COUNT / 2).height);
   });
 
   it("an unlit burner heats nothing", () => {
@@ -100,7 +97,7 @@ describe("preheating", () => {
     state().restartPreheat(() => 0.9);
     expect(state().phase).toBe("preheat");
     expect(Math.max(...state().zones)).toBe(0);
-    expect(state().target).toBe(1);
+    expect(state().sweep).toBe(1);
     expect(state().started).toBe(false);
   });
 });
@@ -109,24 +106,25 @@ describe("heating the contents", () => {
   const preheat = () => {
     state().grab();
     for (let t = 0; t < PASS_SECONDS * 6 && state().phase === "preheat"; t += STEP) {
-      state().setSweep(state().target);
+      state().setSweep(pacedSweep(t, -1));
       state().tick(STEP, true);
     }
+    expect(state().phase).toBe("heating");
   };
 
-  it("parks the oval in the flame and fills while the knob is held there", () => {
+  it("fills while the tube's bottom is held in the flame, at either top of the V", () => {
     preheat();
-    expect(state().target).toBe(0);
-    state().setSweep(0);
+    state().setSweep(-1);
     run(HEAT_SECONDS / 2, false);
     expect(state().heatProgress).toBeCloseTo(0.5, 1);
+    state().setSweep(0.95);
     run(HEAT_SECONDS, false);
     expect(state().phase).toBe("done");
   });
 
   it("does not advance with the tube out of the flame", () => {
     preheat();
-    state().setSweep(0.8);
+    state().setSweep(0);
     run(HEAT_SECONDS, false);
     expect(state().heatProgress).toBe(0);
   });
@@ -140,5 +138,4 @@ it("leaving the mini-game keeps the glass as it was", () => {
   state().enter(() => 0.9);
   expect(state().active).toBe(true);
   expect(state().zones).toEqual(zones);
-  expect(state().target).not.toBe(1);
 });

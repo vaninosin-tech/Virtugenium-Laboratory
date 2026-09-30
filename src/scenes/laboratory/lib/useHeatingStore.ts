@@ -1,17 +1,21 @@
 import { create } from "zustand";
 
 /**
- * The glass along the tube is modelled as this many zones. The knob's
- * position on the track is the part of the tube sitting in the flame, so
- * the zones are laid out along the same -1..1 axis as the knob.
+ * The heating mini-game, after `docs/assets/SpiritLamp_flame_logic.txt`: the
+ * clamp comes off the stand and the player drags an ellipse along a V-shaped
+ * line; the held tube follows it through the spirit lamp's STILL flame
+ * (`HeldClampRig`). Along the line, `sweep` runs -1..1: the two tops of the V
+ * put the tube's bottom in the flame, the vertex puts the flame at the middle
+ * of the tube, and each arm is one flank of the glass. The glass along that
+ * line is modelled as this many zones.
  */
 export const HEAT_ZONE_COUNT = 12;
 
 /**
- * Seconds for the target oval to cross the track once. Four crossings are the
- * ToR's «провести в пламени влево-вправо четыре раза», so `PREHEAT_PER_PASS`
- * below is 1/4 — a player who simply follows the oval finishes the preheat in
- * exactly four passes.
+ * The reference pace: seconds for one pass from one top of the V to the
+ * other. Four such passes are the ToR's «провести в пламени четыре раза», so
+ * `PREHEAT_PER_PASS` below is 1/4. Faster passes warm less each and simply
+ * take more of them; lingering is what cracks the glass.
  */
 export const PASS_SECONDS = 5;
 const TARGET_SPEED = 2 / PASS_SECONDS;
@@ -42,8 +46,11 @@ const PREHEATED = 0.97;
 /** Spread at which the overlay starts warning. */
 export const WARN_SPREAD = 0.4;
 
-/** Half-width of the target oval, also the tolerance for "held in the flame" during heating. */
+/** How close to a top of the V counts as "the tube's bottom in the flame" when heating the contents. */
 export const TARGET_HALF_WIDTH = 0.14;
+
+/** Whether `sweep` holds the tube's bottom in the flame — either top of the V. */
+export const bottomInFlame = (sweep: number): boolean => Math.abs(sweep) >= 1 - TARGET_HALF_WIDTH;
 
 /** Seconds of holding the contents in the flame to finish heating them. */
 export const HEAT_SECONDS = 3.5;
@@ -53,16 +60,13 @@ export type HeatingPhase = "preheat" | "heating" | "done" | "cracked";
 interface HeatingState {
   /** Whether the heating mini-game currently owns the controls. */
   readonly active: boolean;
-  /** Knob position, -1..1 — the tube's offset across the flame. */
+  /** The ellipse's position along the V, -1..1 — where on the glass the flame is. */
   readonly sweep: number;
   /** Per-zone glass temperature, 0..1; preheat is done when every zone reaches 1. */
   readonly zones: readonly number[];
-  /** The oval the player follows, -1..1. */
-  readonly target: number;
-  readonly targetDirection: -1 | 1;
   /**
-   * The oval and the flame wait for the player's first grab — otherwise the
-   * tube would sit in the flame while the player is still reading the hint.
+   * The glass waits for the player's first grab — otherwise the tube would
+   * sit in the flame while the player is still reading the hint.
    */
   readonly started: boolean;
   /** 0..1 progress of heating the contents, only advances once preheated. */
@@ -70,12 +74,12 @@ interface HeatingState {
   readonly phase: HeatingPhase;
   /** The zone that was hottest when the glass cracked — where the crack starts. Null until a crack. */
   readonly crackZone: number | null;
-  /** `random` is injectable so tests can pick the oval's starting side. */
+  /** `random` is injectable so tests can pick the starting top of the V. */
   enter: (random?: () => number) => void;
   exit: () => void;
   grab: () => void;
   setSweep: (sweep: number) => void;
-  /** Advances the oval and the glass. `burnerLit: false` freezes the heating but not the oval. */
+  /** Advances the glass. `burnerLit: false` heats nothing. */
   tick: (deltaSeconds: number, burnerLit: boolean) => void;
   /** Rollback after a crack: fresh glass, same contents, the preheat starts over. */
   restartPreheat: (random?: () => number) => void;
@@ -97,23 +101,23 @@ export const zoneCentre = (index: number): number => {
 };
 
 /**
- * Where on the tube a crack in `zone` starts. The zones are the knob
- * positions the flame was under; with the tube tilting in its clamp
- * (`FumeHoodWorkArea`), a knob off to one side swings the bottom that way and
- * puts the flame on the bottom's opposite flank, a little higher up — so the
- * crack sits on that flank, higher the further out the zone is.
+ * Where on the tube a crack in `zone` starts: on the flank of that arm of the
+ * V, higher up the tube the nearer the zone is to the V's vertex.
  *
- * `side` is signed along the tube's own local Z (the tilt direction), -1..1;
- * `height` is 0..1 along the tube from its tip.
+ * `side` is signed across the tube, -1..1; `height` is 0..1 along the tube
+ * from its tip.
  */
 export interface CrackSpot {
   readonly side: number;
   readonly height: number;
 }
 
+/** Tube length the V covers from the bottom, as a fraction of the 15 cm tube (`heldTubePose`). */
+const V_REACH = 0.1 / 0.15;
+
 export const crackSpotForZone = (zone: number): CrackSpot => {
   const u = zoneCentre(zone) / (1 - FLAME_HALF_WIDTH);
-  return { side: u, height: 0.06 + 0.2 * Math.abs(u) };
+  return { side: u, height: 0.04 + V_REACH * (1 - Math.abs(u)) };
 };
 
 /** Spread between the hottest and coldest zone — the quantity that cracks the glass. */
@@ -124,10 +128,7 @@ const freshPreheat = (random: () => number) => {
   const side: -1 | 1 = random() < 0.5 ? -1 : 1;
   return {
     zones: coldZones(),
-    target: side,
-    targetDirection: (-side) as -1 | 1,
-    // The knob starts under the oval, at the end of the track — out of the
-    // flame's centre, so nothing heats before the player moves.
+    // The ellipse starts at a top of the V, the tube's bottom at the flame.
     sweep: side,
     started: false,
     heatProgress: 0,
@@ -140,8 +141,6 @@ const INITIAL = {
   active: false,
   sweep: 0,
   zones: coldZones() as readonly number[],
-  target: 0,
-  targetDirection: 1 as -1 | 1,
   started: false,
   heatProgress: 0,
   phase: "preheat" as HeatingPhase,
@@ -169,27 +168,14 @@ export const useHeatingStore = create<HeatingState>((set, get) => ({
 
   tick: (deltaSeconds, burnerLit) =>
     set((state) => {
-      if (!state.active || !state.started) return state;
+      if (!state.active || !state.started || !burnerLit) return state;
       if (state.phase === "cracked" || state.phase === "done") return state;
 
       if (state.phase === "heating") {
-        if (!burnerLit || Math.abs(state.sweep) > TARGET_HALF_WIDTH) return state;
+        if (!bottomInFlame(state.sweep)) return state;
         const heatProgress = Math.min(1, state.heatProgress + deltaSeconds / HEAT_SECONDS);
         return { heatProgress, phase: heatProgress >= 1 ? "done" : "heating" };
       }
-
-      // Preheat: the oval ping-pongs between the ends of the track.
-      let target = state.target + state.targetDirection * TARGET_SPEED * deltaSeconds;
-      let targetDirection = state.targetDirection;
-      if (target >= 1) {
-        target = 2 - target;
-        targetDirection = -1;
-      } else if (target <= -1) {
-        target = -2 - target;
-        targetDirection = 1;
-      }
-
-      if (!burnerLit) return { target, targetDirection };
 
       const zones = state.zones.map((heat, index) => {
         const weight = Math.max(0, 1 - Math.abs(zoneCentre(index) - state.sweep) / FLAME_HALF_WIDTH);
@@ -198,15 +184,12 @@ export const useHeatingStore = create<HeatingState>((set, get) => ({
 
       if (heatSpread(zones) >= CRACK_SPREAD) {
         const crackZone = zones.indexOf(Math.max(...zones));
-        return { zones, target, targetDirection, phase: "cracked", crackZone };
+        return { zones, phase: "cracked", crackZone };
       }
       // A hair under 1: frame-by-frame integration of four exact passes lands
       // a few thousandths short, and the player must not need a fifth.
-      if (Math.min(...zones) >= PREHEATED) {
-        // Preheated: the oval parks in the flame for the heating itself.
-        return { zones, target: 0, targetDirection, phase: "heating" };
-      }
-      return { zones, target, targetDirection };
+      if (Math.min(...zones) >= PREHEATED) return { zones, phase: "heating" };
+      return { zones };
     }),
 
   restartPreheat: (random = Math.random) => set({ active: true, ...freshPreheat(random) }),

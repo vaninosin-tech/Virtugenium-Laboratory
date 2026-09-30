@@ -6,8 +6,8 @@ import {
   CRACK_SPREAD,
   FLAME_HALF_WIDTH,
   HEAT_ZONE_COUNT,
-  TARGET_HALF_WIDTH,
   WARN_SPREAD,
+  bottomInFlame,
   heatSpread,
   useHeatingStore,
   zoneCentre,
@@ -18,10 +18,40 @@ const reagentConfig = (id: string | undefined): ReagentContainerConfig | undefin
   id === undefined ? undefined : (REAGENTS as Record<string, ReagentContainerConfig | undefined>)[id];
 
 const TRACK_WIDTH = 340;
-const KNOB_SIZE = 26;
+const V_HEIGHT = 130;
+const V_INSET = 22;
+/** The V: its left top, vertex and right top, in the SVG's pixels. */
+const V_LEFT = { x: V_INSET, y: V_INSET };
+const V_VERTEX = { x: TRACK_WIDTH / 2, y: V_HEIGHT - V_INSET / 2 };
+const V_RIGHT = { x: TRACK_WIDTH - V_INSET, y: V_INSET };
+const ELLIPSE_RX = 20;
+const ELLIPSE_RY = 11;
 
-/** -1..1 track position → percentage from the track's left edge. */
-const percent = (value: number) => `${((value + 1) / 2) * 100}%`;
+type Point = { readonly x: number; readonly y: number };
+const lerpPoint = (a: Point, b: Point, t: number): Point => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+
+/** -1..1 along the V → a point on it: -1 the left top, 0 the vertex, 1 the right top. */
+const pointOnV = (s: number): Point =>
+  s < 0 ? lerpPoint(V_VERTEX, V_LEFT, -s) : lerpPoint(V_VERTEX, V_RIGHT, s);
+
+/** The nearest point on the V to a pointer position, as -1..1. */
+const sweepAt = (p: Point): number => {
+  const project = (a: Point, b: Point) => {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const t = Math.min(1, Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)));
+    const q = lerpPoint(a, b, t);
+    return { t, distance: Math.hypot(p.x - q.x, p.y - q.y) };
+  };
+  const left = project(V_VERTEX, V_LEFT);
+  const right = project(V_VERTEX, V_RIGHT);
+  return left.distance < right.distance ? -left.t : right.t;
+};
+
+/** Angle of the arm a point on the V lies on, degrees, for the ellipse to lie along it. */
+const armAngle = (s: number) => {
+  const end = s < 0 ? V_LEFT : V_RIGHT;
+  return (Math.atan2(end.y - V_VERTEX.y, end.x - V_VERTEX.x) * 180) / Math.PI;
+};
 
 /** Cold glass reads as the track, hot glass as flame orange. */
 const zoneColour = (heat: number) => {
@@ -30,22 +60,21 @@ const zoneColour = (heat: number) => {
 };
 
 /**
- * The heating mini-game: the player drags the knob (the tube's position over
- * the flame) and follows the oval as it slowly crosses from one end to the
- * other. The strip under the track is the glass itself, zone by zone — it
- * fills evenly while the player follows and unevenly when they lag or hold
- * still, and too uneven cracks the tube. Once every zone is warm the oval
- * parks in the flame and holding the knob in it heats the contents.
+ * The heating mini-game: the clamp is off the stand and the player drags the
+ * ellipse along the V — the tube follows it through the lamp's still flame
+ * (`HeldClampRig`). The V itself is the glass, zone by zone: it fills evenly
+ * while the player keeps the ellipse moving and unevenly where they linger,
+ * and too uneven cracks the tube. Once every zone is warm, holding the
+ * ellipse at a top of the V — the tube's bottom in the flame — heats the
+ * contents.
  *
- * An HTML overlay rather than a 3D control on the stand: the player needs to
- * watch the real tube and the real flame while cranking, so the control has
- * to live outside the view it is acting on.
+ * An HTML overlay rather than a 3D control: the player needs to watch the
+ * real tube and the real flame while moving it.
  */
 export function HeatingControls() {
   const active = useHeatingStore((state) => state.active);
   const sweep = useHeatingStore((state) => state.sweep);
   const zones = useHeatingStore((state) => state.zones);
-  const target = useHeatingStore((state) => state.target);
   const started = useHeatingStore((state) => state.started);
   const phase = useHeatingStore((state) => state.phase);
   const heatProgress = useHeatingStore((state) => state.heatProgress);
@@ -57,7 +86,7 @@ export function HeatingControls() {
   const hoodTubes = useTestTubeStorageStore((state) => state.fumeHoodTestTubes);
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
 
-  const trackRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<SVGSVGElement>(null);
   const draggingRef = useRef(false);
 
   // Contents are still a single reagent id per tube (`StoredTestTube`), so a
@@ -74,31 +103,32 @@ export function HeatingControls() {
   const cracked = phase === "cracked";
   const spread = heatSpread(zones);
   const warming = phase === "preheat" && spread >= WARN_SPREAD;
-  const onTarget = Math.abs(sweep - target) <= TARGET_HALF_WIDTH;
+  const inFlame = phase === "heating" && bottomInFlame(sweep);
   const preheatRatio = zones.reduce((sum, heat) => sum + heat, 0) / HEAT_ZONE_COUNT;
 
-  const sweepFromEvent = (clientX: number) => {
+  const sweepFromEvent = (clientX: number, clientY: number) => {
     const track = trackRef.current;
     if (!track) return;
     const rect = track.getBoundingClientRect();
     if (rect.width === 0) return;
-    setSweep(((clientX - rect.left) / rect.width) * 2 - 1);
+    const scale = TRACK_WIDTH / rect.width;
+    setSweep(sweepAt({ x: (clientX - rect.left) * scale, y: (clientY - rect.top) * scale }));
   };
 
-  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (cracked) return;
     draggingRef.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
     grab();
-    sweepFromEvent(event.clientX);
+    sweepFromEvent(event.clientX, event.clientY);
   };
 
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (!draggingRef.current) return;
-    sweepFromEvent(event.clientX);
+    sweepFromEvent(event.clientX, event.clientY);
   };
 
-  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const endDrag = (event: ReactPointerEvent<SVGSVGElement>) => {
     draggingRef.current = false;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -109,10 +139,10 @@ export function HeatingControls() {
     ? "Пробирка треснула: стекло прогрето неравномерно."
     : phase === "preheat"
       ? started
-        ? "Ведите пробирку за овалом, пока стекло не прогреется равномерно."
-        : "Возьмите кружок и ведите пробирку за овалом через пламя."
+        ? "Водите эллипс по V, пока стекло не прогреется равномерно."
+        : "Возьмите эллипс и водите пробирку по V через пламя."
       : phase === "heating"
-        ? "Прогрев выполнен. Удерживайте пробирку в пламени."
+        ? "Прогрев выполнен. Держите дно пробирки в пламени — у верха V."
         : nothingToReact
           ? "Пробирка нагрета, но реагировать нечему."
           : "Содержимое нагрето.";
@@ -127,30 +157,72 @@ export function HeatingControls() {
         </span>
       ) : null}
 
-      <div
+      <svg
         ref={trackRef}
+        width={TRACK_WIDTH}
+        height={V_HEIGHT}
+        viewBox={`0 0 ${TRACK_WIDTH} ${V_HEIGHT}`}
         style={trackStyle(cracked)}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         role="slider"
-        aria-label="Положение пробирки над пламенем"
+        aria-label="Положение пробирки в пламени"
         aria-valuemin={-1}
         aria-valuemax={1}
         aria-valuenow={sweep}
       >
-        <div style={flameMarkStyle} aria-hidden />
-        {phase !== "done" && !cracked ? <div style={targetStyle(target, onTarget)} aria-hidden /> : null}
-        <div style={knobStyle(sweep, cracked)} aria-hidden />
-      </div>
-
-      {/* The glass, zone by zone, on the same axis as the track above. */}
-      <div style={glassStripStyle} aria-hidden>
-        {zones.map((heat, index) => (
-          <div key={index} style={zoneStyle(zoneCentre(index), heat)} />
+        <polyline
+          points={[V_LEFT, V_VERTEX, V_RIGHT].map((p) => `${p.x},${p.y}`).join(" ")}
+          fill="none"
+          stroke="rgba(8, 20, 32, 0.95)"
+          strokeWidth={22}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {/* The glass, zone by zone, laid along the V. */}
+        {zones.map((heat, index) => {
+          const centre = zoneCentre(index);
+          const from = pointOnV(centre - ZONE_HALF_SPAN);
+          const to = pointOnV(centre + ZONE_HALF_SPAN);
+          const crossesVertex = centre - ZONE_HALF_SPAN < 0 && centre + ZONE_HALF_SPAN > 0;
+          const points = crossesVertex ? [from, V_VERTEX, to] : [from, to];
+          return (
+            <polyline
+              key={index}
+              points={points.map((p) => `${p.x},${p.y}`).join(" ")}
+              fill="none"
+              stroke={zoneColour(heat)}
+              strokeWidth={12}
+              strokeLinecap="butt"
+            />
+          );
+        })}
+        {/* The tops of the V: the tube's bottom in the flame. */}
+        {[V_LEFT, V_RIGHT].map((p, index) => (
+          <circle
+            key={index}
+            cx={p.x}
+            cy={p.y}
+            r={16}
+            fill={phase === "heating" ? "rgba(255, 179, 71, 0.18)" : "none"}
+            stroke={phase === "heating" ? "rgba(255, 179, 71, 0.8)" : "rgba(255, 179, 71, 0.35)"}
+            strokeWidth={1.5}
+            strokeDasharray={phase === "heating" ? undefined : "3 3"}
+          />
         ))}
-      </div>
+        <ellipse
+          cx={pointOnV(sweep).x}
+          cy={pointOnV(sweep).y}
+          rx={ELLIPSE_RX}
+          ry={ELLIPSE_RY}
+          transform={`rotate(${armAngle(sweep)} ${pointOnV(sweep).x} ${pointOnV(sweep).y})`}
+          fill={cracked ? "rgba(248, 113, 113, 0.35)" : inFlame ? "rgba(110, 231, 168, 0.3)" : "rgba(127, 212, 255, 0.25)"}
+          stroke={cracked ? "#f87171" : inFlame ? "#6ee7a8" : "#7fd4ff"}
+          strokeWidth={2.5}
+        />
+      </svg>
 
       <div style={progressTrackStyle} aria-hidden>
         <div
@@ -168,7 +240,7 @@ export function HeatingControls() {
           </button>
         ) : null}
         <button type="button" style={exitButtonStyle} onClick={exit}>
-          Отойти от штатива
+          Вернуть лапку в штатив
         </button>
       </div>
     </div>
@@ -210,70 +282,14 @@ const warningStyle: CSSProperties = {
 };
 
 const trackStyle = (cracked: boolean): CSSProperties => ({
-  position: "relative",
-  width: TRACK_WIDTH,
-  height: 34,
-  borderRadius: 17,
-  border: "1px solid rgba(56, 189, 248, 0.3)",
-  backgroundColor: "rgba(8, 20, 32, 0.9)",
-  cursor: cracked ? "not-allowed" : "ew-resize",
+  display: "block",
+  cursor: cracked ? "not-allowed" : "grab",
   touchAction: "none",
   opacity: cracked ? 0.5 : 1,
 });
 
-const flameMarkStyle: CSSProperties = {
-  position: "absolute",
-  left: "50%",
-  top: 4,
-  bottom: 4,
-  width: 2,
-  marginLeft: -1,
-  borderRadius: 1,
-  backgroundColor: "rgba(255, 179, 71, 0.75)",
-};
-
-const targetStyle = (target: number, onTarget: boolean): CSSProperties => ({
-  position: "absolute",
-  top: 2,
-  bottom: 2,
-  left: percent(target - TARGET_HALF_WIDTH),
-  width: `${TARGET_HALF_WIDTH * 100}%`,
-  borderRadius: "50%",
-  border: `2px solid ${onTarget ? "rgba(110, 231, 168, 0.95)" : "rgba(252, 211, 77, 0.9)"}`,
-  backgroundColor: onTarget ? "rgba(110, 231, 168, 0.15)" : "rgba(252, 211, 77, 0.1)",
-  pointerEvents: "none",
-});
-
-const knobStyle = (sweep: number, cracked: boolean): CSSProperties => ({
-  position: "absolute",
-  top: (34 - 2 - KNOB_SIZE) / 2,
-  left: `calc(${percent(sweep)} - ${KNOB_SIZE / 2}px)`,
-  width: KNOB_SIZE,
-  height: KNOB_SIZE,
-  borderRadius: "50%",
-  backgroundColor: cracked ? "#f87171" : "#7fd4ff",
-  boxShadow: `0 0 12px ${cracked ? "rgba(248, 113, 113, 0.7)" : "rgba(127, 212, 255, 0.7)"}`,
-  pointerEvents: "none",
-});
-
-const glassStripStyle: CSSProperties = {
-  position: "relative",
-  width: TRACK_WIDTH,
-  height: 10,
-};
-
-/** Matches `zoneCentre`'s spacing: the zones span the track inset by the flame's half-width. */
-const ZONE_WIDTH_PERCENT = ((1 - FLAME_HALF_WIDTH) * 100) / HEAT_ZONE_COUNT;
-
-const zoneStyle = (centre: number, heat: number): CSSProperties => ({
-  position: "absolute",
-  top: 0,
-  bottom: 0,
-  left: `calc(${percent(centre)} - ${ZONE_WIDTH_PERCENT / 2}%)`,
-  width: `calc(${ZONE_WIDTH_PERCENT}% - 2px)`,
-  borderRadius: 3,
-  backgroundColor: zoneColour(heat),
-});
+/** Half of one zone's stretch along the V — matches `zoneCentre`'s spacing, less a hairline gap. */
+const ZONE_HALF_SPAN = (1 - FLAME_HALF_WIDTH) / HEAT_ZONE_COUNT - 0.012;
 
 const progressTrackStyle: CSSProperties = {
   width: TRACK_WIDTH,
