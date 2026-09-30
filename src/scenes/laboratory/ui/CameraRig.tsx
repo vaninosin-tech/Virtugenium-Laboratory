@@ -289,6 +289,10 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
   const heatForward = useRef(new THREE.Vector3());
   const heatBaseQuaternion = useRef(new THREE.Quaternion());
   const heatDolly = useRef(0);
+  /** The table viewpoint's own pose, followed as usual while the camera may be leaning in to the stand (see `tableDolly`). */
+  const roomBasePosition = useRef<THREE.Vector3 | null>(null);
+  /** 0..1 lean-in from the table viewpoint to the stand's close-up. */
+  const tableDolly = useRef(0);
   const closeUpPosition = useRef(new THREE.Vector3());
   const closeUpMatrix = useRef(new THREE.Matrix4());
   const closeUpQuaternion = useRef(new THREE.Quaternion());
@@ -1542,20 +1546,32 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
       heatDolly.current = 0;
       if (useHeatingStore.getState().active) useHeatingStore.getState().exit();
     }
-    if (useTubeCloseUpStore.getState().viewing) useTubeCloseUpStore.getState().setViewing(false);
+    // The stand on the table has the same close-up as the one in the hood:
+    // only leaving the table ends it.
+    const atTable = activeTargetId === "table";
+    if (!atTable) {
+      if (useTubeCloseUpStore.getState().viewing) useTubeCloseUpStore.getState().setViewing(false);
+      if (useHeatingStore.getState().active) useHeatingStore.getState().exit();
+    }
 
     // cabinetPhase === "room": normal free-look at a fixed CAMERA_TARGETS viewpoint.
     const target = resolveCameraTarget(activeTargetId);
     const [targetX, targetY, targetZ] = target.position;
 
+    // Follow the viewpoint on a base pose of its own, so a lean-in to the
+    // stand never feeds back into it.
+    const base = (roomBasePosition.current ??= camera.position.clone());
+    // Not leaning in: the base IS the camera (flights elsewhere move it).
+    if (tableDolly.current <= 0.001) base.copy(camera.position);
     if (!hasSnapped.current) {
-      camera.position.set(targetX, targetY, targetZ);
+      base.set(targetX, targetY, targetZ);
       hasSnapped.current = true;
     } else {
       const positionLerp = 1 - Math.exp(-delta / POSITION_DAMPING);
       targetPosition.current.set(targetX, targetY, targetZ);
-      camera.position.lerp(targetPosition.current, positionLerp);
+      base.lerp(targetPosition.current, positionLerp);
     }
+    camera.position.copy(base);
 
     const directionX = Math.sin(yaw.current) * Math.cos(pitch.current);
     const directionY = Math.sin(pitch.current);
@@ -1566,6 +1582,21 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
       camera.position.y + directionY,
       camera.position.z + directionZ,
     );
+
+    const standCloseUp =
+      atTable && (useHeatingStore.getState().active || useTubeCloseUpStore.getState().viewing);
+    tableDolly.current = THREE.MathUtils.damp(tableDolly.current, standCloseUp ? 1 : 0, HEAT_DOLLY_DAMPING, delta);
+    if (tableDolly.current > 0.001 && TUBE_FOCUS.valid) {
+      closeUpPosition.current
+        .subVectors(base, TUBE_FOCUS.point)
+        .normalize()
+        .multiplyScalar(TUBE_CLOSE_UP_DISTANCE)
+        .add(TUBE_FOCUS.point);
+      closeUpMatrix.current.lookAt(closeUpPosition.current, TUBE_FOCUS.point, camera.up);
+      closeUpQuaternion.current.setFromRotationMatrix(closeUpMatrix.current);
+      camera.position.lerpVectors(base, closeUpPosition.current, tableDolly.current);
+      camera.quaternion.slerp(closeUpQuaternion.current, tableDolly.current);
+    }
 
     if (activeTargetId === "overview" && state.isPointerLocked) {
       // Real geometry raycast, not a distance-to-anchor-point heuristic —

@@ -17,7 +17,7 @@ import { HeatingControls } from "./HeatingControls";
 import { InspectionControls } from "./InspectionControls";
 import { LabAudioRuntime } from "./LabAudioRuntime";
 import { LabNoticeOverlay } from "./LabNoticeOverlay";
-import { TubeCloseUpControls } from "./TubeCloseUpControls";
+import { StandActionPanel } from "./StandActionPanel";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { SceneStepAutoAdvance } from "../../../features/tablet/lib/SceneStepAutoAdvance";
@@ -660,7 +660,7 @@ export function Laboratory() {
       <DevExperimentShortcut />
       <PPEStatusOverlay />
       <HeatingControls />
-      <TubeCloseUpControls />
+      <StandActionPanel />
       <LabNoticeOverlay />
       <SandboxPanel />
       <SceneStepAutoAdvance />

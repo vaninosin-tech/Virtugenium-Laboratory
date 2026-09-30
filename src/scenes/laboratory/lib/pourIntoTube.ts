@@ -78,9 +78,36 @@ const guardMix = (
   return false;
 };
 
+/**
+ * Mixes that give off a toxic gas and so belong in the fume hood only: the
+ * ToR's «работа с токсичным газом вне вытяжки». Refused outside the hood,
+ * and charged — the attempt itself is the mistake.
+ */
+const HOOD_ONLY_MIXES: Readonly<Record<EntityId, { readonly together: readonly string[]; readonly ruleId: EntityId; readonly gas: string }>> = {
+  "experiment-copper-nitric-acid": { together: ["cu", "hno3"], ruleId: "error-1-fume", gas: "оксиды азота" },
+};
+
+const refusedOutsideHood = (location: TubeLocation, contents: readonly string[], adding: readonly string[]): boolean => {
+  if (location === "fumeHood") return false;
+  const experimentId = useLaboratoryStore.getState().selectedExperimentId;
+  const rule = experimentId === null ? undefined : HOOD_ONLY_MIXES[experimentId];
+  if (!rule) return false;
+  const after = new Set([...contents, ...adding]);
+  if (!rule.together.every((id) => after.has(id))) return false;
+  // The workbench fills by proximity every frame: one attempt, one notice.
+  if (isRepeat(`hood-only:${rule.ruleId}`)) return true;
+  const penalty = applyErrorRule(rule.ruleId, "safety-violation");
+  const points = penalty?.charged ? ` (${penalty.rule.points})` : "";
+  useLabNoticeStore
+    .getState()
+    .show(`Ошибка: выделяются ядовитые ${rule.gas} — этот опыт проводят только в вытяжном шкафу${points}`, "error");
+  return true;
+};
+
 export const tryAddToTube = (location: TubeLocation, index: number, reagentId: string): boolean => {
   const target = listFor(location)[index];
   if (!target || target.contents.includes(reagentId)) return false;
+  if (refusedOutsideHood(location, target.contents, [reagentId])) return false;
   return guardMix(target.instanceId, target.contents, [reagentId], () =>
     useTestTubeStorageStore.getState().addTubeContents(location, index, reagentId),
   );
@@ -92,6 +119,7 @@ export const tryPourBetweenTubes = (location: TubeLocation, fromIndex: number, t
   const target = list[toIndex];
   if (!source || !target || fromIndex === toIndex || source.contents.length === 0) return false;
   const adding = source.contents.filter((id) => !target.contents.includes(id));
+  if (refusedOutsideHood(location, target.contents, adding)) return false;
   return guardMix(target.instanceId, target.contents, adding, () =>
     useTestTubeStorageStore.getState().pourBetweenTubes(location, fromIndex, toIndex),
   );

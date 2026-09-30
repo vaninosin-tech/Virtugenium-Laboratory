@@ -179,6 +179,12 @@ interface TestTubeStorageState {
   pourBetweenTubes: (location: TubeLocation, fromIndex: number, toIndex: number) => void;
   /** Moves the named workbench tubes into the fume hood, preserving their relative order. Unknown ids are ignored. */
   transferTestTubesToFumeHood: (instanceIds: readonly string[]) => void;
+  /**
+   * A cracked tube goes in the bin and a clean, empty one takes its place
+   * (same slot, so a clamp holding it keeps holding the new one). The
+   * contents are lost with the glass — the player fills it again.
+   */
+  replaceWithEmptyTube: (location: TubeLocation, index: number) => void;
 }
 
 export const useTestTubeStorageStore = create<TestTubeStorageState>((set, get) => ({
@@ -237,6 +243,17 @@ export const useTestTubeStorageStore = create<TestTubeStorageState>((set, get) =
       const next = list.slice();
       next[fromIndex] = { ...source, contents: [] };
       next[toIndex] = { ...target, contents: [...target.contents, ...poured] };
+      return location === "workbench" ? { workbenchTestTubes: next } : { fumeHoodTestTubes: next };
+    }),
+
+  replaceWithEmptyTube: (location, index) =>
+    set((state) => {
+      const list =
+        location === "workbench" ? state.workbenchTestTubes : state.fumeHoodTestTubes;
+      const old = list[index];
+      if (!old) return state;
+      const next = list.slice();
+      next[index] = { instanceId: `${old.instanceId.replace(/-replaced-\d+$/, "")}-replaced-${Date.now()}`, contents: [] };
       return location === "workbench" ? { workbenchTestTubes: next } : { fumeHoodTestTubes: next };
     }),
 

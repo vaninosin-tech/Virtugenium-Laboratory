@@ -1,142 +1,28 @@
-﻿import { useGLTF } from "@react-three/drei";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 
-import { useBunsenStandScene } from "../lib/bunsenStandAssembly";
-
+import { TUBE_CLAMP_PIVOT, useBunsenStandScene } from "../lib/bunsenStandAssembly";
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
-import type { Position3 } from "../lib/layout";
-import { fillTestTubeContents, resolveTubeContents } from "../lib/testTubeContents";
-import { prepareTestTube } from "../lib/testTubeMaterials";
-import {
-  STAND_BASE_BOTTOM_OFFSET,
-  TUBE_RING_INSERT_DEPTH,
-  TUBE_RING_LOCAL_OFFSET,
-  useBunsenStandStorageStore,
-} from "../lib/useBunsenStandStorageStore";
+import { CAMERA_TARGETS, type Position3 } from "../lib/layout";
+import { STAND_BASE_BOTTOM_OFFSET, useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { useHeatingStore } from "../lib/useHeatingStore";
+import { useStandStationStore } from "../lib/useStandStationStore";
 import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useWorkbenchReagentAreaStore } from "../lib/useWorkbenchReagentAreaStore";
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
-import { SpiritBurner } from "./SpiritBurner";
-
-const TUBE_MODEL_PATH = "/assets/models/LabTestTube.glb";
-const ATTACHED_TUBE_LOCAL_POSITION: Position3 = [
-  TUBE_RING_LOCAL_OFFSET[0],
-  TUBE_RING_LOCAL_OFFSET[1] - TUBE_RING_INSERT_DEPTH,
-  TUBE_RING_LOCAL_OFFSET[2],
-];
-const ATTACHED_TUBE_TARGET = new THREE.Vector3(...ATTACHED_TUBE_LOCAL_POSITION);
-/** Same damping rate `WorkbenchTestTubeRackInstance` uses for its own shelf<->stage moves вЂ” reaches ~95% of the way to a target in about 0.5s, a deliberate "clips into place" feel rather than an instant pop. */
-const CLIP_IN_DAMPING = 10;
-/** "Close enough" to the ring's own resting spot to snap the last bit and stop animating. */
-const CLIP_IN_EPSILON = 0.004;
+import { StandStation } from "./StandStation";
 
 /**
- * The test tube currently clipped into `TubeRing` вЂ” a CHILD of the stand's
- * own group (see `BunsenStandWorkbenchDisplay`'s return below), so it
- * travels with the stand for free while it's dragged around the table,
- * instead of needing its own live position recompute every frame. Its rack
- * slot (`InspectableTestTubeSlot`, `index === attachedTubeSlotIndex`) shrinks
- * to an empty hole while this renders вЂ” see `attachedTubeSlotIndex`'s doc.
- *
- * Mounts starting at wherever the tube visually was the instant it clipped
- * in (`attachStartWorldPosition`, captured by `InspectableTestTubeSlot`'s
- * own click handler) and eases from there into `ATTACHED_TUBE_LOCAL_POSITION`
- * вЂ” reads as the tube being clipped into the ring instead of popping
- * straight into it. Click to detach: the rack slot flies back in with its
- * own matching "arrival" animation (see `InspectableTestTubeSlot`'s
- * `visuallyFilled` effect); this component itself just unmounts, same
- * "vanish here the instant it reappears there" convention
- * `ReagentStaticDisplay`'s shelf-return already uses.
+ * "Away from the player" at the table: the table viewpoint's own look
+ * direction, flattened. The stand is never turned on the table, so its local
+ * space is the world's.
  */
-function AttachedTube({ slotIndex }: { readonly slotIndex: number }) {
-  const { scene } = useGLTF(TUBE_MODEL_PATH);
-  const contents = useTestTubeStorageStore((state) => state.workbenchTestTubes[slotIndex]?.contents);
-
-  const instance = useMemo(() => scene.clone(true), [scene]);
-  useEffect(() => prepareTestTube(instance), [instance]);
-  useEffect(() => disableRaycast(instance), [instance]);
-  useEffect(() => {
-    const configs = resolveTubeContents(contents);
-    if (configs.length === 0) return;
-    const binding = fillTestTubeContents(instance, configs);
-    return () => binding.dispose();
-  }, [instance, contents]);
-
-  const hoverHitboxGeometry = useMemo(() => createHoverHitboxGeometry(instance), [instance]);
-  useEffect(() => {
-    cancelDeferredDispose(hoverHitboxGeometry);
-    return () => deferDispose(hoverHitboxGeometry, () => hoverHitboxGeometry.dispose());
-  }, [hoverHitboxGeometry]);
-
-  const [hovered, setHovered] = useState(false);
-
-  const groupRef = useRef<THREE.Group>(null);
-  // Whether this run is still easing toward the ring вЂ” cleared once it
-  // settles, so `useFrame` can skip touching position at all afterward
-  // (a plain ref, not state: this shouldn't trigger a re-render).
-  const arrivingRef = useRef(true);
-
-  // Runs before paint (unlike a plain `useEffect`) so the tube's very first
-  // rendered frame already sits at its captured start pose instead of
-  // flashing at the group's local origin for one frame first.
-  useLayoutEffect(() => {
-    const group = groupRef.current;
-    const parent = group?.parent;
-    const startWorldPos = useBunsenStandStorageStore.getState().attachStartWorldPosition;
-    if (!group || !parent || !startWorldPos) {
-      arrivingRef.current = false;
-      return;
-    }
-    group.position.copy(parent.worldToLocal(new THREE.Vector3(...startWorldPos)));
-    arrivingRef.current = true;
-    // Mount-time-only capture вЂ” deliberately not reactive to later store
-    // changes (a later attach mounts a brand new instance of this component
-    // anyway, since `slotIndex` changing remounts it via its parent's key).
-  }, []);
-
-  useFrame((_, delta) => {
-    if (!arrivingRef.current) return;
-    const group = groupRef.current;
-    if (!group) return;
-    group.position.x = THREE.MathUtils.damp(group.position.x, ATTACHED_TUBE_TARGET.x, CLIP_IN_DAMPING, delta);
-    group.position.y = THREE.MathUtils.damp(group.position.y, ATTACHED_TUBE_TARGET.y, CLIP_IN_DAMPING, delta);
-    group.position.z = THREE.MathUtils.damp(group.position.z, ATTACHED_TUBE_TARGET.z, CLIP_IN_DAMPING, delta);
-    if (group.position.distanceTo(ATTACHED_TUBE_TARGET) < CLIP_IN_EPSILON) {
-      group.position.copy(ATTACHED_TUBE_TARGET);
-      arrivingRef.current = false;
-    }
-  });
-
-  return (
-    <group ref={groupRef}>
-      <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered} />
-      <mesh
-        geometry={hoverHitboxGeometry}
-        onClick={(event: ThreeEvent<MouseEvent>) => {
-          event.stopPropagation();
-          useBunsenStandStorageStore.getState().detachTestTube();
-        }}
-        onPointerOver={(event) => {
-          event.stopPropagation();
-          document.body.style.cursor = "pointer";
-          setHovered(true);
-        }}
-        onPointerOut={(event) => {
-          event.stopPropagation();
-          document.body.style.cursor = "auto";
-          setHovered(false);
-        }}
-      >
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-      </mesh>
-    </group>
-  );
-}
+const AWAY_AT_TABLE = new THREE.Vector3(Math.sin(CAMERA_TARGETS.table.yaw), 0, -Math.cos(CAMERA_TARGETS.table.yaw)).normalize();
+/** A press that moves the stand less than this is a click (walk up to it), not a drag. */
+const CLICK_SLOP = 0.004;
 
 /**
  * The stand's final resting place вЂ” rendered once `useBunsenStandStorageStore`'s
@@ -160,6 +46,10 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
 
   const tablePosition = useBunsenStandStorageStore((state) => state.tablePosition);
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
+  const clampedTube = useTestTubeStorageStore((state) =>
+    attachedTubeSlotIndex === null ? undefined : state.workbenchTestTubes[attachedTubeSlotIndex],
+  );
+  const crackZone = useHeatingStore((state) => (state.phase === "cracked" ? state.crackZone : null));
   // A carried test tube's own click handler decides release-vs-attach by
   // proximity to the ring alone (`InspectableTestTubeSlot`'s `nearRingRef`) вЂ”
   // it never checks whether the click ALSO hit the stand's own hitbox. Left
@@ -185,6 +75,9 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
       }
     });
     disableRaycast(clone);
+    // The clamp is drawn by `StandStation`, which can take it off the boss.
+    const clampPivot = clone.getObjectByName(TUBE_CLAMP_PIVOT);
+    if (clampPivot) clampPivot.visible = false;
     return clone;
   }, [scene]);
 
@@ -248,6 +141,7 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
     raycaster.setFromCamera(ndcAt(event.clientX, event.clientY), camera);
     if (!raycaster.ray.intersectPlane(dragPlane, dragPoint)) return;
     const planeOffset = group.position.clone().sub(dragPoint);
+    const pressedAt = group.position.clone();
 
     setDragging(true);
     document.body.style.cursor = "grabbing";
@@ -262,6 +156,12 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
       window.removeEventListener("pointerup", handleUp);
       setDragging(false);
       document.body.style.cursor = "auto";
+      if (group.position.distanceTo(pressedAt) < CLICK_SLOP) {
+        // A click, not a drag: walk up to the stand.
+        group.position.copy(pressedAt);
+        if (!useHeatingStore.getState().active) useStandStationStore.getState().open();
+        return;
+      }
       useBunsenStandStorageStore
         .getState()
         .setTablePosition(group.position.x - tableWorldPosition[0], group.position.z - tableWorldPosition[2]);
@@ -290,14 +190,8 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
       >
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      {/* `key` forces a fresh mount (and so a fresh clip-in animation) any
-          time the attached slot itself changes, not just on the null<->set
-          edges вЂ” e.g. a different tube clipping in while one's already
-          attached. */}
-      {attachedTubeSlotIndex !== null && <AttachedTube key={attachedTubeSlotIndex} slotIndex={attachedTubeSlotIndex} />}
-      <SpiritBurner />
+      <StandStation away={AWAY_AT_TABLE} tube={clampedTube} crackZone={crackZone} />
     </group>
   );
 }
 
-useGLTF.preload(TUBE_MODEL_PATH);

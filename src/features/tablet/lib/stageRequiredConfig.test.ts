@@ -23,10 +23,10 @@ describe("PPE is worn in the cabinet, not ticked in the tablet", () => {
     expect(isStageRequiredItemCollected(STEP, "safety-goggles", [], {})).toBe(false);
   });
 
-  it("leaves the stand and burner tickable from the tablet", () => {
-    expect(isPhysicalOnlyRequiredItem(STEP, "equipment-holder")).toBe(false);
+  it("does not let the tablet tick the stand and burner", () => {
+    expect(isPhysicalOnlyRequiredItem(STEP, "equipment-holder")).toBe(true);
     expect(isStageRequiredItemCollected(STEP, "equipment-holder", ["equipment-holder"], {})).toBe(
-      true,
+      false,
     );
   });
 
@@ -43,11 +43,17 @@ describe("PPE is worn in the cabinet, not ticked in the tablet", () => {
     ).toBe(true);
   });
 
+  it("counts the stand and spirit lamp only once the stand is taken", () => {
+    expect(isStageRequiredItemCollected(STEP, "equipment-burner", ["equipment-burner"], {})).toBe(false);
+    expect(isStageRequiredItemCollected(STEP, "equipment-holder", [], { standTaken: true })).toBe(true);
+    expect(isStageRequiredItemCollected(STEP, "equipment-burner", [], { standTaken: true })).toBe(true);
+  });
+
   it("counts a fully equipped bench as 8 of 8", () => {
     const progress = getRequiredItemsProgress(
       STEP,
       ["safety-coat", "safety-goggles", "safety-gloves", "equipment-holder", "equipment-burner"],
-      { takenReagentIds: ["cu", "hno3"], takenTestTubeCount: 2 },
+      { takenReagentIds: ["cu", "hno3"], takenTestTubeCount: 2, standTaken: true },
     );
     expect(progress).toEqual({ current: 8, total: 8 });
   });

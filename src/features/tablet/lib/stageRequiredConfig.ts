@@ -49,6 +49,8 @@ export type RequirementProgress = {
 export type PhysicalCollectionState = {
   readonly takenReagentIds?: readonly string[];
   readonly takenTestTubeCount?: number;
+  /** The stand has left the equipment cabinet — it brings its clamp and spirit lamp with it. */
+  readonly standTaken?: boolean;
 };
 
 /**
@@ -68,6 +70,10 @@ const PHYSICAL_ONLY_CATALOG_IDS: Partial<Record<EntityId, ReadonlySet<EntityId>>
     "safety-coat",
     "safety-goggles",
     "safety-gloves",
+    // The stand (with its clamp — the tube holder) and the spirit lamp come
+    // out of the equipment cabinet as one; only taking it counts.
+    "equipment-holder",
+    "equipment-burner",
   ]),
 };
 
@@ -86,6 +92,7 @@ export function isStageRequiredItemCollected(
     if (catalogItemId === "reagent-copper") return physical.takenReagentIds?.includes("cu") ?? false;
     if (catalogItemId === "reagent-nitric-acid") return physical.takenReagentIds?.includes("hno3") ?? false;
     if (catalogItemId === "glassware-test-tube") return (physical.takenTestTubeCount ?? 0) >= 2;
+    if (catalogItemId === "equipment-holder" || catalogItemId === "equipment-burner") return physical.standTaken ?? false;
     // PPE still lives in the inventory; "physical-only" here means the
     // tablet may not tick it, not that it is tracked somewhere else.
     return inventoryItemIds.includes(catalogItemId);

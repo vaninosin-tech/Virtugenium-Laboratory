@@ -12,6 +12,7 @@ import {
   useHeatingStore,
   zoneCentre,
 } from "../lib/useHeatingStore";
+import { replaceCrackedTube } from "../lib/standStationActions";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 
 const reagentConfig = (id: string | undefined): ReagentContainerConfig | undefined =>
@@ -81,9 +82,11 @@ export function HeatingControls() {
   const setSweep = useHeatingStore((state) => state.setSweep);
   const grab = useHeatingStore((state) => state.grab);
   const exit = useHeatingStore((state) => state.exit);
-  const restartPreheat = useHeatingStore((state) => state.restartPreheat);
 
-  const hoodTubes = useTestTubeStorageStore((state) => state.fumeHoodTestTubes);
+  const standInHood = useBunsenStandStorageStore((state) => state.onFumeHood);
+  const hoodTubes = useTestTubeStorageStore((state) =>
+    standInHood ? state.fumeHoodTestTubes : state.workbenchTestTubes,
+  );
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
 
   const trackRef = useRef<SVGSVGElement>(null);
@@ -235,8 +238,8 @@ export function HeatingControls() {
 
       <div style={buttonRowStyle}>
         {cracked ? (
-          <button type="button" style={primaryButtonStyle} onClick={() => restartPreheat()}>
-            Заменить пробирку и прогреть заново
+          <button type="button" style={primaryButtonStyle} onClick={replaceCrackedTube}>
+            Заменить пробирку
           </button>
         ) : null}
         <button type="button" style={exitButtonStyle} onClick={exit}>
