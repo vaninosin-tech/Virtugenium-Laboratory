@@ -25,20 +25,33 @@ export function useSceneSnapshot(): SceneSnapshot {
   const fumeHoodItems = useReagentStorageStore((state) => state.fumeHoodItems);
   const fumeHoodTubes = useTestTubeStorageStore((state) => state.fumeHoodTestTubes);
   const standInFumeHood = useBunsenStandStorageStore((state) => state.onFumeHood);
+  const standOnWorkbench = useBunsenStandStorageStore((state) => state.onWorkbench);
+  const workbenchItems = useReagentStorageStore((state) => state.workbenchItems);
   const heatingDone = useHeatingStore((state) => state.phase === "done");
   const clampedHoodTube =
     standInFumeHood && attachedTubeSlotIndex !== null ? fumeHoodTubes[attachedTubeSlotIndex] : undefined;
+  const clampedTube =
+    attachedTubeSlotIndex === null
+      ? undefined
+      : standInFumeHood
+        ? fumeHoodTubes[attachedTubeSlotIndex]
+        : standOnWorkbench
+          ? workbenchTubes[attachedTubeSlotIndex]
+          : undefined;
 
   // A boolean selector, so the per-frame chemistry only re-renders the
   // tablet when the threshold is actually crossed.
   const clampedReactionSeen = useTubeReactionStore(
     (state) =>
-      clampedHoodTube !== undefined &&
-      (state.chemistryById[clampedHoodTube.instanceId]?.progress ?? 0) >= REACTION_SEEN,
+      clampedTube !== undefined &&
+      (state.chemistryById[clampedTube.instanceId]?.progress ?? 0) >= REACTION_SEEN,
   );
 
   return {
     clampedHoodTubeContents: clampedHoodTube?.contents ?? null,
+    clampedTubeContents: clampedTube?.contents ?? null,
+    standOnWorkbench,
+    workbenchReagentIds: workbenchItems.map((item) => item.reagentId),
     heatingDone,
     clampedReactionSeen,
     workbenchTubes,

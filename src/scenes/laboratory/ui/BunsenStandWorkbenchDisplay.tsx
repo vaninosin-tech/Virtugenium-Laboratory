@@ -50,6 +50,8 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
     attachedTubeSlotIndex === null ? undefined : state.workbenchTestTubes[attachedTubeSlotIndex],
   );
   const crackZone = useHeatingStore((state) => (state.phase === "cracked" ? state.crackZone : null));
+  // At the stand the camera is right on it — no hover outline then.
+  const atStand = useStandStationStore((state) => state.viewing);
   // A carried test tube's own click handler decides release-vs-attach by
   // proximity to the ring alone (`InspectableTestTubeSlot`'s `nearRingRef`) вЂ”
   // it never checks whether the click ALSO hit the stand's own hitbox. Left
@@ -173,7 +175,7 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
   return (
     <group ref={groupRef}>
       <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered || dragging} />
+      <ReagentHoverRim object={instance} active={(hovered || dragging) && !atStand} />
       <mesh
         geometry={hoverHitboxGeometry}
         onPointerDown={handlePointerDown}

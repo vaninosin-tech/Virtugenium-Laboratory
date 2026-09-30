@@ -6,7 +6,15 @@ import {
   type SceneSnapshot,
 } from "./stageSceneConfig";
 
+/**
+ * Like `useSceneSnapshot` for a stand on the bench: the clamped tube's
+ * contents follow from the bench tubes and the clamp index unless given.
+ */
 const snapshot = (overrides: Partial<SceneSnapshot> = {}): SceneSnapshot => ({
+  clampedTubeContents:
+    overrides.attachedTubeSlotIndex === undefined || overrides.attachedTubeSlotIndex === null
+      ? null
+      : overrides.workbenchTubes?.[overrides.attachedTubeSlotIndex]?.contents ?? null,
   workbenchTubes: [],
   attachedTubeSlotIndex: null,
   fumeHoodFanOn: false,
@@ -15,6 +23,8 @@ const snapshot = (overrides: Partial<SceneSnapshot> = {}): SceneSnapshot => ({
   fumeHoodTubeContents: [],
   standInFumeHood: false,
   clampedHoodTubeContents: null,
+  standOnWorkbench: false,
+  workbenchReagentIds: [],
   heatingDone: false,
   clampedReactionSeen: false,
   ...overrides,
@@ -155,24 +165,37 @@ describe("experiments 2–4", () => {
     expect(setup.isMet(bench(["kmno4"]))).toBe(false);
   });
 
-  it("transfer: stand with the base tube in the hood and the rest there as a bottle or a tube, fan not needed", () => {
+  it("transfer: stand with the base tube on the bench and the rest there as a bottle or a tube", () => {
+    const transfer = getStageSceneRequirement("step-3-transfer")!;
+    const bench: Partial<SceneSnapshot> = {
+      standOnWorkbench: true,
+      clampedTubeContents: ["bacl2"],
+      workbenchReagentIds: ["k2so4"],
+    };
+    expect(transfer.isMet(snapshot(bench))).toBe(true);
+    expect(transfer.isMet(snapshot({ ...bench, workbenchReagentIds: [] }))).toBe(false);
+  });
+
+  it("transfer: the fume hood serves as the working place too, fan not needed", () => {
     const transfer = getStageSceneRequirement("step-4-transfer")!;
     const hood: Partial<SceneSnapshot> = {
       standInFumeHood: true,
-      clampedHoodTubeContents: ["na2so3"],
+      clampedTubeContents: ["na2so3"],
       fumeHoodTubeContents: [["na2so3"], ["kmno4"]],
       fumeHoodReagentIds: ["h2so4"],
     };
     expect(transfer.isMet(snapshot(hood))).toBe(true);
     expect(transfer.isMet(snapshot({ ...hood, fumeHoodReagentIds: [] }))).toBe(false);
     expect(transfer.isMet(snapshot({ ...hood, standInFumeHood: false }))).toBe(false);
+    // Not split between the two places: bottles in the hood, stand on the bench.
+    expect(transfer.isMet(snapshot({ ...hood, standInFumeHood: false, standOnWorkbench: true }))).toBe(false);
   });
 
   it("experiment: everything in the clamped tube and the reaction seen", () => {
     const experiment = getStageSceneRequirement("step-2-experiment")!;
-    expect(experiment.isMet(snapshot({ clampedHoodTubeContents: ["agno3", "nacl"], clampedReactionSeen: true }))).toBe(true);
-    expect(experiment.isMet(snapshot({ clampedHoodTubeContents: ["agno3", "nacl"], clampedReactionSeen: false }))).toBe(false);
-    expect(experiment.isMet(snapshot({ clampedHoodTubeContents: ["agno3"], clampedReactionSeen: true }))).toBe(false);
+    expect(experiment.isMet(snapshot({ clampedTubeContents: ["agno3", "nacl"], clampedReactionSeen: true }))).toBe(true);
+    expect(experiment.isMet(snapshot({ clampedTubeContents: ["agno3", "nacl"], clampedReactionSeen: false }))).toBe(false);
+    expect(experiment.isMet(snapshot({ clampedTubeContents: ["agno3"], clampedReactionSeen: true }))).toBe(false);
   });
 });
 

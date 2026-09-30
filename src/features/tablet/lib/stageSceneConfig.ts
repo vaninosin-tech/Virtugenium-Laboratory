@@ -24,9 +24,15 @@ export interface SceneSnapshot {
   readonly standInFumeHood: boolean;
   /** Contents of the tube clamped in the stand inside the hood, in pouring order; null when there is none. */
   readonly clampedHoodTubeContents: readonly string[] | null;
+  /** The stand stands on the workbench. */
+  readonly standOnWorkbench: boolean;
+  /** Reagent ids of the bottles standing on the workbench. */
+  readonly workbenchReagentIds: readonly string[];
+  /** Contents of the tube clamped in the stand, wherever the stand is; null when there is none. */
+  readonly clampedTubeContents: readonly string[] | null;
   /** The heating mini-game ran to the end: preheated, then the contents heated. */
   readonly heatingDone: boolean;
-  /** The clamped hood tube's reaction has gone far enough to be seen (`REACTION_SEEN`). */
+  /** The clamped tube's reaction has gone far enough to be seen (`REACTION_SEEN`), wherever the stand is. */
   readonly clampedReactionSeen: boolean;
 }
 
@@ -44,11 +50,6 @@ export interface StageSceneRequirement {
   readonly isMet: (snapshot: SceneSnapshot) => boolean;
 }
 
-const tubeAt = (
-  snapshot: SceneSnapshot,
-  index: number | null,
-): StoredTestTube | undefined => (index === null ? undefined : snapshot.workbenchTubes[index]);
-
 interface SolutionExperiment {
   /** The working solution that goes into the clamped tube first. */
   readonly base: string;
@@ -64,46 +65,44 @@ const hasAll = (contents: readonly string[] | null, ids: readonly string[]) =>
 
 /**
  * Experiments 2–4 share one shape: a working tube with the base solution in
- * the stand, everything carried to where the experiment is done, the rest
- * poured in and the reaction watched. «Рабочая зона» is the fume hood — the
- * only place in the lab where pouring into the clamped tube and the reaction
- * itself exist — but unlike experiment 1 nothing toxic comes off, so the
- * extraction is not required. The order of pouring is judged at the pour
+ * the stand, everything brought together at the working place, the rest
+ * poured in and the reaction watched. The working place is the workbench
+ * («рабочая зона» in the ToR); the fume hood serves as well — nothing toxic
+ * comes off, so neither is required, but the stand and what goes into its
+ * tube must be at the same one. The order of pouring is judged at the pour
  * (`mixingRules`).
  */
 function solutionExperimentSteps(
   experiment: number,
   { base, baseName, added, addedNames }: SolutionExperiment,
 ): Record<EntityId, StageSceneRequirement> {
+  const available = (snapshot: SceneSnapshot, id: string) =>
+    snapshot.standInFumeHood
+      ? snapshot.fumeHoodReagentIds.includes(id) || snapshot.fumeHoodTubeContents.some((tube) => tube.includes(id))
+      : snapshot.standOnWorkbench &&
+        (snapshot.workbenchReagentIds.includes(id) || snapshot.workbenchTubes.some((tube) => tube.contents.includes(id)));
   return {
     [`step-${experiment}-setup`]: {
-      label: `Налейте в пробирку раствор ${baseName} и закрепите её в штативе.`,
-      isMet: (snapshot) => tubeAt(snapshot, snapshot.attachedTubeSlotIndex)?.contents.includes(base) ?? false,
+      label: `Подойдите к штативу, закрепите пробирку и прилейте в неё раствор ${baseName}.`,
+      isMet: (snapshot) => snapshot.clampedTubeContents?.includes(base) ?? false,
     },
     [`step-${experiment}-transfer`]: {
-      label: `У вытяжного шкафа нажмите «Перенести» и перенесите туда штатив с пробиркой и ${addedNames}.`,
+      label: `Штатив с пробиркой и ${addedNames} должны стоять вместе на рабочем столе (или в вытяжном шкафу).`,
       isMet: (snapshot) =>
-        snapshot.standInFumeHood &&
-        (snapshot.clampedHoodTubeContents?.includes(base) ?? false) &&
-        added.every(
-          (id) =>
-            snapshot.fumeHoodReagentIds.includes(id) ||
-            snapshot.fumeHoodTubeContents.some((tube) => tube.includes(id)),
-        ),
+        (snapshot.clampedTubeContents?.includes(base) ?? false) && added.every((id) => available(snapshot, id)),
     },
     [`step-${experiment}-experiment`]: {
-      label: `Прилейте ${addedNames} к раствору ${baseName} в пробирке на штативе и понаблюдайте за реакцией.`,
+      label: `У штатива прилейте ${addedNames} к раствору ${baseName} и понаблюдайте за реакцией.`,
       isMet: (snapshot) =>
-        hasAll(snapshot.clampedHoodTubeContents, [base, ...added]) && snapshot.clampedReactionSeen,
+        hasAll(snapshot.clampedTubeContents, [base, ...added]) && snapshot.clampedReactionSeen,
     },
   };
 }
 
 export const STAGE_SCENE_REQUIREMENTS: Partial<Record<EntityId, StageSceneRequirement>> = {
   "step-1-setup": {
-    label: "Поместите гранулы меди в пробирку и закрепите её в штативе.",
-    isMet: (snapshot) =>
-      tubeAt(snapshot, snapshot.attachedTubeSlotIndex)?.contents.includes("cu") ?? false,
+    label: "Подойдите к штативу, закрепите пробирку и насыпьте в неё гранулы меди.",
+    isMet: (snapshot) => snapshot.clampedTubeContents?.includes("cu") ?? false,
   },
   "step-1-transfer": {
     label:
