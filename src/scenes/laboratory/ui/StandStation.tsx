@@ -36,7 +36,7 @@ import { FLAME_BASE_Y, FLAME_HEIGHT, SpiritBurner } from "./SpiritBurner";
  * On the V's left arm the held tube leans its mouth up-left, towards the
  * stand's rod; this much room keeps the glass off the rod.
  */
-const LAMP_ASIDE = 0.08;
+const LAMP_ASIDE = 0.13;
 /** Seconds to take the clamp off the boss and bring the tube to the flame, and back. */
 const CLAMP_MOVE_SECONDS = 0.7;
 /** How high the clamp lifts clear of the boss on its way. */

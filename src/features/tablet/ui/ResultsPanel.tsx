@@ -16,6 +16,7 @@ import {
 export function ResultsPanel() {
   const selectedExperimentId = useLaboratoryStore((state) => state.selectedExperimentId);
   const scoreEvents = useLaboratoryStore((state) => state.scoreEvents);
+  const errors = useLaboratoryStore((state) => state.errors);
   const selectExperiment = useLaboratoryStore((state) => state.selectExperiment);
   const setCurrentStep = useLaboratoryStore((state) => state.setCurrentStep);
   const setTabletSection = useLaboratoryStore((state) => state.setTabletSection);
@@ -64,6 +65,19 @@ export function ResultsPanel() {
             Отлично ≥ {experiment.gradeThresholds.excellentMin} · Хорошо ≥{" "}
             {experiment.gradeThresholds.goodMin} · Удовл. ≥ {experiment.gradeThresholds.satisfactoryMin}
           </p>
+        )}
+      </div>
+
+      <div style={{ ...panelStyle, minWidth: 320, maxWidth: 520 }}>
+        <div style={{ ...mutedTextStyle, fontSize: 12, marginBottom: 6 }}>Ошибки попытки</div>
+        {errors.length === 0 ? (
+          <div style={{ color: colors.textPrimary, fontSize: 13 }}>Без ошибок</div>
+        ) : (
+          [...new Set(errors.map((error) => error.message))].map((message) => (
+            <div key={message} style={{ color: colors.textPrimary, fontSize: 13, marginTop: 2 }}>
+              • {message}
+            </div>
+          ))
         )}
       </div>
 

@@ -35,7 +35,8 @@ const SECTION_TITLES: Record<TabletSection, string> = {
 };
 
 /** Results takeover only on main work panels after a finished attempt. */
-const RESULT_TAKEOVER_SECTIONS: readonly TabletSection[] = ["tasks", "stages", "answer", "observations"];
+// "errors" too: finishing the last step lands there, and the result has to be what the player sees then.
+const RESULT_TAKEOVER_SECTIONS: readonly TabletSection[] = ["tasks", "stages", "answer", "observations", "errors"];
 
 type TabletOverlayProps = {
   /** When false, skip TabletBezel — R3F mesh already provides the chassis. */
