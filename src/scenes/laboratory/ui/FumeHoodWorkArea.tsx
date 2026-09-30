@@ -1,4 +1,3 @@
-import { useGLTF } from "@react-three/drei";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import * as THREE from "three";
@@ -6,6 +5,7 @@ import * as THREE from "three";
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
 import { applyErrorRule } from "../../../features/tablet/lib/penalties";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+import { TUBE_CLAMP_PIVOT, useBunsenStandScene } from "../lib/bunsenStandAssembly";
 import { EQUIPMENT, type Position3 } from "../lib/layout";
 import { tryAddToTube, tryPourBetweenTubes } from "../lib/pourIntoTube";
 import {
@@ -29,8 +29,6 @@ import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
 import { SpiritBurner } from "./SpiritBurner";
-
-const STAND_MODEL_PATH = "/assets/models/BunsenStand.glb";
 
 const DEF = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
 
@@ -69,22 +67,12 @@ const STAND_TURN_ASIDE = 0.5;
 const STAND_ROTATION_Y = -Math.PI / 2 + STAND_TURN_ASIDE;
 
 /**
- * Heating tilts the tube instead of sliding it: the tube stays clamped in the
- * ring, the knob on the clamp boss turns, and the whole clamp arm rotates
- * about its own long axis (model X, at the boss's height), swinging the
- * hanging tube's bottom through the flame. At full knob throw the bottom,
- * `TUBE_RING_INSERT_DEPTH` below the ring, moves about ±3.5 cm sideways —
- * the same reach the old slide had, now as an arc from a fixed clamp.
+ * Heating tilts the tube instead of sliding it: the tube stays in the clamp
+ * and the clamp turns about its own handle (the notes' `Rx(tilt)`), swinging
+ * the hanging tube's bottom through the flame. At full throw the bottom,
+ * `TUBE_RING_INSERT_DEPTH` below the jaws, moves about ±3.5 cm sideways.
  */
 const MAX_TILT = Math.asin(0.035 / TUBE_RING_INSERT_DEPTH);
-/** The knob turns further than the arm it drives, so its motion reads as turning a knob. */
-const KNOB_TURNS_PER_TILT = 3;
-/** Height of the clamp arm's axis in the stand model (`ClampJoint` / `ClampNeck`). */
-const CLAMP_AXIS_Y = 0.22;
-/** Centre of `JointKnob` along the arm axis — measured, see `tests/measure-model.mjs`. */
-const JOINT_KNOB_X = -0.022;
-/** The parts that swing with the clamp arm. `ClampJoint` (the boss on the rod) stays put. */
-const CLAMP_ARM_NODES = ["ClampNeck", "TubeRingJoint", "TubeRing"];
 
 /** Current tilt of the clamp arm, radians — shared by the stand model and the clamped tube. */
 const clampTilt = () => useHeatingStore.getState().sweep * MAX_TILT;
@@ -96,8 +84,8 @@ const reagentConfig = (id: string): ReagentContainerConfig | undefined =>
   (REAGENTS as Record<string, ReagentContainerConfig | undefined>)[id];
 
 function StandInFumeHood({ onActivate }: { readonly onActivate: () => void }) {
-  const { scene } = useGLTF(STAND_MODEL_PATH);
-  const { instance, armPivot, knobPivot } = useMemo(() => {
+  const scene = useBunsenStandScene();
+  const { instance, clampPivot } = useMemo(() => {
     const clone = scene.clone(true);
     clone.traverse((object) => {
       if (object instanceof THREE.Mesh) {
@@ -105,32 +93,11 @@ function StandInFumeHood({ onActivate }: { readonly onActivate: () => void }) {
         object.receiveShadow = true;
       }
     });
-
-    // Re-parent the swinging parts under pivots on the arm's axis. `attach`
-    // keeps their world transforms, so at zero tilt the model is unchanged.
-    const root = clone.getObjectByName("BunsenStand") ?? clone;
-    const makePivot = (x: number, names: readonly string[]) => {
-      const pivot = new THREE.Group();
-      pivot.position.set(x, CLAMP_AXIS_Y, 0);
-      root.add(pivot);
-      clone.updateMatrixWorld(true);
-      for (const name of names) {
-        const node = clone.getObjectByName(name);
-        if (node) pivot.attach(node);
-      }
-      return pivot;
-    };
-    return {
-      instance: clone,
-      armPivot: makePivot(0, CLAMP_ARM_NODES),
-      knobPivot: makePivot(JOINT_KNOB_X, ["JointKnob"]),
-    };
+    return { instance: clone, clampPivot: clone.getObjectByName(TUBE_CLAMP_PIVOT) };
   }, [scene]);
 
   useFrame(() => {
-    const tilt = clampTilt();
-    armPivot.rotation.x = tilt;
-    knobPivot.rotation.x = tilt * KNOB_TURNS_PER_TILT;
+    if (clampPivot) clampPivot.rotation.x = clampTilt();
   });
 
   return (
@@ -206,10 +173,10 @@ function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefin
 }
 
 /**
- * Holds the clamped tube in the ring and tilts it with the clamp arm — the
- * same pivot and angle `StandInFumeHood` gives the arm itself, so the tube
- * never slips relative to its ring. Set per frame on the object rather than
- * through React state: the knob can move every frame while heating.
+ * Holds the clamped tube in the clamp and tilts it with the clamp — the same
+ * handle axis and angle `StandInFumeHood` gives the clamp itself, so the tube
+ * never slips in the jaws. Set per frame on the object rather than through
+ * React state: the knob can move every frame while heating.
  */
 function ClampTiltGroup({ children }: { readonly children: ReactNode }) {
   const ref = useRef<THREE.Group>(null);
@@ -217,8 +184,8 @@ function ClampTiltGroup({ children }: { readonly children: ReactNode }) {
     if (ref.current) ref.current.rotation.x = clampTilt();
   });
   return (
-    <group ref={ref} position={[TUBE_RING_LOCAL_OFFSET[0], CLAMP_AXIS_Y, TUBE_RING_LOCAL_OFFSET[2]]}>
-      {children}
+    <group ref={ref} position={[0, TUBE_RING_LOCAL_OFFSET[1], TUBE_RING_LOCAL_OFFSET[2]]}>
+      <group position={[TUBE_RING_LOCAL_OFFSET[0], 0, 0]}>{children}</group>
     </group>
   );
 }
@@ -442,4 +409,3 @@ export function FumeHoodWorkArea() {
   );
 }
 
-useGLTF.preload(STAND_MODEL_PATH);

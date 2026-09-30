@@ -1,7 +1,8 @@
-import { useGLTF } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
+
+import { useBunsenStandScene } from "../lib/bunsenStandAssembly";
 
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import type { Position3 } from "../lib/layout";
@@ -9,7 +10,6 @@ import { BUNSEN_STAND_TRAY_REST_POSITION, useBunsenStandStorageStore } from "../
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
 
-const MODEL_PATH = "/assets/models/BunsenStand.glb";
 /** Held-tray true/real-world size — matches `BunsenStandInstance`'s own flight target scale. */
 const TRAY_WORLD_SCALE = 1;
 
@@ -28,7 +28,7 @@ const TRAY_WORLD_SCALE = 1;
  * `ReagentStaticDisplay`'s own return-to-shelf click.
  */
 export function BunsenStandTrayDisplay() {
-  const { scene } = useGLTF(MODEL_PATH);
+  const scene = useBunsenStandScene();
   const [hovered, setHovered] = useState(false);
   const groupRef = useRef<THREE.Group>(null);
 
@@ -102,4 +102,3 @@ export function BunsenStandTrayDisplay() {
   );
 }
 
-useGLTF.preload(MODEL_PATH);

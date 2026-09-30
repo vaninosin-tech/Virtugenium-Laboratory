@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { CLAMP_CHANNEL_OFFSET_Z, CLAMP_MOUNT_HEIGHT, CLAMP_TUBE_AXIS_X } from "./bunsenStandGeometry";
 import type { Position3 } from "./layout";
 
 /**
@@ -57,17 +58,15 @@ export interface BunsenStandTablePosition {
 const DEFAULT_TABLE_POSITION: BunsenStandTablePosition = { x: 0.4, z: 0.3 };
 
 /**
- * `TubeRing`'s centre, in `BunsenStand.glb`'s own local space (X unchanged,
- * Y = Blender Z, Z = -Blender Y, per the Blender→glTF Z-up→Y-up export —
- * the ring's Blender build placed it at (RING_X=0.104, 0, JZ=0.22)). The
- * stand is never rotated once on the table (`BunsenStandWorkbenchDisplay`
- * has no `rotation` prop), so this offset is a plain, un-rotated add onto
- * the stand's own world position wherever `InspectableTestTubeSlot` needs
- * to test a held tube's proximity to it — and the same offset positions the
- * attached tube display as a CHILD of the stand's own group, so it travels
- * with it for free while the stand itself is dragged.
+ * The clamped tube's axis at the clamp jaws (`TubeClamp_TubeAxis`), in the
+ * stand's own local space, for the assembly in `bunsenStandAssembly.ts`: the
+ * boss at `CLAMP_MOUNT_HEIGHT` on the rod, the clamp handle in the boss's side
+ * channel, the jaws `CLAMP_TUBE_AXIS_X` along it. The stand is never rotated
+ * once on the table, so this is a plain add onto the stand's own position
+ * wherever `InspectableTestTubeSlot` tests a held tube's proximity to it, and
+ * the same offset places the attached tube as a CHILD of the stand's group.
  */
-export const TUBE_RING_LOCAL_OFFSET: Position3 = [0.104, 0.22, 0];
+export const TUBE_RING_LOCAL_OFFSET: Position3 = [CLAMP_TUBE_AXIS_X, CLAMP_MOUNT_HEIGHT, CLAMP_CHANNEL_OFFSET_Z];
 /** How close a held tube needs to get to the ring's centre to "clip in" on release — same spirit as `InspectableTestTubeSlot`'s own `FILL_PROXIMITY_RADIUS` for reagent jars. */
 export const TUBE_RING_ATTACH_RADIUS = 0.1;
 /** How far below the ring's own centre the attached tube's (bottom-pivoted) origin sits — mostly hanging through/below the ring with its neck poking a little above it, matching how it read in the Blender verification render. */

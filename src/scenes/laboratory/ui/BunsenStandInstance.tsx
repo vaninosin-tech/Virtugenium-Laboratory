@@ -1,7 +1,8 @@
-import { useGLTF } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
+
+import { useBunsenStandScene } from "../lib/bunsenStandAssembly";
 
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import { getCabinetParallelTrayYaw, type HotspotTargetId, type Position3 } from "../lib/layout";
@@ -16,7 +17,6 @@ import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
 
-const MODEL_PATH = "/assets/models/BunsenStand.glb";
 
 /** Deterministic shelf -> held-tray flight, same tween shape as `ReagentContainerInstance`'s own "takeMove" (see its doc for why a fixed-duration lerp/slerp, not damping-then-snap). */
 const TAKE_DURATION_S = 0.36;
@@ -46,7 +46,7 @@ export function BunsenStandInstance({
   readonly position?: Position3;
   readonly rotationY?: number;
 }) {
-  const { scene } = useGLTF(MODEL_PATH);
+  const scene = useBunsenStandScene();
   const { camera } = useThree();
   const [hovered, setHovered] = useState(false);
 
@@ -239,4 +239,3 @@ export function BunsenStandInstance({
   );
 }
 
-useGLTF.preload(MODEL_PATH);

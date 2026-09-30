@@ -3,6 +3,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 
+import { useBunsenStandScene } from "../lib/bunsenStandAssembly";
+
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import type { Position3 } from "../lib/layout";
 import { fillTestTubeContents, resolveTubeContents } from "../lib/testTubeContents";
@@ -20,7 +22,6 @@ import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerIns
 import { ReagentHoverRim } from "./ReagentHoverRim";
 import { SpiritBurner } from "./SpiritBurner";
 
-const MODEL_PATH = "/assets/models/BunsenStand.glb";
 const TUBE_MODEL_PATH = "/assets/models/LabTestTube.glb";
 const ATTACHED_TUBE_LOCAL_POSITION: Position3 = [
   TUBE_RING_LOCAL_OFFSET[0],
@@ -152,7 +153,7 @@ function AttachedTube({ slotIndex }: { readonly slotIndex: number }) {
  * changes needed to that already-large file for a single free-standing prop.
  */
 export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly tableWorldPosition: Position3 }) {
-  const { scene } = useGLTF(MODEL_PATH);
+  const scene = useBunsenStandScene();
   const { camera, gl } = useThree();
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -299,5 +300,4 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
   );
 }
 
-useGLTF.preload(MODEL_PATH);
 useGLTF.preload(TUBE_MODEL_PATH);
