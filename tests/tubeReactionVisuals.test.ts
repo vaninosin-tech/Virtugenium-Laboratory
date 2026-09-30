@@ -170,7 +170,7 @@ describe("tube reaction rendering contract", () => {
     expect(f.volume.material).toBe(active);
   });
 
-  it.each([-20, 20])("settles the water plane horizontally at %s degrees under transformed, scaled parents", degrees => {
+  it.each([-45, -20, 20, 45])("settles the water plane horizontally at %s degrees under transformed, scaled parents", degrees => {
     const f = fixture(null);
     f.parent.position.set(1.2, -0.4, 2.1);
     f.parent.rotation.set(0.12, 0.7, -0.09);
@@ -194,6 +194,42 @@ describe("tube reaction rendering contract", () => {
       return new THREE.Vector3(x, y, z).applyMatrix4(cap.matrixWorld).y;
     });
     expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(1e-6);
+    const wallY = (x: number) => (uLevel.value - uUp.value.x * x) / uUp.value.y;
+    expect((wallY(0.007) + wallY(-0.007)) / 2).toBeCloseTo(f.geometry.boundingBox!.max.y, 6);
+  });
+
+  it("keeps the gas height and outlet's up direction consistent with a tilted tube", () => {
+    const f = fixture("copper-nitric", true);
+    f.update(chemistry(0.4, 1));
+    f.root.rotation.z = THREE.MathUtils.degToRad(45);
+    f.advance(4, chemistry(0.4, 1));
+    const head = f.get("TubeNO2Headspace").material as THREE.ShaderMaterial;
+    const plume = f.get("TubeNO2").material as THREE.ShaderMaterial;
+    expect(surfaceError(f)).toBeLessThan(1e-4);
+    expect(head.uniforms.uMouthHeight.value).toBeCloseTo(0.095 / Math.sqrt(2), 3);
+    f.volume.updateWorldMatrix(true, false);
+    const plumeUp = (plume.uniforms.uWorldUp.value as THREE.Vector3).clone()
+      .transformDirection(f.volume.matrixWorld);
+    expect(plumeUp.angleTo(new THREE.Vector3(0, 1, 0))).toBeLessThan(1e-5);
+  });
+
+  it("moves settled AgCl flocs toward the lower wall when the tube tilts", () => {
+    const f = fixture("silver-chloride");
+    const flocs = f.get<THREE.InstancedMesh>("TubePrecipitate");
+    const centerX = () => {
+      const matrix = new THREE.Matrix4();
+      let sum = 0;
+      for (let i = 0; i < flocs.count; i++) {
+        flocs.getMatrixAt(i, matrix);
+        sum += matrix.elements[12];
+      }
+      return sum / flocs.count;
+    };
+    f.update(chemistry(1));
+    const upright = centerX();
+    f.root.rotation.z = THREE.MathUtils.degToRad(45);
+    f.advance(4, chemistry(1));
+    expect(Math.abs(centerX() - upright)).toBeGreaterThan(0.001);
   });
 
   it("excites a spring on rapid tilt, then damps toward the horizontal surface", () => {

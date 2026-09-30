@@ -401,27 +401,29 @@ outgoingLight = vec3(0.16, 0.25, 0.27) + edge * vec3(1.05, 1.12, 1.15) + totalSp
   const gasMaterial = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, depthTest: false, toneMapped: false,
     uniforms: { uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) },
-      uOpacity: { value: 0 }, uTime: { value: 0 }, uLip: { value: lip.y } },
-    vertexShader: `varying vec2 vP; varying float vGasHeight;
+      uOpacity: { value: 0 }, uTime: { value: 0 }, uWorldUp: { value: new THREE.Vector3(0, 1, 0) } },
+    vertexShader: `varying vec2 vP; varying float vAxisLean;
+uniform vec3 uWorldUp;
 void main() {
   vP = position.xy;
   vec2 extent = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
-  vGasHeight = instanceMatrix[3].y + position.y * extent.y;
+  vec3 axisView = normalize((modelViewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+  vec3 upView = normalize((modelViewMatrix * vec4(uWorldUp, 0.0)).xyz);
+  vAxisLean = clamp(axisView.x - upView.x, -1.0, 1.0);
   vec4 mv = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
   mv.xy += position.xy * extent * vec2(length(modelViewMatrix[0].xyz), length(modelViewMatrix[1].xyz));
   gl_Position = projectionMatrix * mv;
 }`,
     fragmentShader: `uniform vec3 uColor; uniform float uOpacity; uniform float uTime;
-uniform float uLip;
-varying vec2 vP; varying float vGasHeight;
+varying vec2 vP; varying float vAxisLean;
 void main() {
-  if (vGasHeight < uLip - 0.006) discard;
   float rise = clamp((vP.y + 1.0) * 0.5, 0.0, 1.0);
   float flow = sin(uTime * 0.28 + rise * 2.8) * 0.025 * rise * rise;
+  flow += vAxisLean * 0.34 * smoothstep(0.0, 0.32, rise);
   float width = mix(0.52, 0.63, smoothstep(0.0, 1.0, rise));
   float edge = 1.0 - smoothstep(width * 0.45, width, abs(vP.x - flow));
   float top = 1.0 - smoothstep(0.3, 1.0, rise);
-  float bridge = smoothstep(uLip - 0.006, uLip + 0.001, vGasHeight);
+  float bridge = smoothstep(0.0, 0.07, rise);
   gl_FragColor = vec4(uColor, uOpacity * edge * top * bridge);
   #include <colorspace_fragment>
 }`,
@@ -432,11 +434,12 @@ void main() {
   const headMaterial = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.FrontSide, toneMapped: false,
     uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uFront: { value: 0 }, uMouth: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
+      uMouthHeight: { value: lip.y - box.max.y },
       uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) } },
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 void main() { vP = position; vN = normalize(normalMatrix * normal);
 vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uFront; uniform float uMouth; uniform float uResidue; uniform float uTime; uniform float uDetail;
+    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uFront; uniform float uMouth; uniform float uResidue; uniform float uTime; uniform float uDetail; uniform float uMouthHeight;
 uniform float uLip; uniform float uRadius; uniform vec3 uColor;
 varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 float gasNoise(vec3 p) {
@@ -450,7 +453,7 @@ float gasNoise(vec3 p) {
 void main() {
 float aboveWater = dot(uUp, vP) - uLevel;
 if (aboveWater < -0.005) discard;
-float h = clamp(aboveWater / max(uLip - uLevel, 0.005), 0.0, 1.0);
+float h = clamp(aboveWater / max(uMouthHeight, 0.005), 0.0, 1.0);
 float motion = 1.0 + 0.10 * sin(h * 2.4 - uTime * 0.3);
 if (uDetail > 0.5) {
   vec3 q = vec3(vP.x / uRadius * 1.1, vP.y / uRadius * 0.35 - uTime * 0.13,
@@ -512,18 +515,23 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uResidue * wallBand * smoothstep(0.0
   // the top, preserving the bowl profile instead of flattening the hemisphere.
   const bedMaterial = white.clone();
   const sedimentLevel = { value: box.min.y };
+  const sedimentGravity = { value: new THREE.Vector3(0, 1, 0) };
+  const sedimentDrift = { value: 0 };
   bedMaterial.onBeforeCompile = (shader, renderer) => {
     white.onBeforeCompile(shader, renderer);
     shader.uniforms.uSedimentLevel = sedimentLevel;
     shader.uniforms.uSedimentUp = up;
+    shader.uniforms.uSedimentGravity = sedimentGravity;
+    shader.uniforms.uSedimentDrift = sedimentDrift;
     shader.vertexShader = `uniform float uSedimentLevel; uniform vec3 uSedimentUp;
+uniform vec3 uSedimentGravity; uniform float uSedimentDrift;
 uniform float uSedimentBottom; uniform float uSedimentRadius; uniform vec3 uSedimentCenter;
 ${shader.vertexShader}`.replace("#include <beginnormal_vertex>", `#include <beginnormal_vertex>
 if (position.y > uSedimentLevel) objectNormal = uSedimentUp;`).replace("#include <begin_vertex>", `#include <begin_vertex>
 transformed.y = min(position.y, uSedimentLevel - dot(uSedimentUp.xz, position.xz - uSedimentCenter.xz) / max(0.3, uSedimentUp.y));
 float h = clamp(transformed.y - uSedimentBottom, 0.0, uSedimentRadius);
 float availableRadius = sqrt(max(0.0, h * (2.0 * uSedimentRadius - h)));
-vec2 radial = position.xz - uSedimentCenter.xz;
+vec2 radial = position.xz - uSedimentCenter.xz - uSedimentGravity.xz * uSedimentDrift;
 transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(length(radial), 0.000001));`);
   };
   const bed = new THREE.Mesh(originalGeometry, bedMaterial);
@@ -637,6 +645,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       inverse.copy(volume.matrixWorld).invert();
       gravity.set(0, 1, 0).transformDirection(inverse);
+      sedimentGravity.value.copy(gravity);
       // A visual reservoir outlives the instantaneous chemical rate. Seeking
       // backwards resets it; wall residue clears over several minutes.
       if (reverseTime) {
@@ -731,6 +740,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       bed.visible = precipitate && settled > 0;
       sedimentLevel.value = box.min.y + size.y * (curds ? settled * 0.155 : Math.sqrt(settled) * 0.10);
+      sedimentDrift.value = radius * settled * 0.55;
       flakes.visible = curds && p > 0;
       flakes.count = count;
       bubbles.visible = producingBubbles || bubbleStopAge < 1.8 && releasedBubbles.length > 0;
@@ -839,8 +849,15 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         const floor = box.min.y + size.y * (curds ? 0.10 + random(i + 14) * (TUBE_VISUALS.curdLayerHeight - 0.13) : 0.07 + random(i + 14) * 0.025);
         const drift = Math.sin(time * 0.75 + i * 2.4) * radius * 0.07 * (1 - settled);
         const ingress = curds ? THREE.MathUtils.smoothstep(p * 8, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
-        if (flakes.visible) place(flakes, i, x + drift - gravity.x * radius * settled * 0.6, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), floor - gravity.z * z, settled), z - gravity.z * radius * settled * 0.6,
-          grain * onset * ingress, grain * onset * ingress * (curds ? 1.5 : 0.65), grain * onset * ingress);
+        if (flakes.visible) {
+          const settledX = x + drift - gravity.x * radius * settled * 0.6;
+          const settledZ = z - gravity.z * radius * settled * 0.6;
+          const radialSq = (settledX - center.x) ** 2 + (settledZ - center.z) ** 2;
+          const bowlY = box.min.y + radius - Math.sqrt(Math.max(0, radius * radius - radialSq));
+          const settledY = Math.max(floor, bowlY + grain * 0.3);
+          place(flakes, i, settledX, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), settledY, settled), settledZ,
+            grain * onset * ingress, grain * onset * ingress * (curds ? 1.5 : 0.65), grain * onset * ingress);
+        }
         if (bubbles.visible && !producingBubbles && i < bubbles.count) {
           const { position, scale } = releasedBubbles[i];
           const distance = Math.max(0, (level.value - up.value.dot(position)) / Math.max(0.3, up.value.dot(gravity)));
@@ -940,9 +957,11 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       gasMaterial.uniforms.uOpacity.value = Math.min(0.9,
         (1 - Math.exp(-gasDensity * 1.55 * 0.92)) * mouthFill * 1.25);
       gasMaterial.uniforms.uTime.value = time;
+      gasMaterial.uniforms.uWorldUp.value.copy(gravity);
       headMaterial.uniforms.uDensity.value = gasDensity;
       headMaterial.uniforms.uFront.value = gasFront;
       headMaterial.uniforms.uMouth.value = mouthFill;
+      headMaterial.uniforms.uMouthHeight.value = up.value.dot(lip) - level.value;
       headMaterial.uniforms.uResidue.value = Math.pow(wallResidue, 0.85) * (1 - gasDensity);
       headMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDetail.value = quality === "LOW" ? 0 : 1;

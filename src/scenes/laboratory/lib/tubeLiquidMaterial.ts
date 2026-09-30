@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { LiquidMaterial, type LiquidOptions } from "./reagentMaterials";
 
-export const TUBE_LIQUID = { clearAlpha: 0.10, edgeAlpha: 0.42, meniscusAlpha: 0.12, clearHighlight: 0.25 };
+export const TUBE_LIQUID = { clearAlpha: 0.17, edgeAlpha: 0.42, meniscusAlpha: 0.22, clearHighlight: 0.30 };
 
 /** Tube-only optics: no framebuffer copy or change to the reagent bottles. */
 export class TubeLiquidMaterial extends LiquidMaterial {
@@ -97,7 +97,10 @@ float pigment = mix(smoothstep(0.15, 0.3, baseChroma), smoothstep(0.15, 0.3, end
 diffuseColor.rgb = tubeColor;
 float waterEdge = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.4);
 float meniscus = (1.0 - smoothstep(0.0003, 0.0015, abs(surfaceDistance))) * (1.0 - vCap);
-float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + meniscus * uMeniscusAlpha;
+float capRadius = length((vTubePoint.xz - uBoundsMin.xz - uBoundsSize.xz * 0.5) / (uBoundsSize.xz * 0.5));
+float capRim = vCap * smoothstep(0.77, 0.94, capRadius);
+float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + meniscus * uMeniscusAlpha
+  + vCap * 0.12 + capRim * 0.30;
 waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
 float milk = uReactionKind > 2.5 && uReactionKind < 3.5 ? 1.0 : 0.0;
 float raspberry = uReactionKind > 3.5 ? 1.0 - localMix : 0.0;
@@ -109,11 +112,11 @@ diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
   + cloud * mix(1.25, 0.72, milk) + raspberry * 0.28 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
-float edgeSoft = vCap > 0.5 ? max(0.10, clamp(abs(vTubeWaveSlope) * 8.0, 0.0, 1.0))
-  : smoothstep(0.0, 0.009, -surfaceDistance);
+float edgeSoft = vCap > 0.5 ? max(0.42, clamp(abs(vTubeWaveSlope) * 8.0, 0.0, 1.0))
+  : max(0.42, smoothstep(0.0, 0.006, -surfaceDistance));
 diffuseColor.a *= edgeSoft;
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
-vec3 clearLight = mix(vec3(0.25, 0.37, 0.40), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
+vec3 clearLight = mix(vec3(0.33, 0.44, 0.47), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
 // Neutral scattering keeps a white precipitate white next to the warm burner.
 float relief = 0.7 + 0.2 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
 vec3 coloredLight = tubeColor * (0.68 + relief * 0.42) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.26;
@@ -125,6 +128,9 @@ outgoingLight = mix(mix(clearLight, coloredLight, pigment),
   mix(vec3(0.91 + 0.07 * relief), vec3(0.80 + 0.06 * relief), milk),
   clamp(cloud * mix(1.0, 0.88, milk), 0.0, 1.0));
 outgoingLight = mix(outgoingLight, vec3(0.93), film * 0.80);
+float underRim = (1.0 - vCap) * (1.0 - smoothstep(0.0005, 0.0017, -surfaceDistance));
+outgoingLight = mix(outgoingLight, vec3(0.10, 0.19, 0.22), underRim * 0.63);
+outgoingLight = mix(outgoingLight, vec3(0.82, 0.95, 0.98), capRim * 0.68);
 float waveBright = vCap * clamp(vTubeWaveSlope * 10.0, 0.0, 1.0);
 float waveDark = vCap * clamp(-vTubeWaveSlope * 10.0, 0.0, 1.0);
 outgoingLight = mix(outgoingLight, vec3(0.90, 0.97, 1.0), waveBright * 0.85);
@@ -132,5 +138,5 @@ outgoingLight *= 1.0 - waveDark * 0.55;
 #include <opaque_fragment>`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v9-waves"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v10-meniscus"; }
 }
