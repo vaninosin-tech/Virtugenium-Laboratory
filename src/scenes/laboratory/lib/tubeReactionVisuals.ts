@@ -534,6 +534,19 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   group.add(bed);
   const dummy = new THREE.Object3D();
   const random = (i: number) => ((Math.sin(i * 127.1 + 311.7) * 43758.5453) % 1 + 1) % 1;
+  // Weight the exposed face in the default game close-up, while retaining
+  // sites around the back for other viewing angles.
+  const coatFacing = new THREE.Vector3(0.82, 0.27, 0.50).normalize();
+  const coatRight = new THREE.Vector3(0, 1, 0).cross(coatFacing).normalize();
+  const coatUp = coatFacing.clone().cross(coatRight).normalize();
+  const bubbleSpecs = Array.from({ length: 72 }, (_, i) => {
+    const mix = random(i + 241);
+    const variation = random(i + 619);
+    if (mix < 0.04) return { diameterMm: 0.18 + variation * 0.08, speed: 0.015, wobble: 0.006 };
+    if (mix < 0.24) return { diameterMm: 0.45 + variation * 0.15, speed: 0.06, wobble: 0.015 };
+    if (mix < 0.94) return { diameterMm: 0.85 + variation * 0.35, speed: 0.125, wobble: 0.03 };
+    return { diameterMm: 2 + variation, speed: 0.25, wobble: 0.075 };
+  });
   const place = (mesh: THREE.InstancedMesh, i: number, x: number, y: number, z: number, sx: number, sy = sx, sz = sx) => {
     dummy.position.set(x, y, z);
     dummy.scale.set(sx, sy, sz);
@@ -650,7 +663,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
             radius * 0.025, 0.22);
         }
       }
-      bubblePhase += dt * (1.25 + rate * 0.55);
+      bubblePhase += dt;
       const drive = kind === "copper-nitric" && p > 0 && p < 0.999 ? rate : 0;
       const producingBubbles = drive > 0.005;
       if (!producingBubbles && wasProducingBubbles) {
@@ -767,21 +780,30 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       if (attachedBubbles.visible && producingBubbles && copperGrain instanceof THREE.Mesh) {
         const grainBound = copperBounds[0] * copperGrain.scale.x;
         for (let i = 0; i < attachedBubbles.count; i++) {
-          // The lower hemisphere touches the rounded glass bowl. Seed the
-          // exposed upper/front hemisphere (the close-up looks along +X).
-          const elevation = 0.05 + 0.82 * ((i + 0.5) / attachedBubbles.count);
-          const radial = Math.sqrt(Math.max(0, 1 - elevation * elevation));
-          const angle = (random(i + 413) - 0.5) * Math.PI * 1.8;
-          const cycle = (bubblePhase * (0.42 + rate * 0.42) + random(i + 307)) % 1;
+          // A disk distribution fills the visible face instead of making a
+          // silhouette ring. Remaining sites cover the back of the grain.
+          const angle = random(i + 413) * Math.PI * 2;
+          if (random(i + 981) < 0.78) {
+            const radial = Math.sqrt(random(i + 521)) * 0.96;
+            source.copy(coatFacing).multiplyScalar(Math.sqrt(1 - radial * radial))
+              .addScaledVector(coatRight, radial * Math.cos(angle))
+              .addScaledVector(coatUp, radial * Math.sin(angle));
+          } else {
+            const elevation = -0.15 + 1.1 * random(i + 521);
+            const radial = Math.sqrt(Math.max(0, 1 - elevation * elevation));
+            source.set(Math.cos(angle) * radial, elevation, Math.sin(angle) * radial);
+          }
+          const elevation = source.y;
+          const cycle = (bubblePhase * (0.38 + rate * 0.30 + Math.max(0, elevation) * 0.35)
+            + random(i + 307)) % 1;
           const growth = THREE.MathUtils.smoothstep(cycle, 0.02, 0.77);
           const release = 1 - THREE.MathUtils.smoothstep(cycle, 0.78, 1);
-          const siteFade = THREE.MathUtils.smoothstep(surfaceActivity,
-            i / attachedBubbles.count, (i + 3) / attachedBubbles.count);
-          const sizeBubble = radius * (0.075 + 0.075 * growth) * release
+          const site = random(i + 721);
+          const siteFade = THREE.MathUtils.smoothstep(surfaceActivity, site - 0.03, site + 0.03);
+          const sizeBubble = radius * (0.045 + 0.045 * growth) * release
             * THREE.MathUtils.smoothstep(cycle, 0, 0.08) * siteFade
             * THREE.MathUtils.smoothstep(surfaceActivity, 0, 0.18) * copperGrain.scale.x;
-          source.set(Math.cos(angle) * radial, elevation, Math.sin(angle) * radial)
-            .multiplyScalar(grainBound * 1.08).add(copperGrain.position);
+          source.multiplyScalar(grainBound * 1.03).add(copperGrain.position);
           place(attachedBubbles, i, source.x, source.y + radius * 0.22 * (1 - release), source.z,
             sizeBubble, sizeBubble, sizeBubble);
         }
@@ -830,7 +852,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         } else if (bubbles.visible && i < bubbles.count) {
           const site = i % 8;
           const chain = Math.floor(i / 8);
-          const rise = (bubblePhase * (0.7 + random(site + 180) * 0.35)
+          const spec = bubbleSpecs[i];
+          const rise = (bubblePhase * spec.speed / (size.y * 0.72)
             + chain * 0.23) % 1;
           const grainMesh = copper?.children[site % Math.max(1, copper.children.length)];
           if (grainMesh instanceof THREE.Mesh && p < 0.999) {
@@ -841,10 +864,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           }
           else source.set(x * 0.6, box.min.y + radius * 1.3, z * 0.6);
           const distance = Math.max(0, (level.value - up.value.dot(source)) / Math.max(0.3, up.value.dot(gravity)));
-          const travel = rise * rise * (1.25 - rise * 0.25);
+          const travel = rise;
           bubblePoint.copy(source).addScaledVector(gravity, travel * distance);
-          bubblePoint.x += Math.sin(time * 3 + site * 1.7 + rise * 8) * radius * 0.055 * rise;
-          bubblePoint.z += Math.cos(time * 2.4 + site * 2.1 + rise * 7) * radius * 0.045 * rise;
+          bubblePoint.x += Math.sin(time * 3 + site * 1.7 + rise * 8) * radius * spec.wobble * rise;
+          bubblePoint.z += Math.cos(time * 2.4 + site * 2.1 + rise * 7) * radius * spec.wobble * 0.82 * rise;
           // A rising bubble hits the wall and slides along it, never exits sideways.
           const radialDistance = Math.hypot(bubblePoint.x, bubblePoint.z);
           if (radialDistance > radius * 0.84) { bubblePoint.x *= radius * 0.84 / radialDistance; bubblePoint.z *= radius * 0.84 / radialDistance; }
@@ -852,13 +875,12 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
             i / count, (i + 3) / count);
           const cycleFade = THREE.MathUtils.smoothstep(rise, 0, 0.08)
             * (1 - THREE.MathUtils.smoothstep(rise, 0.90, 1));
-          const bubbleSize = radius * (0.095 + Math.pow(random(i + 241), 2) * 0.21)
+          const bubbleSize = spec.diameterMm * 0.0005
             * bubbleFade * cycleFade * THREE.MathUtils.smoothstep(drive, 0, 0.06);
           if (producingBubbles && previousBubbleRise[i] > 0.9 && rise < previousBubbleRise[i]) {
             // Completed trajectories deliver gas to the headspace. Normalize
             // by pool size so quality settings do not change the chemistry.
-            const nominalSize = 0.095 + Math.pow(random(i + 241), 2) * 0.21;
-            poppedVolume += 0.26 / count * Math.pow(nominalSize / 0.2, 3)
+            poppedVolume += 0.025 / count * Math.pow(spec.diameterMm, 3)
               * bubbleFade * THREE.MathUtils.smoothstep(drive, 0, 0.06);
             if (waveSurface) waveSurface.impulse((bubblePoint.x - center.x) / radius,
               (bubblePoint.z - center.z) / radius, radius * (0.018 + rate * 0.018), 0.20);

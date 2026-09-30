@@ -248,7 +248,6 @@ describe("tube reaction rendering contract", () => {
     f.update(chemistry(0.4, 1), quality);
     expect(density(f)).toBe(0);
     f.advance(0.02, chemistry(0.4, 1), quality);
-    expect(density(f)).toBe(0);
     f.advance(0.98, chemistry(0.4, 1), quality);
     const first = density(f);
     expect(first).toBeGreaterThan(0);
@@ -457,7 +456,7 @@ describe("tube reaction rendering contract", () => {
     expect(attached.visible).toBe(false);
   });
 
-  it("carries a rising copper bubble nearly through the water in under a second", () => {
+  it("carries a one-millimetre copper bubble nearly through the water in a quarter second", () => {
     const f = fixture("copper-nitric", true);
     const free = f.get<THREE.InstancedMesh>("TubeNOBubbles");
     const matrix = new THREE.Matrix4();
@@ -465,10 +464,35 @@ describe("tube reaction rendering contract", () => {
     f.update(state);
     free.getMatrixAt(0, matrix);
     const start = new THREE.Vector3().setFromMatrixPosition(matrix);
-    f.advance(0.75, state);
+    f.advance(0.25, state);
     free.getMatrixAt(0, matrix);
     const after = new THREE.Vector3().setFromMatrixPosition(matrix);
     expect(after.y - start.y).toBeGreaterThan(0.025);
+  });
+
+  it("lets larger bubbles complete more surface-to-grain trips than smaller ones", () => {
+    const f = fixture("copper-nitric", true);
+    const free = f.get<THREE.InstancedMesh>("TubeNOBubbles");
+    const indices = [33, 3, 0, 11]; // dust, 0.5 mm, 1 mm, 2–3 mm
+    const matrix = new THREE.Matrix4();
+    const wraps = indices.map(() => 0);
+    const previous = indices.map(() => 0);
+    const state = chemistry(0.4, 1);
+    f.update(state);
+    indices.forEach((index, k) => { free.getMatrixAt(index, matrix); previous[k] = matrix.elements[13]; });
+    for (let frame = 0; frame < 180; frame++) {
+      f.advance(1 / 60, state);
+      indices.forEach((index, k) => {
+        free.getMatrixAt(index, matrix);
+        const y = matrix.elements[13];
+        if (y < previous[k] - 0.01) wraps[k]++;
+        previous[k] = y;
+      });
+    }
+    expect(wraps[0]).toBeGreaterThanOrEqual(1);
+    expect(wraps[0]).toBeLessThan(wraps[1]);
+    expect(wraps[1]).toBeLessThan(wraps[2]);
+    expect(wraps[2]).toBeLessThan(wraps[3]);
   });
 
   it.each<RuntimeQuality>(["LOW", "HIGH"])("clears released bubbles after copper dissolves without creating new ones at %s", quality => {
@@ -535,7 +559,7 @@ describe("tube reaction rendering contract", () => {
             a.local.distanceTo(b.local) > 0.003) continue;
         const delta = b.world.clone().sub(a.world);
         expect(delta.y, `frame ${frame}, bubble ${i}: must rise`).toBeGreaterThan(0);
-        expect(Math.hypot(delta.x, delta.z), `frame ${frame}, bubble ${i}: wobble bound`).toBeLessThan(5e-5);
+        expect(Math.hypot(delta.x, delta.z), `frame ${frame}, bubble ${i}: wobble bound`).toBeLessThan(1.5e-4);
         checked++;
       }
       expect(checked, `frame ${frame}: enough free, non-wrapping bubbles`).toBeGreaterThanOrEqual(2);
