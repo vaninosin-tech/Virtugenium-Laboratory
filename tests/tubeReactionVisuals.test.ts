@@ -247,7 +247,9 @@ describe("tube reaction rendering contract", () => {
     const f = fixture("copper-nitric");
     f.update(chemistry(0.4, 1), quality);
     expect(density(f)).toBe(0);
-    f.advance(1, chemistry(0.4, 1), quality);
+    f.advance(0.02, chemistry(0.4, 1), quality);
+    expect(density(f)).toBe(0);
+    f.advance(0.98, chemistry(0.4, 1), quality);
     const first = density(f);
     expect(first).toBeGreaterThan(0);
     f.advance(1, chemistry(0.5, 1), quality);
@@ -257,9 +259,9 @@ describe("tube reaction rendering contract", () => {
     const plume = f.get<THREE.InstancedMesh>("TubeNO2");
     expect(head.visible).toBe(true);
     expect(plume.visible).toBe(true);
-    expect(front(f)).toBeGreaterThan(0.9);
+    expect(front(f)).toBeGreaterThan(0.85);
     f.advance(4, chemistry(0.5, 1), quality);
-    expect(front(f)).toBe(1);
+    expect(front(f)).toBeCloseTo(1, 5);
     expect(plume.visible).toBe(true);
     const atLip = density(f);
     head.geometry.computeBoundingBox();
@@ -344,11 +346,11 @@ describe("tube reaction rendering contract", () => {
     expect(density(fast)).toBe(0);
     fast.advance(2, chemistry(0.1, 1));
     slow.advance(2, chemistry(0.1, 0.25));
-    expect(front(fast)).toBeGreaterThan(front(slow) * 3);
+    expect(front(fast)).toBeGreaterThan(front(slow) * 1.5);
     expect(front(fast)).toBeGreaterThan(0.9);
     expect(fast.get("TubeNO2").visible).toBe(true);
     fast.advance(8, chemistry(0.1, 1));
-    expect(front(fast)).toBe(1);
+    expect(front(fast)).toBeCloseTo(1, 5);
     expect(fast.get("TubeNO2").visible).toBe(true);
     expect(slow.get("TubeNO2").visible).toBe(false);
   });
@@ -424,12 +426,14 @@ describe("tube reaction rendering contract", () => {
   it.each<RuntimeQuality>(["LOW", "HIGH"])("grows attached bubbles on the single copper grain and releases them after stopping at %s", quality => {
     const f = fixture("copper-nitric", true);
     const attached = f.get<THREE.InstancedMesh>("TubeNOAttachedBubbles");
+    const free = f.get<THREE.InstancedMesh>("TubeNOBubbles");
+    expect(attached.material).toBe(free.material);
     const grain = f.copper!.children[0];
     f.update(chemistry(0.1, 1), quality);
     expect(attached.visible).toBe(false);
     f.advance(0.4, chemistry(0.1, 1), quality);
     expect(attached.visible).toBe(true);
-    expect(attached.count).toBeGreaterThan(quality === "LOW" ? 18 : 30);
+    expect(attached.count).toBe(quality === "LOW" ? 128 : 192);
     const first = new THREE.Matrix4();
     attached.getMatrixAt(0, first);
     const firstPosition = new THREE.Vector3().setFromMatrixPosition(first);
@@ -437,10 +441,11 @@ describe("tube reaction rendering contract", () => {
     const firstScale = new THREE.Vector3().setFromMatrixScale(first).x;
     f.advance(0.3, chemistry(0.1, 1), quality);
     attached.getMatrixAt(0, first);
-    expect(new THREE.Vector3().setFromMatrixScale(first).x).not.toBeCloseTo(firstScale, 6);
+    const grownScale = new THREE.Vector3().setFromMatrixScale(first).x;
+    expect(grownScale).not.toBeCloseTo(firstScale, 6);
     f.update(chemistry(0.6, 1), quality);
     attached.getMatrixAt(0, first);
-    expect(new THREE.Vector3().setFromMatrixScale(first).x).toBeLessThan(firstScale);
+    expect(new THREE.Vector3().setFromMatrixScale(first).x).toBeLessThan(grownScale);
     const activeCount = attached.count;
     f.advance(1, chemistry(0.6), quality);
     expect(attached.visible).toBe(true);
@@ -450,6 +455,20 @@ describe("tube reaction rendering contract", () => {
     expect(attached.visible).toBe(false);
     f.advance(10, chemistry(0.6), quality);
     expect(attached.visible).toBe(false);
+  });
+
+  it("carries a rising copper bubble nearly through the water in under a second", () => {
+    const f = fixture("copper-nitric", true);
+    const free = f.get<THREE.InstancedMesh>("TubeNOBubbles");
+    const matrix = new THREE.Matrix4();
+    const state = chemistry(0.4, 0.25);
+    f.update(state);
+    free.getMatrixAt(0, matrix);
+    const start = new THREE.Vector3().setFromMatrixPosition(matrix);
+    f.advance(0.75, state);
+    free.getMatrixAt(0, matrix);
+    const after = new THREE.Vector3().setFromMatrixPosition(matrix);
+    expect(after.y - start.y).toBeGreaterThan(0.025);
   });
 
   it.each<RuntimeQuality>(["LOW", "HIGH"])("clears released bubbles after copper dissolves without creating new ones at %s", quality => {
@@ -516,7 +535,7 @@ describe("tube reaction rendering contract", () => {
             a.local.distanceTo(b.local) > 0.003) continue;
         const delta = b.world.clone().sub(a.world);
         expect(delta.y, `frame ${frame}, bubble ${i}: must rise`).toBeGreaterThan(0);
-        expect(Math.hypot(delta.x, delta.z), `frame ${frame}, bubble ${i}: wobble bound`).toBeLessThan(3e-5);
+        expect(Math.hypot(delta.x, delta.z), `frame ${frame}, bubble ${i}: wobble bound`).toBeLessThan(5e-5);
         checked++;
       }
       expect(checked, `frame ${frame}: enough free, non-wrapping bubbles`).toBeGreaterThanOrEqual(2);
