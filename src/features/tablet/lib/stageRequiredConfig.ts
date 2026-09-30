@@ -15,21 +15,74 @@ export type StageRequiredItem = {
   readonly catalogItemId: EntityId;
 };
 
+const PPE_ITEMS: readonly StageRequiredItem[] = [
+  { id: "coat", label: "Лабораторный халат", kind: "ppe", catalogItemId: "safety-coat" },
+  { id: "goggles", label: "Очки", kind: "ppe", catalogItemId: "safety-goggles" },
+  { id: "gloves", label: "Перчатки", kind: "ppe", catalogItemId: "safety-gloves" },
+];
+
+const STAND_ITEM: StageRequiredItem = {
+  id: "stand",
+  label: "Штатив с мет. лапкой",
+  kind: "equipment",
+  catalogItemId: "equipment-holder",
+};
+
+const reagentItem = (id: string, label: string, catalogItemId: EntityId): StageRequiredItem => ({
+  id,
+  label,
+  kind: "reagent",
+  catalogItemId,
+});
+
+const TUBE_ITEM: StageRequiredItem = { id: "tube", label: "Пробирка", kind: "glassware", catalogItemId: "glassware-test-tube" };
+
+/** Catalog reagent → the id the 3D storage stores keep it under. */
+const REAGENT_STORE_ID: Partial<Record<EntityId, string>> = {
+  "reagent-copper": "cu",
+  "reagent-nitric-acid": "hno3",
+  "reagent-silver-nitrate": "agno3",
+  "reagent-sodium-chloride": "nacl",
+  "reagent-barium-chloride": "bacl2",
+  "reagent-potassium-sulfate": "k2so4",
+  "reagent-sulfuric-acid": "h2so4",
+  "reagent-sodium-sulfite": "na2so3",
+  "reagent-potassium-permanganate": "kmno4",
+};
+
+/** How many test tubes each checklist asks for. */
+const TUBES_NEEDED: Partial<Record<EntityId, number>> = { "step-1-ppe": 2 };
+
 /** Display list for the «Необходимо» block on selected stages. */
 export const STAGE_REQUIRED_ITEMS: Partial<Record<EntityId, readonly StageRequiredItem[]>> = {
+  "step-2-ppe": [
+    ...PPE_ITEMS,
+    reagentItem("agno3", "AgNO₃", "reagent-silver-nitrate"),
+    reagentItem("nacl", "NaCl", "reagent-sodium-chloride"),
+    TUBE_ITEM,
+    STAND_ITEM,
+  ],
+  "step-3-ppe": [
+    ...PPE_ITEMS,
+    reagentItem("bacl2", "BaCl₂", "reagent-barium-chloride"),
+    reagentItem("k2so4", "K₂SO₄", "reagent-potassium-sulfate"),
+    TUBE_ITEM,
+    STAND_ITEM,
+  ],
+  "step-4-ppe": [
+    ...PPE_ITEMS,
+    reagentItem("na2so3", "Na₂SO₃", "reagent-sodium-sulfite"),
+    reagentItem("h2so4", "H₂SO₄", "reagent-sulfuric-acid"),
+    reagentItem("kmno4", "KMnO₄", "reagent-potassium-permanganate"),
+    TUBE_ITEM,
+    STAND_ITEM,
+  ],
   "step-1-ppe": [
-    { id: "coat", label: "Лабораторный халат", kind: "ppe", catalogItemId: "safety-coat" },
-    { id: "goggles", label: "Очки", kind: "ppe", catalogItemId: "safety-goggles" },
-    { id: "gloves", label: "Перчатки", kind: "ppe", catalogItemId: "safety-gloves" },
+    ...PPE_ITEMS,
     { id: "cu", label: "Cu", kind: "reagent", catalogItemId: "reagent-copper" },
     { id: "hno3", label: "HNO₃ (разб.)", kind: "reagent", catalogItemId: "reagent-nitric-acid" },
     { id: "tubes", label: "Пробирка x2", kind: "glassware", catalogItemId: "glassware-test-tube" },
-    {
-      id: "stand",
-      label: "Штатив с мет. лапкой",
-      kind: "equipment",
-      catalogItemId: "equipment-holder",
-    },
+    STAND_ITEM,
     { id: "burner", label: "Спиртовая горелка", kind: "equipment", catalogItemId: "equipment-burner" },
   ],
 };
@@ -60,25 +113,15 @@ export type PhysicalCollectionState = {
  * `toggleRequiredItem` skips them), so the progress counter only advances
  * when the player physically grabs Cu/HNO₃/a test tube from the cabinet.
  */
-const PHYSICAL_ONLY_CATALOG_IDS: Partial<Record<EntityId, ReadonlySet<EntityId>>> = {
-  "step-1-ppe": new Set<EntityId>([
-    "reagent-copper",
-    "reagent-nitric-acid",
-    "glassware-test-tube",
-    // Only `PPEBoard` (inside the opened СИЗ cabinet) puts these into the
-    // inventory — the tablet checkbox must not stand in for walking over.
-    "safety-coat",
-    "safety-goggles",
-    "safety-gloves",
-    // The stand (with its clamp — the tube holder) and the spirit lamp come
-    // out of the equipment cabinet as one; only taking it counts.
-    "equipment-holder",
-    "equipment-burner",
-  ]),
-};
+const PHYSICAL_ONLY_STEPS: ReadonlySet<EntityId> = new Set(["step-1-ppe", "step-2-ppe", "step-3-ppe", "step-4-ppe"]);
 
+/**
+ * Every item on these checklists counts only once the player has actually
+ * done it in the 3D scene — worn the PPE, taken the reagent, the tubes, the
+ * stand (which brings its clamp and spirit lamp). The tablet cannot tick them.
+ */
 export function isPhysicalOnlyRequiredItem(stepId: EntityId, catalogItemId: EntityId): boolean {
-  return PHYSICAL_ONLY_CATALOG_IDS[stepId]?.has(catalogItemId) ?? false;
+  return PHYSICAL_ONLY_STEPS.has(stepId) && (STAGE_REQUIRED_ITEMS[stepId]?.some((item) => item.catalogItemId === catalogItemId) ?? false);
 }
 
 /** Returns whether one required item is actually available to the player. */
@@ -89,9 +132,9 @@ export function isStageRequiredItemCollected(
   physical: PhysicalCollectionState = {},
 ): boolean {
   if (isPhysicalOnlyRequiredItem(stepId, catalogItemId)) {
-    if (catalogItemId === "reagent-copper") return physical.takenReagentIds?.includes("cu") ?? false;
-    if (catalogItemId === "reagent-nitric-acid") return physical.takenReagentIds?.includes("hno3") ?? false;
-    if (catalogItemId === "glassware-test-tube") return (physical.takenTestTubeCount ?? 0) >= 2;
+    const reagentId = REAGENT_STORE_ID[catalogItemId];
+    if (reagentId) return physical.takenReagentIds?.includes(reagentId) ?? false;
+    if (catalogItemId === "glassware-test-tube") return (physical.takenTestTubeCount ?? 0) >= (TUBES_NEEDED[stepId] ?? 1);
     if (catalogItemId === "equipment-holder" || catalogItemId === "equipment-burner") return physical.standTaken ?? false;
     // PPE still lives in the inventory; "physical-only" here means the
     // tablet may not tick it, not that it is tracked somewhere else.
