@@ -1,4 +1,9 @@
+import { useEffect } from "react";
+
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { useReagentStorageStore } from "../lib/useReagentStorageStore";
+import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { getChainNeighbors } from "../lib/layout";
 import { useNavButtonCalibrationStore, type NavButtonConfig } from "../lib/useNavButtonCalibrationStore";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
@@ -92,6 +97,19 @@ export function InspectionControls({ onBack }: { readonly onBack: () => void }) 
   const { prevId, nextId } = showChainArrows ? getChainNeighbors(focusedCabinetId!) : { prevId: null, nextId: null };
   const isInspectingReagent = useReagentInspectionStore((state) => state.inspectedId !== null);
   const openTablet = useLaboratoryStore((state) => state.openTablet);
+
+  // Arriving at the fume hood opens «Перенести» by itself — choosing what to
+  // bring over is the whole point of walking up to it. Once per arrival, and
+  // only with something on the bench to bring; the button below reopens it.
+  const arrivedAtHood = activeTargetId === "fume-hood" && controlsSettled;
+  useEffect(() => {
+    if (!arrivedAtHood) return;
+    const benchHasItems =
+      useReagentStorageStore.getState().workbenchItems.length > 0 ||
+      useTestTubeStorageStore.getState().workbenchTestTubes.length > 0 ||
+      useBunsenStandStorageStore.getState().onWorkbench;
+    if (benchHasItems) useLaboratoryStore.getState().openTablet("transfer");
+  }, [arrivedAtHood]);
 
   // Nav conflicts with reagent inspection (its own ОСТАВИТЬ/ВЗЯТЬ + drag
   // rotation own the screen while a bottle is being examined) — hidden

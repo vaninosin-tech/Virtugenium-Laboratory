@@ -573,6 +573,9 @@ export function Laboratory() {
         gl={{ powerPreference: "high-performance", antialias: true, localClippingEnabled: true }}
         onCreated={(state) => {
           gameCanvasRef.current = state.gl.domElement;
+          // DEV: lets the play-through scripts (tests/visual/e2e) find where a
+          // 3D object is on screen and click it like a player would.
+          if (import.meta.env.DEV) (window as unknown as { __three?: unknown }).__three = state;
           state.gl.toneMappingExposure = 1.0;
         }}
       >
