@@ -55,7 +55,7 @@ export interface BunsenStandTablePosition {
 }
 
 /** Where the stand first appears on the table, the moment a cabinet session ends with it riding the tray (see `transferToWorkbench`) — clear of the reagent grid/stopper holder, which sit closer to the table's own center/back edge. Only ever applied once; dragging afterward persists via `setTablePosition`. */
-const DEFAULT_TABLE_POSITION: BunsenStandTablePosition = { x: 0.4, z: 0.3 };
+const DEFAULT_TABLE_POSITION: BunsenStandTablePosition = { x: -0.06, z: -0.12 };
 
 /**
  * The clamped tube's axis at the clamp jaws (`TubeClamp_TubeAxis`), in the
@@ -72,7 +72,7 @@ export const TUBE_RING_ATTACH_RADIUS = 0.1;
 /** How far below the ring's own centre the attached tube's (bottom-pivoted) origin sits — mostly hanging through/below the ring with its neck poking a little above it, matching how it read in the Blender verification render. */
 export const TUBE_RING_INSERT_DEPTH = 0.1;
 
-const STORAGE_KEY = "vg-bunsen-stand-table-position";
+const STORAGE_KEY = "vg-bunsen-stand-table-position-v2";
 
 function loadSavedTablePosition(): BunsenStandTablePosition {
   try {
@@ -145,3 +145,7 @@ export const useBunsenStandStorageStore = create<BunsenStandStorageState>((set, 
     set({ onTray: false, returnRequest: { worldPos, worldQuat, worldScale } }),
   clearReturnRequest: () => set({ returnRequest: null }),
 }));
+
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  (window as unknown as { __bunsenStandStore?: unknown }).__bunsenStandStore = useBunsenStandStorageStore;
+}

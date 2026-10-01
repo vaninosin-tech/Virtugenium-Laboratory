@@ -55,11 +55,16 @@ const UP = new THREE.Vector3(0, 1, 0);
 /** Where the lamp stands and where its flame is hottest, for a player looking along `away`. */
 export function lampLayout(away: THREE.Vector3): { readonly lamp: Position3; readonly hotSpot: THREE.Vector3 } {
   const right = new THREE.Vector3().crossVectors(away, UP).normalize();
-  const lamp: Position3 = [
-    TUBE_RING_LOCAL_OFFSET[0] + right.x * LAMP_ASIDE,
+  // Beside the clamp on whichever side (as the player sees it) is farther
+  // from the rod — the stand stands turned differently in the hood and on
+  // the table, and the lamp must never land on the stand's own base.
+  const at = (side: number): Position3 => [
+    TUBE_RING_LOCAL_OFFSET[0] + right.x * LAMP_ASIDE * side,
     0,
-    TUBE_RING_LOCAL_OFFSET[2] + right.z * LAMP_ASIDE,
+    TUBE_RING_LOCAL_OFFSET[2] + right.z * LAMP_ASIDE * side,
   ];
+  const reach = (p: Position3) => Math.hypot(p[0], p[2]);
+  const lamp = reach(at(1)) >= reach(at(-1)) ? at(1) : at(-1);
   return { lamp, hotSpot: new THREE.Vector3(lamp[0], FLAME_BASE_Y + FLAME_HEIGHT * 0.7, lamp[2]) };
 }
 
