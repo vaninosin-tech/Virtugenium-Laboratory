@@ -19,7 +19,12 @@ export interface LabAmbience {
   readonly boil: number;
 }
 
-export type LabOneShot = "pour" | "crack";
+/**
+ * One-shots. Beside the pour and the crack, the small sounds of handling
+ * things (VL-015): glass set down (`clink`), a tube clipped into the clamp
+ * (`clamp`), the lamp's cap (`cap`), something lifted (`lift`).
+ */
+export type LabOneShot = "pour" | "crack" | "clink" | "clamp" | "cap" | "lift";
 
 interface Voice {
   readonly gain: GainNode;
@@ -123,6 +128,23 @@ const blip = (e: Engine, level: number, low: number, high: number) => {
   source.start(now, Math.random() * 1.5, 0.12);
 };
 
+/** One decaying tone, gliding from `from` to `to` Hz. */
+const tone = (e: Engine, type: OscillatorType, from: number, to: number, level: number, seconds: number) => {
+  const { context } = e;
+  const now = context.currentTime;
+  const oscillator = context.createOscillator();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(from, now);
+  if (to !== from) oscillator.frequency.exponentialRampToValueAtTime(to, now + seconds);
+  const gain = context.createGain();
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(level, now + 0.003);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + seconds);
+  oscillator.connect(gain).connect(e.master);
+  oscillator.start(now);
+  oscillator.stop(now + seconds + 0.02);
+};
+
 /**
  * Called every frame with what the scene is doing. Levels glide rather than
  * jump (`setTargetAtTime`), and the fizz gets individual bubble pops on top
@@ -169,6 +191,31 @@ export const playLabSound = (sound: LabOneShot): void => {
     source.connect(filter).connect(gain).connect(e.master);
     source.start(now, 0, 0.75);
     for (let i = 0; i < 4; i++) setTimeout(() => blip(e, 0.05, 700, 2200), 120 + i * 110 + Math.random() * 60);
+    return;
+  }
+
+  if (sound === "clink") {
+    // Glass on a hard surface: two inharmonic sine partials, ringing briefly.
+    tone(e, "sine", 2650, 2650, 0.07, 0.28);
+    tone(e, "sine", 4120, 4120, 0.035, 0.18);
+    return;
+  }
+  if (sound === "clamp") {
+    // Metal jaws closing on glass: a dull knock under a bright click.
+    tone(e, "triangle", 260, 160, 0.12, 0.07);
+    blip(e, 0.12, 3200, 5200);
+    setTimeout(() => tone(e, "sine", 2400, 2400, 0.03, 0.12), 25);
+    return;
+  }
+  if (sound === "cap") {
+    // The lamp's glass cap: a small hollow tick.
+    tone(e, "triangle", 1250, 620, 0.06, 0.06);
+    blip(e, 0.05, 1500, 3000);
+    return;
+  }
+  if (sound === "lift") {
+    // Picked up: the faintest brush.
+    blip(e, 0.025, 900, 1800);
     return;
   }
 
