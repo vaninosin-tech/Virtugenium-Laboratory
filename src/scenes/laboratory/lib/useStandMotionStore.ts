@@ -52,7 +52,8 @@ export interface TubeArrival {
 interface StandMotionState {
   /** Stand clicks are refused until then. */
   readonly busyUntil: number;
-  readonly pour: { readonly instanceId: string; readonly at: number } | null;
+  /** `from`: where the bottle's base was when the pour began (it was in the hand), if not at its place. */
+  readonly pour: { readonly instanceId: string; readonly at: number; readonly from?: Position3 } | null;
   /** The tube now in the clamp, flying in from its rack slot. */
   readonly clampArrival: TubeArrival | null;
   /** The tube just taken out of the clamp, flying back to its rack slot. */
@@ -60,7 +61,7 @@ interface StandMotionState {
   /** Refuses stand clicks for `ms`. */
   hold: (ms: number) => void;
   /** Starts a bottle's pour; `commit` puts the reagent in the tube at the pour's tipping point. */
-  startPour: (instanceId: string, commit: () => void) => void;
+  startPour: (instanceId: string, commit: () => void, from?: Position3) => void;
   arriveInClamp: (world: Position3) => void;
   arriveInRack: (location: TubeLocation, index: number, world: Position3) => void;
 }
@@ -71,9 +72,9 @@ export const useStandMotionStore = create<StandMotionState>((set) => ({
   clampArrival: null,
   rackArrival: null,
   hold: (ms) => set((state) => ({ busyUntil: Math.max(state.busyUntil, Date.now() + ms) })),
-  startPour: (instanceId, commit) => {
+  startPour: (instanceId, commit, from) => {
     const at = Date.now();
-    set({ pour: { instanceId, at }, busyUntil: at + POUR_MS });
+    set({ pour: { instanceId, at, from }, busyUntil: at + POUR_MS });
     setTimeout(commit, POUR_COMMIT_MS);
     setTimeout(() => {
       set((state) => (state.pour?.at === at ? { pour: null } : state));

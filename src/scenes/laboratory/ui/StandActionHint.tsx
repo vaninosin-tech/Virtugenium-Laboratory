@@ -1,6 +1,7 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 
-import { standActionFor } from "../lib/standTableActions";
+import { standActionFor, takeLabel } from "../lib/standTableActions";
+import { useHandStore } from "../lib/useHandStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { useStandHintStore } from "../lib/useStandHintStore";
 
@@ -51,7 +52,17 @@ export function StandActionHint() {
         shownFor = target;
         delete box.dataset.tone;
       }
-      const next = target && overScene ? standActionFor(target) : null;
+      // Bottles and rack tubes are taken into the hand; the stand's own parts act.
+      const takeable = target?.kind === "bottle" || target?.kind === "rack-tube";
+      const take = takeable ? takeLabel(target) : null;
+      const next =
+        !target || !overScene || useHandStore.getState().held
+          ? null
+          : takeable
+            ? take
+              ? { label: take, blocked: false }
+              : null
+            : standActionFor(target);
       if (!next) {
         if (box.style.display !== "none") box.style.display = "none";
         return;

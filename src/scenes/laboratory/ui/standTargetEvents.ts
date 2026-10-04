@@ -1,7 +1,8 @@
 import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 
-import { runStandAction, type StandTarget } from "../lib/standTableActions";
+import { runStandAction, takeLabel, type StandTarget } from "../lib/standTableActions";
+import { takeIntoHand, type HeldItem } from "../lib/useHandStore";
 import { useStandHintStore } from "../lib/useStandHintStore";
 
 /**
@@ -28,6 +29,23 @@ export function standTargetEvents(owner: string, target: StandTarget) {
       event.stopPropagation();
       useStandHintStore.getState().hide(owner);
       document.body.style.cursor = "auto";
+    },
+  };
+}
+
+/**
+ * Pointer handlers for something taken into the hand by a click (VL-015) —
+ * a bottle or a rack tube. Hover shows «Взять …» (`takeLabel`); the click
+ * takes it, unless the stand is busy (a pour, heating).
+ */
+export function takeTargetEvents(owner: string, target: StandTarget, item: HeldItem) {
+  return {
+    ...standTargetEvents(owner, target),
+    onClick: (event: ThreeEvent<MouseEvent>) => {
+      event.stopPropagation();
+      if (!takeLabel(target)) return;
+      useStandHintStore.getState().hide(owner);
+      takeIntoHand(item, [0, 0, 0]);
     },
   };
 }

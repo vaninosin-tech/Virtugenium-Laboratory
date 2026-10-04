@@ -43,8 +43,21 @@ describe("useLaboratoryStore", () => {
     actions.setTabletSection("settings");
     expect(useLaboratoryStore.getState().tabletSection).toBe("settings");
 
+    // Nothing can be done before an experiment is chosen: the tablet stays open.
+    actions.closeTablet();
+    expect(useLaboratoryStore.getState().tabletOpen).toBe(true);
+
+    actions.selectExperiment("experiment-copper-nitric-acid");
     actions.closeTablet();
     expect(useLaboratoryStore.getState().tabletOpen).toBe(false);
+  });
+
+  it("в песочнице планшет закрывается и без опыта", () => {
+    useLaboratoryStore.setState({ mode: "sandbox", selectedExperimentId: null });
+    useLaboratoryStore.getState().openTablet();
+    useLaboratoryStore.getState().closeTablet();
+    expect(useLaboratoryStore.getState().tabletOpen).toBe(false);
+    useLaboratoryStore.setState({ mode: "training" });
   });
 
   it("добавляет предметы в инвентарь без повторов и удаляет их", () => {

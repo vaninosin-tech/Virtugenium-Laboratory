@@ -88,6 +88,8 @@ export function WorkbenchTestTubeRackInstance() {
   // position waiting for it instead of starting from (0, 0).
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
+      // Under Pointer Lock the cursor is frozen: the hand steers the carry then (`HandController`).
+      if (document.pointerLockElement) return;
       const rect = gl.domElement.getBoundingClientRect();
       sharedMouseNdc.set(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,

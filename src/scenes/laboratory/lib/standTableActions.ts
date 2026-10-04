@@ -1,5 +1,7 @@
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+import type * as THREE from "three";
+
 import type { Position3 } from "./layout";
 import { judgeMix, reagentName } from "./mixingRules";
 import { tryAddToTube, tryPourBetweenTubes } from "./pourIntoTube";
@@ -8,8 +10,8 @@ import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
 import { useBurnerStore, type BurnerPhase } from "./useBurnerStore";
 import { useHeatingStore } from "./useHeatingStore";
 import { useStandStationStore } from "./useStandStationStore";
-import { useReagentInspectionStore } from "./useReagentInspectionStore";
 import { CAP_MS, CLAMP_TUBE_MOUTH, standBusy, useStandMotionStore } from "./useStandMotionStore";
+import { takeIntoHand, useHandStore, type HeldItem } from "./useHandStore";
 import { toggleTubePick, useTestTubeDragStore } from "./useTestTubeDragStore";
 import { useTestTubeStorageStore, type StoredTestTube, type TubeLocation } from "./useTestTubeStorageStore";
 
@@ -78,14 +80,15 @@ const BURNER_LABEL: Record<BurnerPhase, string> = {
  * stand's business: the object keeps its own behaviour (on the workbench an
  * empty tube is still picked up and carried to a jar to be filled).
  */
-export function standActionFor(target: StandTarget): StandAction | null {
+export function standActionFor(target: StandTarget, { fromHand = false }: { readonly fromHand?: boolean } = {}): StandAction | null {
   // While heating, the heating panel owns the stand.
   if (useHeatingStore.getState().active) return null;
   // Something is still moving at the stand (a pour, a tube in flight, the cap).
   if (standBusy()) return null;
   // A tube carried on the workbench fills from a jar by being brought to it;
-  // clicks then belong to that gesture, not to the stand.
-  if (target.kind !== "burner" && useTestTubeDragStore.getState().heldInstanceId !== null) return null;
+  // clicks then belong to that gesture, not to the stand — unless the hand
+  // carrying it is the one asking (`handActionFor`).
+  if (!fromHand && target.kind !== "burner" && useTestTubeDragStore.getState().heldInstanceId !== null) return null;
   const location = standLocation();
 
   if (target.kind === "burner") {
@@ -127,10 +130,11 @@ export function standActionFor(target: StandTarget): StandAction | null {
     const foreign = foreignIn([reagentId]);
     if (foreign) return blocked(foreignLabel(foreign));
     const verb = reagentConfig(reagentId)?.contentsKind === "solid" ? "Насыпать" : "Прилить";
-    return action(`${verb} ${formula(reagentId)} в пробирку в лапке`, () => {
+    return action(`${verb} ${formula(reagentId)} в пробирку в лапке`, (origin) => {
       const pour = () => tryAddToTube(location, clampedIndex, reagentId);
-      // The reagent goes in when the bottle is tipped over the mouth, not on the click.
-      if (target.instanceId) useStandMotionStore.getState().startPour(target.instanceId, pour);
+      // The reagent goes in when the bottle is tipped over the mouth, not on
+      // the click; the bottle comes from wherever it is (in the hand: `origin`).
+      if (target.instanceId) useStandMotionStore.getState().startPour(target.instanceId, pour, origin);
       else pour();
     });
   }
@@ -166,15 +170,56 @@ export function runStandAction(target: StandTarget, origin?: Position3): boolean
 
 /**
  * A tube in the workbench rack, clicked in 3D or on its button in the rack's
- * close-up. A stand action wins (clamp it, pour it into the clamp) and the
- * close-up closes so the player sees it happen at the stand; otherwise the
- * tube is picked up as before — an empty one is carried to a jar to fill.
+ * close-up: it goes into the hand (VL-015). The rack's own carry
+ * (`InspectableTestTubeSlot`) moves it; the hand steers that carry from the
+ * middle of the screen. Clicking the tube already carried puts it back.
  */
 export function clickWorkbenchRackTube(index: number, instanceId: string, origin?: Position3): void {
-  const carrying = useTestTubeDragStore.getState().heldInstanceId !== null;
-  if (!carrying && runStandAction({ kind: "rack-tube", location: "workbench", index }, origin)) {
-    useReagentInspectionStore.getState().requestClose();
+  if (useTestTubeDragStore.getState().heldInstanceId === instanceId) {
+    useTestTubeDragStore.getState().releaseIfHeld(instanceId);
+    useHandStore.getState().release();
     return;
   }
+  if (useHandStore.getState().held || standBusy()) return;
+  takeIntoHand({ kind: "workbench-tube", index, instanceId }, origin ?? [0, 0, 0]);
   toggleTubePick(instanceId);
+}
+
+/** How close (horizontally) a held tube must come to the clamp's axis to go into it. */
+const CLAMP_REACH = 0.07;
+/** How close a held bottle must come to the clamped tube's mouth to pour into it. */
+const POUR_REACH = 0.1;
+
+/** The stand target a held item becomes when brought to the stand. */
+function heldAsTarget(held: HeldItem): StandTarget {
+  if (held.kind === "bottle") {
+    return { kind: "bottle", location: held.location, reagentId: held.reagentId, instanceId: held.instanceId };
+  }
+  return { kind: "rack-tube", location: held.kind === "tube" ? held.location : "workbench", index: held.index };
+}
+
+/**
+ * What a click does with `held` at `point` (the hand, over the worktop):
+ * a tube near the clamp goes into it (or is poured into the tube already
+ * there), a bottle near the clamped tube's mouth pours. Null: nothing here.
+ */
+export function handActionFor(held: HeldItem, point: THREE.Vector3): StandAction | null {
+  if (!CLAMP_TUBE_MOUTH.valid) return null;
+  const reach = held.kind === "bottle" ? POUR_REACH : CLAMP_REACH;
+  const dx = point.x - CLAMP_TUBE_MOUTH.point.x;
+  const dz = point.z - CLAMP_TUBE_MOUTH.point.z;
+  if (Math.hypot(dx, dz) > reach) return null;
+  return standActionFor(heldAsTarget(held), { fromHand: true });
+}
+
+/** The hover caption for something that can be taken into the hand. */
+export function takeLabel(target: StandTarget): string | null {
+  if (useHandStore.getState().held || standBusy() || useHeatingStore.getState().active) return null;
+  if (target.kind === "bottle") return `Взять ${formula(target.reagentId)}`;
+  if (target.kind === "rack-tube") {
+    const tube = tubesAt(target.location)[target.index];
+    if (!tube) return null;
+    return tube.contents.length === 0 ? "Взять пустую пробирку" : `Взять пробирку (${tube.contents.map(formula).join(" + ")})`;
+  }
+  return null;
 }

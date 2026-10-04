@@ -19,8 +19,9 @@ import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
 import { SpiritBurner } from "./SpiritBurner";
 import { StandStation, lampLayout } from "./StandStation";
-import { standTargetEvents } from "./standTargetEvents";
-import { ArrivalFlight, PourMotion } from "./StandMotion";
+import { takeTargetEvents } from "./standTargetEvents";
+import { useHandStore } from "../lib/useHandStore";
+import { ArrivalFlight, HandFollow, PourMotion } from "./StandMotion";
 import { POUR_POINT_HEIGHT, useStandMotionStore } from "../lib/useStandMotionStore";
 
 const DEF = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
@@ -137,6 +138,7 @@ export function FumeHoodWorkArea() {
   const sandbox = useLaboratoryStore((state) => state.mode === "sandbox");
   const crackZone = useHeatingStore((state) => (state.phase === "cracked" ? state.crackZone : null));
   const lampInHood = useBurnerStore((state) => state.place === "fumeHood");
+  const heldId = useHandStore((state) => state.held?.instanceId ?? null);
   const rackArrival = useStandMotionStore((state) => (state.rackArrival?.location === "fumeHood" ? state.rackArrival : null));
 
   const clampedIndex = standInHood ? attachedTubeSlotIndex : null;
@@ -162,13 +164,19 @@ export function FumeHoodWorkArea() {
             index === clampedIndex ? null : (
               <group
                 key={tube.instanceId}
-                {...standTargetEvents(tube.instanceId, { kind: "rack-tube", location: "fumeHood", index })}
+                {...takeTargetEvents(
+                  tube.instanceId,
+                  { kind: "rack-tube", location: "fumeHood", index },
+                  { kind: "tube", location: "fumeHood", index, instanceId: tube.instanceId },
+                )}
               >
                 <group position={computeTubeSlotLocalOffset(index)}>
-                  {/* Back from the clamp: seen flying home to its slot. */}
-                  <ArrivalFlight arrival={rackArrival?.index === index ? rackArrival : null}>
-                    <LabTestTubeInstance contents={tube.contents} />
-                  </ArrivalFlight>
+                  <HandFollow instanceId={tube.instanceId}>
+                    {/* Back from the clamp: seen flying home to its slot. */}
+                    <ArrivalFlight arrival={rackArrival?.index === index ? rackArrival : null}>
+                      <LabTestTubeInstance contents={tube.contents} />
+                    </ArrivalFlight>
+                  </HandFollow>
                 </group>
               </group>
             ),
@@ -199,7 +207,13 @@ export function FumeHoodWorkArea() {
         const reagent = reagentConfig(item.reagentId);
         if (!reagent) return null;
         const target = { kind: "bottle", location: "fumeHood", reagentId: item.reagentId, instanceId: item.instanceId } as const;
-        const { onClick } = standTargetEvents(item.instanceId, target);
+        const { onClick } = takeTargetEvents(item.instanceId, target, {
+          kind: "bottle",
+          location: "fumeHood",
+          instanceId: item.instanceId,
+          reagentId: item.reagentId,
+          containerType: reagent.containerType,
+        });
         return (
           <group key={item.instanceId} onClick={onClick}>
             <PourMotion
@@ -217,6 +231,7 @@ export function FumeHoodWorkArea() {
                 // handler on the wrapping group above could never fire. Always
                 // on: a bottle that can't be poured yet still says why.
                 hoverable
+                highlighted={heldId === item.instanceId}
                 onHoverChange={(hovered) =>
                   hovered
                     ? useStandHintStore.getState().show(item.instanceId, target)

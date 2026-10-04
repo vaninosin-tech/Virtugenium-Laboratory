@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
 import { EffectComposer, N8AO, Outline, Selection } from "@react-three/postprocessing";
 import { InspectionDepthOfField } from "./InspectionDepthOfField";
@@ -21,9 +21,12 @@ import { StandActionPanel } from "./StandActionPanel";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { useBurnerStore } from "../lib/useBurnerStore";
 import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
-import { runStandAction } from "../lib/standTableActions";
+import { takeLabel } from "../lib/standTableActions";
+import { escapeTakenByHand, takeIntoHand, useHandStore } from "../lib/useHandStore";
 import { useStandHintStore } from "../lib/useStandHintStore";
 import { StandActionHint } from "./StandActionHint";
+import { HandController } from "./HandController";
+import { ControlsHint, HeldItemHint } from "./HandHints";
 import { PourMotion } from "./StandMotion";
 import { POUR_POINT_HEIGHT, standBusy } from "../lib/useStandMotionStore";
 import { SceneStepAutoAdvance } from "../../../features/tablet/lib/SceneStepAutoAdvance";
@@ -157,6 +160,7 @@ function DraggableWorkbenchReagent({
   const override = useWorkbenchReagentDragStore((state) => state.overrides[instanceId]);
   const isDragging = useWorkbenchReagentDragStore((state) => state.draggingInstanceId === instanceId);
   const isSwapTarget = useWorkbenchReagentDragStore((state) => state.swapTargetInstanceId === instanceId);
+  const held = useHandStore((state) => state.held?.instanceId === instanceId);
   // Post-drop swap-into-place tween — see `WorkbenchReagentSwapSpec`'s doc.
   // Distinct from `isSwapTarget` above, which is just the live drag-hover
   // highlight before a drop, not this after-the-fact animation state.
@@ -306,7 +310,12 @@ function DraggableWorkbenchReagent({
     const handleUp = (up: PointerEvent) => {
       window.removeEventListener("pointerup", handleUp);
       if (Math.hypot(up.clientX - clientX, up.clientY - clientY) > JAR_CLICK_SLOP_PX) return;
-      runStandAction({ kind: "bottle", location: "workbench", reagentId: reagent.id, instanceId });
+      // A click takes it into the hand (VL-015).
+      if (!takeLabel({ kind: "bottle", location: "workbench", reagentId: reagent.id })) return;
+      takeIntoHand(
+        { kind: "bottle", location: "workbench", instanceId, reagentId: reagent.id, containerType: reagent.containerType },
+        [0, 0, 0],
+      );
     };
     window.addEventListener("pointerup", handleUp);
   };
@@ -323,7 +332,7 @@ function DraggableWorkbenchReagent({
           rotationY={rotationY}
           scale={scale}
           hoverable={!prewarm}
-          highlighted={!prewarm && (isDragging || isSwapTarget)}
+          highlighted={!prewarm && (isDragging || isSwapTarget || held)}
           onPointerDown={prewarm ? undefined : handlePointerDown}
           onHoverChange={(hovered) =>
             hovered
@@ -515,6 +524,18 @@ export function Laboratory() {
   const tubeViewing = useTubeCloseUpStore((state) => state.viewing);
   const heatingActive = useHeatingStore((state) => state.active);
   const tubeCloseUp = tubeViewing || heatingActive;
+  const handHeld = useHandStore((state) => state.held !== null);
+  // RMB in the overview hides or shows the aiming dot — nothing else.
+  const [crosshairHidden, setCrosshairHidden] = useState(false);
+  useEffect(() => {
+    const handleMouseDown = (event: MouseEvent) => {
+      if (event.button !== 2 || !document.pointerLockElement) return;
+      if (useSceneInteractionStore.getState().activeTargetId !== "overview") return;
+      setCrosshairHidden((hidden) => !hidden);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, []);
   const gameCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const resumeMouseLook = useCallback(() => {
@@ -544,6 +565,9 @@ export function Laboratory() {
     void loadCabinetFonts();
     const sandbox = useLaboratoryStore.getState().mode === "sandbox";
     if (sandbox) setupSandbox();
+    // The lab starts with the tablet open on the experiment list; it cannot
+    // be closed until one is chosen (`closeTablet`).
+    else if (!useLaboratoryStore.getState().selectedExperimentId) useLaboratoryStore.getState().openTablet("tasks");
     return () => {
       if (sandbox) teardownSandbox();
     };
@@ -555,6 +579,8 @@ export function Laboratory() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // Esc with something in the hand puts it back, nothing more (VL-015).
+      if (escapeTakenByHand()) return;
       // Do not navigate or recapture the scene behind the tablet overlay.
       if (useLaboratoryStore.getState().tabletOpen) return;
       // A focused cabinet owns Escape exclusively — CameraRig runs the
@@ -586,7 +612,7 @@ export function Laboratory() {
     setActiveTarget("overview");
   };
 
-  const showCrosshair = isPointerLocked && activeTargetId === "overview";
+  const showCrosshair = isPointerLocked && activeTargetId === "overview" && !crosshairHidden;
   const showZonePanel = activeTargetId !== "overview";
 
   return (
@@ -669,6 +695,7 @@ export function Laboratory() {
         </Selection>
 
         <CameraRig onResumeMouseLook={resumeMouseLook} />
+        <HandController />
       </Canvas>
 
       {showCrosshair && (
@@ -691,13 +718,16 @@ export function Laboratory() {
       <HeatingControls />
       <StandActionPanel />
       <StandActionHint />
+      <HeldItemHint />
+      <ControlsHint />
       <LabNoticeOverlay />
       <SandboxPanel />
       <SceneStepAutoAdvance />
       {/* The tube close-up has its own way out («Отойти» / «Отойти от
           штатива»), and these buttons sat right over the bottom of the tube,
           where the copper and the precipitate are. */}
-      {tubeCloseUp ? null : <InspectionControls onBack={returnToOverview} />}
+      {/* While something is in the hand, the hand has the mouse: no «Назад» (VL-015). */}
+      {tubeCloseUp || handHeld ? null : <InspectionControls onBack={returnToOverview} />}
       <ReagentInspectionOverlay />
 
       {showZonePanel ? (

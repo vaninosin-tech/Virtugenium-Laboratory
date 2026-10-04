@@ -27,6 +27,7 @@ import { useDevMenuStore, type DevMenuCategory } from "../lib/useDevMenuStore";
 import { useFumeHoodControlsStore } from "../lib/useFumeHoodControlsStore";
 import { useFurniturePositionStore, type FurnitureId } from "../lib/useFurniturePositionStore";
 import { useBurnerStore } from "../lib/useBurnerStore";
+import { escapeTakenByHand } from "../lib/useHandStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useHotspotObjectsStore } from "../lib/useHotspotObjectsStore";
@@ -1203,6 +1204,8 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // Esc with something in the hand puts it back, nothing more (VL-015).
+      if (escapeTakenByHand()) return;
       // The tablet owns all input while it covers the scene. Escape must not
       // return/lock the cabinet behind an open tablet.
       if (useLaboratoryStore.getState().tabletOpen) return;

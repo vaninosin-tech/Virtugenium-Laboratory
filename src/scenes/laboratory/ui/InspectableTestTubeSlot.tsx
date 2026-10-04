@@ -20,6 +20,7 @@ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { clickWorkbenchRackTube } from "../lib/standTableActions";
 import { useStandHintStore } from "../lib/useStandHintStore";
 import { useStandMotionStore } from "../lib/useStandMotionStore";
+import { useHandStore } from "../lib/useHandStore";
 import { ArrivalFlight } from "./StandMotion";
 import { consumePickablePressed, sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { useTestTubeHoverStore } from "../lib/useTestTubeHoverStore";
@@ -264,9 +265,14 @@ export function InspectableTestTubeSlot({
         if (!group) return;
         const worldPos = group.getWorldPosition(new THREE.Vector3());
         useBunsenStandStorageStore.getState().attachTestTube(index, [worldPos.x, worldPos.y, worldPos.z]);
+        useStandMotionStore.getState().arriveInClamp([worldPos.x, worldPos.y, worldPos.z]);
         useTestTubeDragStore.getState().releaseIfHeld(instanceId);
         return;
       }
+      // In the hand (VL-015) a click on empty air does nothing — a double
+      // click puts the tube back (`HandController`) — except right over the
+      // rack, where it plainly means «put it back here».
+      if (useHandStore.getState().held && !useTestTubeDragStore.getState().isNearHolder) return;
       useTestTubeDragStore.getState().releaseIfHeld(instanceId);
     };
     window.addEventListener("click", handleClick);
@@ -537,7 +543,7 @@ export function InspectableTestTubeSlot({
       {/* Back from the clamp: seen flying home to its slot. */}
       <ArrivalFlight arrival={rackArrival}>
         <primitive object={instance} />
-        <ReagentHoverRim object={instance} active={hovered} />
+        <ReagentHoverRim object={instance} active={hovered || isHeld} />
       </ArrivalFlight>
       {/* The ONLY raycast target (the real glass had raycasting disabled
           above) вЂ” noticeably bigger than the tube itself, see

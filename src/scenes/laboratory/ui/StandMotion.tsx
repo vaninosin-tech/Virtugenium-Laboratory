@@ -1,8 +1,10 @@
-import { useFrame, useThree } from "@react-three/fiber";
-import { useMemo, useRef, type ReactNode } from "react";
+import { createPortal, useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 
 import type { Position3 } from "../lib/layout";
+import { HAND, useHandStore } from "../lib/useHandStore";
+import { ReagentHoverRim } from "./ReagentHoverRim";
 import {
   CLAMP_TUBE_MOUTH,
   POUR_MS,
@@ -57,29 +59,31 @@ export function ArrivalFlight({ arrival, children }: { readonly arrival: TubeArr
 
 /** Tip of a pouring bottle (radians): its neck well down over the tube's mouth. */
 const POUR_TILT = 1.6;
-/** The bottle's pour point, above the tube's mouth while pouring… */
+/** The bottle's mouth, above the tube's mouth while pouring… */
 const POUR_ABOVE_MOUTH = 0.012;
 /** …and higher while it comes over and goes back, clear of the clamp. */
 const APPROACH_ABOVE_MOUTH = 0.05;
-/** How high the bottle arcs on its way over: above the tube's mouth and the clamp. */
+/** How high a bottle arcs on its way over from its place: above the tube's mouth and the clamp. */
 const TRAVEL_LIFT = 0.12;
 /** Phases of a pour, as fractions of `POUR_MS`. */
-const CAP_OFF = 0.12;
-const COME = 0.36;
-const TIP = 0.48;
+const COME = 0.3;
+const TIP = 0.44;
 const HOLD = 0.74;
-const UNTIP = 0.82;
-const HOME = 0.94;
-/** Where the cap is put down: this far beside the bottle's place, across its way to the tube. */
+const UNTIP = 0.84;
+/** Where the cap is put down: this far to the side of the bottle's place, as the player sees it. */
 const CAP_ASIDE = 0.085;
+/** How fast a held item follows the hand, and goes home after (1/s, exponential). */
+const FOLLOW_RATE = 12;
+/** Seconds for the cap to come off or go back on. */
+const CAP_SECONDS = 0.35;
 
-interface CapRest {
+interface BottleRest {
   readonly cap: THREE.Object3D | null;
-  readonly position: THREE.Vector3;
-  readonly quaternion: THREE.Quaternion;
+  readonly capPosition: THREE.Vector3;
+  readonly capQuaternion: THREE.Quaternion;
   /** The cap standing on the table beside the bottle's place. */
-  readonly asideWorld: THREE.Vector3;
-  readonly worldQuat: THREE.Quaternion;
+  readonly capAside: THREE.Vector3;
+  readonly capWorldQuat: THREE.Quaternion;
   /**
    * The bottle's mouth relative to this group's origin, in the world, at
    * rest. Measured off the model rather than assumed at the origin: the
@@ -90,13 +94,17 @@ interface CapRest {
 }
 
 /**
- * A bottle that can be seen pouring into the clamped tube. Its cap comes off
- * and is put down beside it; the bottle arcs over to the tube from the side
- * the stand's rod is NOT on, as the player sees it (so it neither hides the
- * tube nor passes through the stand), tips until its pour point is over the
- * mouth, holds while the reagent goes in (`POUR_COMMIT_MS`), straightens,
- * goes home, and gets its cap back. Wrap the bottle at its resting place —
- * base centre at this group's origin.
+ * A bottle that can be taken into the hand (VL-015) and seen pouring into
+ * the clamped tube (VL-014). Wrap it at its resting place — base centre at
+ * this group's origin.
+ *
+ * - Taken: its cap comes off and stays on the table at its place, the bottle
+ *   flies to the hand and follows it (`HAND.point`).
+ * - Pouring: from wherever it is, it comes beside the tube's mouth from the
+ *   side the stand's rod is NOT on, as the player sees it, tips until its
+ *   mouth is over the tube's, holds while the reagent goes in
+ *   (`POUR_COMMIT_MS`), straightens and goes home.
+ * - Let go or put back: it goes home and gets its cap back.
  *
  * @param pourPointHeight the bottle's `PourPoint` above its base, at the scale it is drawn —
  *   used only for a container without a cap; with one, the cap's rim is the mouth
@@ -115,8 +123,9 @@ export function PourMotion({
   const { camera } = useThree();
   const groupRef = useRef<THREE.Group>(null);
   const pour = useStandMotionStore((state) => (state.pour?.instanceId === instanceId ? state.pour : null));
-  const capRef = useRef<CapRest | null>(null);
-  const runningAt = useRef<number | null>(null);
+  const held = useHandStore((state) => state.held?.instanceId === instanceId);
+  const restRef = useRef<BottleRest | null>(null);
+  const motion = useRef({ away: false, cur: new THREE.Vector3(), curQuat: new THREE.Quaternion(), capOff: 0 });
   const s = useMemo(
     () => ({
       rest: new THREE.Vector3(),
@@ -128,126 +137,222 @@ export function PourMotion({
       worldQuat: new THREE.Quaternion(),
       target: new THREE.Vector3(),
       point: new THREE.Vector3(),
+      from: new THREE.Vector3(),
       parentQuat: new THREE.Quaternion(),
       onBottle: new THREE.Vector3(),
       capWorld: new THREE.Vector3(),
+      tmpQuat: new THREE.Quaternion(),
     }),
     [],
   );
 
-  const restoreCap = () => {
-    const rest = capRef.current;
-    if (rest?.cap) {
-      rest.cap.position.copy(rest.position);
-      rest.cap.quaternion.copy(rest.quaternion);
+  /** Measures the bottle at rest — its mouth, where its cap goes — before it first leaves its place. */
+  const measure = (group: THREE.Group) => {
+    let found: THREE.Object3D | null = null;
+    group.traverse((object) => {
+      if (!found && object.name.startsWith("Cap")) found = object;
+    });
+    const cap = found as THREE.Object3D | null;
+    s.right.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
+    if (!cap) {
+      restRef.current = {
+        cap: null,
+        capPosition: new THREE.Vector3(),
+        capQuaternion: new THREE.Quaternion(),
+        capAside: new THREE.Vector3(),
+        capWorldQuat: new THREE.Quaternion(),
+        mouthOffset: new THREE.Vector3(0, pourPointHeight, 0),
+      };
+      return;
     }
-    capRef.current = null;
+    const capWorld = cap.getWorldPosition(new THREE.Vector3());
+    const box = new THREE.Box3().setFromObject(cap);
+    // The mouth: under the middle of the cap, at its rim.
+    const mouth = box.getCenter(new THREE.Vector3()).setY(box.min.y);
+    // Stood on the table beside the bottle's place, rim down as it was on the bottle.
+    const capAside = capWorld.clone().addScaledVector(s.right, CAP_ASIDE);
+    capAside.y = s.rest.y + (capWorld.y - box.min.y) + 0.001;
+    restRef.current = {
+      cap,
+      capPosition: cap.position.clone(),
+      capQuaternion: cap.quaternion.clone(),
+      capAside,
+      capWorldQuat: cap.getWorldQuaternion(new THREE.Quaternion()),
+      mouthOffset: mouth.sub(s.rest),
+    };
   };
 
-  useFrame(() => {
+  useFrame((_, rawDelta) => {
     const group = groupRef.current;
     const parent = group?.parent;
     if (!group || !parent) return;
-    group.position.set(...(position ?? [0, 0, 0]));
-    group.quaternion.identity();
-    const elapsed = pour ? Date.now() - pour.at : Infinity;
-    if (!pour || elapsed >= POUR_MS || !CLAMP_TUBE_MOUTH.valid) {
-      if (runningAt.current !== null) {
-        restoreCap();
-        runningAt.current = null;
-      }
-      return;
-    }
-    const k = elapsed / POUR_MS;
-    const mouth = CLAMP_TUBE_MOUTH.point;
+    const delta = Math.min(rawDelta, 0.1);
+    const m = motion.current;
 
     // Where the bottle rests, in the world.
+    group.position.set(...(position ?? [0, 0, 0]));
+    group.quaternion.identity();
+    const rest = restRef.current;
+    if (rest?.cap) {
+      rest.cap.position.copy(rest.capPosition);
+      rest.cap.quaternion.copy(rest.capQuaternion);
+    }
     group.updateWorldMatrix(true, true);
     group.getWorldPosition(s.rest);
     group.getWorldQuaternion(s.restQuat);
 
-    // The side of the tube, as the player sees it, that the rod is not on.
-    s.right.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
-    const rodSide = Math.sign(s.side.subVectors(CLAMP_TUBE_MOUTH.rod, mouth).dot(s.right)) || -1;
-    s.side.copy(s.right).multiplyScalar(-rodSide);
-    s.axis.crossVectors(UP, s.side).normalize();
+    const elapsed = pour ? Date.now() - pour.at : Infinity;
+    const pouring = !!pour && elapsed < POUR_MS && CLAMP_TUBE_MOUTH.valid;
+    if (!m.away && !held && !pouring) {
+      // At its place and staying there.
+      m.cur.copy(s.rest);
+      m.curQuat.copy(s.restQuat);
+      return;
+    }
+    if (!m.away) {
+      // Leaving its place: measure it first, while it still stands there.
+      measure(group);
+      m.away = true;
+      m.cur.copy(s.rest);
+      m.curQuat.copy(s.restQuat);
+    }
+    const r = restRef.current!;
+    if (held) {
+      HAND.home.copy(s.rest);
+      HAND.homeValid = true;
+    }
 
-    if (runningAt.current !== pour.at) {
-      restoreCap();
-      runningAt.current = pour.at;
-      let found: THREE.Object3D | null = null;
-      group.traverse((object) => {
-        if (!found && object.name.startsWith("Cap")) found = object;
-      });
-      const cap = found as THREE.Object3D | null;
-      if (cap) {
-        const worldQuat = cap.getWorldQuaternion(new THREE.Quaternion());
-        const capWorld = cap.getWorldPosition(new THREE.Vector3());
-        const box = new THREE.Box3().setFromObject(cap);
-        // The mouth: under the middle of the cap, at its rim.
-        const mouthWorld = box.getCenter(new THREE.Vector3()).setY(box.min.y);
-        // Stood on the table beside the bottle's place, rim down as it was on the bottle.
-        const asideWorld = capWorld.clone().addScaledVector(s.axis, CAP_ASIDE);
-        asideWorld.y = s.rest.y + (capWorld.y - box.min.y) + 0.001;
-        capRef.current = {
-          cap,
-          position: cap.position.clone(),
-          quaternion: cap.quaternion.clone(),
-          asideWorld,
-          worldQuat,
-          mouthOffset: mouthWorld.sub(s.rest),
-        };
+    if (pouring) {
+      const k = elapsed / POUR_MS;
+      const mouth = CLAMP_TUBE_MOUTH.point;
+      // The side of the tube, as the player sees it, that the rod is not on.
+      s.right.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
+      const rodSide = Math.sign(s.side.subVectors(CLAMP_TUBE_MOUTH.rod, mouth).dot(s.right)) || -1;
+      s.side.copy(s.right).multiplyScalar(-rodSide);
+      s.axis.crossVectors(UP, s.side).normalize();
+
+      const tip = k < COME ? 0 : k < TIP ? smooth((k - COME) / (TIP - COME)) : k < HOLD ? 1 : k < UNTIP ? 1 - smooth((k - HOLD) / (UNTIP - HOLD)) : 0;
+      const above = THREE.MathUtils.lerp(APPROACH_ABOVE_MOUTH, POUR_ABOVE_MOUTH, tip);
+      // Tipping towards the tube turns the bottle's up about `axis` by −angle.
+      s.tilt.setFromAxisAngle(s.axis, -POUR_TILT * tip);
+      // The bottle sits so that its (tipped) mouth is just over the tube's, on the bottle's side.
+      s.point.copy(r.mouthOffset).applyQuaternion(s.tilt);
+      s.target.copy(mouth).addScaledVector(UP, above).addScaledVector(s.side, 0.004).sub(s.point);
+
+      if (k < UNTIP) {
+        // Over to the tube from where it was — its place, or the hand.
+        if (pour.from) s.from.set(...pour.from);
+        else s.from.copy(s.rest);
+        const travel = k < COME ? smooth(k / COME) : 1;
+        const lift = (pour.from ? 0.03 : TRAVEL_LIFT) * Math.sin(Math.PI * travel);
+        m.cur.copy(s.from).lerp(s.target, travel).addScaledVector(UP, lift);
       } else {
-        capRef.current = {
-          cap: null,
-          position: new THREE.Vector3(),
-          quaternion: new THREE.Quaternion(),
-          asideWorld: new THREE.Vector3(),
-          worldQuat: new THREE.Quaternion(),
-          mouthOffset: new THREE.Vector3(0, pourPointHeight, 0),
-        };
+        m.cur.copy(s.target);
+      }
+      m.curQuat.copy(s.tilt).multiply(s.restQuat);
+    } else {
+      // In the hand, or on its way home.
+      const goal = held && HAND.valid ? HAND.point : s.rest;
+      const t = 1 - Math.exp(-FOLLOW_RATE * delta);
+      m.cur.lerp(goal, t);
+      m.curQuat.slerp(s.restQuat, t);
+      if (!held && m.cur.distanceTo(s.rest) < 0.0008) {
+        m.cur.copy(s.rest);
+        m.curQuat.copy(s.restQuat);
       }
     }
 
-    const tip = k < COME ? 0 : k < TIP ? smooth((k - COME) / (TIP - COME)) : k < HOLD ? 1 : k < UNTIP ? 1 - smooth((k - HOLD) / (UNTIP - HOLD)) : 0;
-    const above = THREE.MathUtils.lerp(APPROACH_ABOVE_MOUTH, POUR_ABOVE_MOUTH, tip);
-    // Tipping towards the tube turns the bottle's up about `axis` by −angle.
-    s.tilt.setFromAxisAngle(s.axis, -POUR_TILT * tip);
-    s.worldQuat.copy(s.tilt).multiply(s.restQuat);
-    // The bottle sits so that its (tipped) mouth is just over the tube's, on the bottle's side.
-    s.point.copy(capRef.current?.mouthOffset ?? s.point.set(0, pourPointHeight, 0)).applyQuaternion(s.tilt);
-    s.target.copy(mouth).addScaledVector(UP, above).addScaledVector(s.side, 0.004).sub(s.point);
-
-    // Over to the tube and back home, arcing up between.
-    const travel =
-      k < CAP_OFF ? 0 : k < COME ? smooth((k - CAP_OFF) / (COME - CAP_OFF)) : k < UNTIP ? 1 : k < HOME ? 1 - smooth((k - UNTIP) / (HOME - UNTIP)) : 0;
-    const worldPos = s.rest.clone().lerp(s.target, travel).addScaledVector(UP, TRAVEL_LIFT * Math.sin(Math.PI * travel));
-
-    group.position.copy(parent.worldToLocal(worldPos));
+    group.position.copy(parent.worldToLocal(s.target.copy(m.cur)));
     // World = parent · local, so local = parent⁻¹ · world.
     parent.getWorldQuaternion(s.parentQuat);
-    group.quaternion.copy(s.parentQuat.invert().multiply(s.worldQuat));
+    group.quaternion.copy(s.parentQuat.invert().multiply(m.curQuat));
 
-    // The cap: off and down beside the bottle's place, back on once it is home.
-    const rest = capRef.current;
-    if (rest?.cap?.parent) {
-      rest.cap.position.copy(rest.position);
-      rest.cap.quaternion.copy(rest.quaternion);
+    // The cap: off while the bottle is away from its place, back on once it is home.
+    const home = !held && !pouring && m.cur.equals(s.rest);
+    m.capOff = THREE.MathUtils.clamp(m.capOff + (home ? -1 : 1) * (delta / CAP_SECONDS), 0, 1);
+    if (r.cap?.parent) {
       group.updateWorldMatrix(false, true);
-      rest.cap.getWorldPosition(s.onBottle);
-      const off = k < CAP_OFF ? smooth(k / CAP_OFF) : k < HOME ? 1 : 1 - smooth((k - HOME) / (1 - HOME));
-      s.capWorld.copy(s.onBottle).lerp(rest.asideWorld, off).addScaledVector(UP, 0.03 * Math.sin(Math.PI * off));
-      const capParent = rest.cap.parent;
-      rest.cap.position.copy(capParent.worldToLocal(s.capWorld));
-      const capParentQuat = capParent.getWorldQuaternion(new THREE.Quaternion()).invert();
-      const onBottleQuat = rest.cap.getWorldQuaternion(new THREE.Quaternion());
-      rest.cap.quaternion.copy(capParentQuat.multiply(onBottleQuat.slerp(rest.worldQuat, off)));
+      r.cap.getWorldPosition(s.onBottle);
+      const off = smooth(m.capOff);
+      s.capWorld.copy(s.onBottle).lerp(r.capAside, off).addScaledVector(UP, 0.03 * Math.sin(Math.PI * off));
+      const capParent = r.cap.parent;
+      r.cap.position.copy(capParent.worldToLocal(s.capWorld));
+      capParent.getWorldQuaternion(s.tmpQuat).invert();
+      const onBottleQuat = r.cap.getWorldQuaternion(new THREE.Quaternion());
+      r.cap.quaternion.copy(s.tmpQuat.multiply(onBottleQuat.slerp(r.capWorldQuat, off)));
+    }
+    if (home && m.capOff === 0) {
+      // Home, capped: back to standing still.
+      m.away = false;
+      if (r.cap) {
+        r.cap.position.copy(r.capPosition);
+        r.cap.quaternion.copy(r.capQuaternion);
+      }
+      group.position.set(...(position ?? [0, 0, 0]));
+      group.quaternion.identity();
     }
   });
 
   return (
     <group ref={groupRef} position={position}>
       {children}
+    </group>
+  );
+}
+
+/**
+ * A tube that can be taken into the hand (VL-015): flies to the hand and
+ * follows it (`HAND.point`), outlined; let go, it goes back to its place.
+ * Wrap it at its resting place — its base at this group's origin.
+ */
+export function HandFollow({ instanceId, children }: { readonly instanceId: string; readonly children: ReactNode }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const held = useHandStore((state) => state.held?.instanceId === instanceId);
+  // The outline goes round the tube's glass only (not its contents and
+  // reaction effects), drawn beside the glass in the glass's own parent.
+  const [glass, setGlass] = useState<THREE.Mesh | null>(null);
+  useEffect(() => {
+    if (!held) return;
+    let found: THREE.Mesh | null = null;
+    groupRef.current?.traverse((object) => {
+      if (!found && object instanceof THREE.Mesh && object.name === "Tube_Glass") found = object;
+    });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- found once the tube is taken, in the loaded scene graph
+    setGlass(found);
+  }, [held]);
+  const motion = useRef({ away: false, cur: new THREE.Vector3() });
+  const rest = useMemo(() => new THREE.Vector3(), []);
+
+  useFrame((_, rawDelta) => {
+    const group = groupRef.current;
+    const parent = group?.parent;
+    if (!group || !parent) return;
+    const m = motion.current;
+    group.position.set(0, 0, 0);
+    group.updateWorldMatrix(true, false);
+    group.getWorldPosition(rest);
+    if (!m.away && !held) return;
+    if (!m.away) {
+      m.away = true;
+      m.cur.copy(rest);
+    }
+    if (held) {
+      HAND.home.copy(rest);
+      HAND.homeValid = true;
+    }
+    const goal = held && HAND.valid ? HAND.point : rest;
+    m.cur.lerp(goal, 1 - Math.exp(-FOLLOW_RATE * Math.min(rawDelta, 0.1)));
+    if (!held && m.cur.distanceTo(rest) < 0.0008) {
+      m.away = false;
+      return;
+    }
+    group.position.copy(parent.worldToLocal(m.cur.clone()));
+  });
+
+  return (
+    <group ref={groupRef}>
+      {children}
+      {glass?.parent ? createPortal(<ReagentHoverRim object={glass} active={held} />, glass.parent) : null}
     </group>
   );
 }

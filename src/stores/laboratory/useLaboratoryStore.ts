@@ -27,6 +27,10 @@ const resolveSection = (
 ): TabletSection =>
   isSectionLockedWithoutTask(section, selectedExperimentId) ? "tasks" : section;
 
+/** The tablet may not be closed yet: no experiment chosen, outside the sandbox. */
+export const mustChooseExperiment = (state: { readonly mode: string; readonly selectedExperimentId: EntityId | null }): boolean =>
+  state.mode !== "sandbox" && state.selectedExperimentId === null;
+
 export const useLaboratoryStore = create<LaboratoryStore>((set) => ({
   ...createInitialLaboratoryState(),
 
@@ -46,7 +50,9 @@ export const useLaboratoryStore = create<LaboratoryStore>((set) => ({
       };
     }),
 
-  closeTablet: () => set({ tabletOpen: false }),
+  // Nothing can be done in the lab before an experiment is chosen: the
+  // tablet stays open until then (the sandbox has no experiment to choose).
+  closeTablet: () => set((state) => (mustChooseExperiment(state) ? state : { tabletOpen: false })),
 
   setTabletSection: (tabletSection) =>
     set((state) => {

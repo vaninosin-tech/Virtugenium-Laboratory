@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, FlaskConical, RotateCcw, Settings, X } from "lucide-react";
 
 import type { EntityId } from "../../../entities/laboratory";
-import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+import { mustChooseExperiment, useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import {
   isSectionLockedWithoutTask,
   type TabletSection,
@@ -63,6 +63,7 @@ export function TabletOverlay({ chrome = true, shellClassName, onClose }: Tablet
   const pushTabletSection = useLaboratoryStore((state) => state.pushTabletSection);
   const goBackTablet = useLaboratoryStore((state) => state.goBackTablet);
   const clearAssignment = useLaboratoryStore((state) => state.clearAssignment);
+  const closeLocked = useLaboratoryStore(mustChooseExperiment);
 
   const [confirmingExit, setConfirmingExit] = useState(false);
   const [focusedStepId, setFocusedStepId] = useState<EntityId | null>(currentStepId);
@@ -183,7 +184,13 @@ export function TabletOverlay({ chrome = true, shellClassName, onClose }: Tablet
             >
               Выход
             </button>
-            <button style={closeButtonStyle} onClick={handleClose} aria-label="Свернуть планшет">
+            <button
+              style={closeLocked ? { ...closeButtonStyle, opacity: 0.35, cursor: "not-allowed" } : closeButtonStyle}
+              onClick={closeLocked ? undefined : handleClose}
+              disabled={closeLocked}
+              aria-label={closeLocked ? "Сначала выберите опыт" : "Свернуть планшет"}
+              title={closeLocked ? "Сначала выберите опыт" : undefined}
+            >
               <X size={18} />
             </button>
           </div>
