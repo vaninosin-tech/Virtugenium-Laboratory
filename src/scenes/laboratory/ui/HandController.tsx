@@ -4,32 +4,26 @@ import * as THREE from "three";
 
 import { handActionFor, standActionFor } from "../lib/standTableActions";
 import { HAND, useHandStore, type HeldItem } from "../lib/useHandStore";
-import { CLAMP_TUBE_MOUTH } from "../lib/useStandMotionStore";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 
-/** How high above the worktop the held item is carried with no stand around. */
-const CARRY_LIFT = 0.06;
-/** The clamped tube's base below its mouth — the 15 cm tube. Things are carried with their base there. */
-const TUBE_LENGTH = 0.15;
+/** How high above the worktop the held item glides — just off it, its shadow right under it. */
+const CARRY_LIFT = 0.02;
 /**
  * The hand stays this close (horizontally) to the item's place: across the
  * whole worktop (a bottle at the hood's far end is ~0.7 m from the stand),
  * not off across the room.
  */
 const REACH = 1.3;
-/** Mouse travel (px) that moves the hand across half the screen — a little slower than the raw cursor, for aiming at a 2 cm tube mouth. */
-const HALF_SCREEN_PX = 700;
-/** Two clicks this close together put the item back. */
-const DOUBLE_CLICK_MS = 350;
+
 
 /**
  * Drives the hand (VL-015) while something is held: holds Pointer Lock so
  * the cursor is gone and the mouse moves the item, keeps the scene's own
  * pointer events off (under Pointer Lock they would all land on wherever the
  * cursor froze), finds what a click would do (`handActionFor`), does it on a
- * click, and puts the item back on a double click or when the lock is lost
- * (Esc). Mounted once in the canvas.
+ * left click, and puts the item back on a right click or when the lock is
+ * lost (Esc). Mounted once in the canvas.
  */
 export function HandController() {
   const { gl, camera, setEvents } = useThree();
@@ -51,7 +45,6 @@ export function HandController() {
     const canvas = gl.domElement;
     setEvents({ enabled: false });
     canvas.style.cursor = "none";
-    let lastClick = 0;
 
     const letGo = () => {
       useHandStore.getState().release();
@@ -65,25 +58,29 @@ export function HandController() {
     };
 
     const handleMove = (event: MouseEvent) => {
-      HAND.ndc.x = THREE.MathUtils.clamp(HAND.ndc.x + event.movementX / HALF_SCREEN_PX, -0.97, 0.97);
-      HAND.ndc.y = THREE.MathUtils.clamp(HAND.ndc.y - event.movementY / HALF_SCREEN_PX, -0.97, 0.97);
+      // 1:1 with the mouse — exactly as far as the cursor would have gone.
+      const rect = canvas.getBoundingClientRect();
+      HAND.ndc.x = THREE.MathUtils.clamp(HAND.ndc.x + (event.movementX / rect.width) * 2, -0.97, 0.97);
+      HAND.ndc.y = THREE.MathUtils.clamp(HAND.ndc.y - (event.movementY / rect.height) * 2, -0.97, 0.97);
       if (held.kind === "workbench-tube") sharedMouseNdc.copy(HAND.ndc);
     };
     const handleDown = (event: MouseEvent) => {
-      if (event.button !== 0) return;
-      // The hand owns the button while it holds something.
+      if (event.button !== 0 && event.button !== 2) return;
+      // The hand owns the buttons while it holds something.
       event.stopPropagation();
       event.preventDefault();
-      const action = held.kind === "workbench-tube" ? null : handActionFor(held, HAND.point);
-      if (action && !action.blocked) {
-        action.run([HAND.point.x, HAND.point.y, HAND.point.z]);
-        letGo();
+      if (event.button === 2) {
+        putBack();
         return;
       }
-      const now = Date.now();
-      if (now - lastClick < DOUBLE_CLICK_MS) putBack();
-      else lastClick = now;
+      const action = held.kind === "workbench-tube" ? null : handActionFor(held, HAND.point);
+      if (!action || action.blocked) return;
+      // From where the item is drawn (snapped beside its target), not the bare hand.
+      const from = HAND.itemPosValid ? HAND.itemPos : HAND.point;
+      action.run([from.x, from.y, from.z]);
+      letGo();
     };
+    const handleContextMenu = (event: MouseEvent) => event.preventDefault();
     const handleKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
@@ -101,11 +98,13 @@ export function HandController() {
     if (held.kind === "workbench-tube") sharedMouseNdc.set(0, 0);
     window.addEventListener("mousemove", handleMove);
     window.addEventListener("mousedown", handleDown, true);
+    window.addEventListener("contextmenu", handleContextMenu, true);
     window.addEventListener("keydown", handleKey, true);
     document.addEventListener("pointerlockchange", handleLockChange);
     return () => {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mousedown", handleDown, true);
+      window.removeEventListener("contextmenu", handleContextMenu, true);
       window.removeEventListener("keydown", handleKey, true);
       document.removeEventListener("pointerlockchange", handleLockChange);
       unsubscribeCarry();
@@ -123,13 +122,10 @@ export function HandController() {
       s.projected.set(sharedMouseNdc.x, sharedMouseNdc.y, 0.5);
     } else {
       if (!HAND.homeValid) return;
-      // The hand: where the virtual cursor's ray meets the plane things are
-      // carried in — lifted to the clamped tube's own height when the stand
-      // is there, so an item brought up to the tube on screen IS beside it.
-      const carryY = CLAMP_TUBE_MOUTH.valid
-        ? Math.max(CLAMP_TUBE_MOUTH.point.y - TUBE_LENGTH, HAND.home.y + CARRY_LIFT)
-        : HAND.home.y + CARRY_LIFT;
-      s.plane.set(new THREE.Vector3(0, 1, 0), -carryY);
+      // The hand: where the virtual cursor's ray meets a plane just above
+      // the worktop — the item glides over it, its shadow under it, so it is
+      // plain how near or far it is. Near the stand it snaps (`PourMotion`).
+      s.plane.set(new THREE.Vector3(0, 1, 0), -(HAND.home.y + CARRY_LIFT));
       s.raycaster.setFromCamera(HAND.ndc, camera);
       if (!s.raycaster.ray.intersectPlane(s.plane, s.hit)) return;
       const dx = s.hit.x - HAND.home.x;
@@ -146,7 +142,7 @@ export function HandController() {
       useHandStore
         .getState()
         .setAim(action ? { part: held.kind === "bottle" || clampTaken ? "tube" : "clamp", refused: action.blocked } : null);
-      s.projected.copy(HAND.point).project(camera);
+      s.projected.copy(HAND.itemPosValid ? HAND.itemPos : HAND.point).project(camera);
     }
     const rect = gl.domElement.getBoundingClientRect();
     HAND.screen.set(rect.left + ((s.projected.x + 1) / 2) * rect.width, rect.top + ((1 - s.projected.y) / 2) * rect.height);

@@ -72,8 +72,16 @@ const HOLD = 0.74;
 const UNTIP = 0.84;
 /** Where the cap is put down: this far to the side of the bottle's place, as the player sees it. */
 const CAP_ASIDE = 0.085;
-/** How fast a held item follows the hand, and goes home after (1/s, exponential). */
+/** How fast a let-go item goes home (1/s, exponential). */
 const FOLLOW_RATE = 12;
+/** Seconds for a taken item to fly from its place to the hand; after that it follows the mouse 1:1. */
+const FLY_IN_SECONDS = 0.22;
+/** How fast an item snaps to its target near the stand, and off again (1/s, exponential). */
+const SNAP_RATE = 16;
+/** A tube brought to the empty clamp hovers this far above its clamped place, ready to drop in. */
+const CLAMP_HOVER = 0.04;
+/** Gap between a bottle snapped beside the clamped tube and the tube. */
+const READY_GAP = 0.02;
 /** Seconds for the cap to come off or go back on. */
 const CAP_SECONDS = 0.35;
 
@@ -91,6 +99,8 @@ interface BottleRest {
    * the bottle would swing that offset upwards.
    */
   readonly mouthOffset: THREE.Vector3;
+  /** Half its width — how far beside the tube a snapped bottle must stand. */
+  readonly radius: number;
 }
 
 /**
@@ -127,7 +137,20 @@ export function PourMotion({
   const pour = useStandMotionStore((state) => (state.pour?.instanceId === instanceId ? state.pour : null));
   const held = useHandStore((state) => state.held?.instanceId === instanceId);
   const restRef = useRef<BottleRest | null>(null);
-  const motion = useRef({ away: false, cur: new THREE.Vector3(), curQuat: new THREE.Quaternion(), capOff: 0 });
+  const motion = useRef({
+    away: false,
+    cur: new THREE.Vector3(),
+    curQuat: new THREE.Quaternion(),
+    capOff: 0,
+    wasHeld: false,
+    flyIn: 1,
+    flyStart: new THREE.Vector3(),
+    snap: 0,
+    snapGoal: new THREE.Vector3(),
+    pourAt: 0,
+    pourFrom: new THREE.Vector3(),
+    pourFromPlace: true,
+  });
   const s = useMemo(
     () => ({
       rest: new THREE.Vector3(),
@@ -156,6 +179,8 @@ export function PourMotion({
     });
     const cap = found as THREE.Object3D | null;
     s.right.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
+    const size = new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3());
+    const radius = Math.max(size.x, size.z) / 2;
     if (!cap) {
       restRef.current = {
         cap: null,
@@ -164,6 +189,7 @@ export function PourMotion({
         capAside: new THREE.Vector3(),
         capWorldQuat: new THREE.Quaternion(),
         mouthOffset: new THREE.Vector3(0, pourPointHeight, 0),
+        radius,
       };
       return;
     }
@@ -181,7 +207,16 @@ export function PourMotion({
       capAside,
       capWorldQuat: cap.getWorldQuaternion(new THREE.Quaternion()),
       mouthOffset: mouth.sub(s.rest),
+      radius,
     };
+  };
+
+  /** The side of the tube, as the player sees it, that the stand's rod is not on — into `s.side`, `s.axis`. */
+  const sideAwayFromRod = (mouth: THREE.Vector3) => {
+    s.right.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
+    const rodSide = Math.sign(s.side.subVectors(CLAMP_TUBE_MOUTH.rod, mouth).dot(s.right)) || -1;
+    s.side.copy(s.right).multiplyScalar(-rodSide);
+    s.axis.crossVectors(UP, s.side).normalize();
   };
 
   useFrame((_, rawDelta) => {
@@ -227,11 +262,13 @@ export function PourMotion({
     if (pouring) {
       const k = elapsed / POUR_MS;
       const mouth = CLAMP_TUBE_MOUTH.point;
-      // The side of the tube, as the player sees it, that the rod is not on.
-      s.right.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
-      const rodSide = Math.sign(s.side.subVectors(CLAMP_TUBE_MOUTH.rod, mouth).dot(s.right)) || -1;
-      s.side.copy(s.right).multiplyScalar(-rodSide);
-      s.axis.crossVectors(UP, s.side).normalize();
+      sideAwayFromRod(mouth);
+      if (m.pourAt !== pour.at) {
+        // The pour starts from wherever the item is: its place, or snapped beside the tube.
+        m.pourAt = pour.at;
+        m.pourFrom.copy(m.cur);
+        m.pourFromPlace = m.cur.distanceTo(s.rest) < 0.001;
+      }
 
       const tip = k < COME ? 0 : k < TIP ? smooth((k - COME) / (TIP - COME)) : k < HOLD ? 1 : k < UNTIP ? 1 - smooth((k - HOLD) / (UNTIP - HOLD)) : 0;
       const above = THREE.MathUtils.lerp(APPROACH_ABOVE_MOUTH, POUR_ABOVE_MOUTH, tip);
@@ -242,27 +279,58 @@ export function PourMotion({
       s.target.copy(mouth).addScaledVector(UP, above).addScaledVector(s.side, 0.004).sub(s.point);
 
       if (k < UNTIP) {
-        // Over to the tube from where it was — its place, or the hand.
-        if (pour.from) s.from.set(...pour.from);
-        else s.from.copy(s.rest);
+        // Over to the tube from where it was — its place (arcing over), or right beside it.
+        s.from.copy(m.pourFrom);
         const travel = k < COME ? smooth(k / COME) : 1;
-        const lift = (pour.from ? 0.03 : TRAVEL_LIFT) * Math.sin(Math.PI * travel);
+        const lift = (m.pourFromPlace ? TRAVEL_LIFT : 0.01) * Math.sin(Math.PI * travel);
         m.cur.copy(s.from).lerp(s.target, travel).addScaledVector(UP, lift);
       } else {
         m.cur.copy(s.target);
       }
       m.curQuat.copy(s.tilt).multiply(s.restQuat);
+    } else if (held) {
+      if (!m.wasHeld) {
+        // Just taken: a short flight to the hand, then it IS the hand.
+        m.flyIn = 0;
+        m.flyStart.copy(m.cur);
+        m.snap = 0;
+      }
+      m.flyIn = Math.min(1, m.flyIn + delta / FLY_IN_SECONDS);
+      const free = HAND.valid ? HAND.point : s.rest;
+      // Near the stand it snaps into a ready pose (VL-015): a tube over the
+      // empty clamp, a bottle (or a tube to pour) upright beside the clamped
+      // tube, mouth level with its mouth — no aiming at a 2 cm opening.
+      const aim = useHandStore.getState().aim;
+      if (aim && CLAMP_TUBE_MOUTH.valid) {
+        const mouth = CLAMP_TUBE_MOUTH.point;
+        if (aim.part === "clamp") {
+          m.snapGoal.copy(mouth).sub(r.mouthOffset).addScaledVector(UP, CLAMP_HOVER);
+        } else {
+          sideAwayFromRod(mouth);
+          m.snapGoal
+            .copy(mouth)
+            .addScaledVector(s.side, r.radius + READY_GAP)
+            .sub(r.mouthOffset)
+            .addScaledVector(UP, READY_GAP);
+        }
+      }
+      m.snap = THREE.MathUtils.lerp(m.snap, aim ? 1 : 0, 1 - Math.exp(-SNAP_RATE * delta));
+      s.target.copy(free).lerp(m.snapGoal, smooth(m.snap));
+      m.cur.copy(m.flyStart).lerp(s.target, smooth(m.flyIn));
+      m.curQuat.copy(s.restQuat);
+      HAND.itemPos.copy(m.cur);
+      HAND.itemPosValid = true;
     } else {
-      // In the hand, or on its way home.
-      const goal = held && HAND.valid ? HAND.point : s.rest;
+      // On its way home.
       const t = 1 - Math.exp(-FOLLOW_RATE * delta);
-      m.cur.lerp(goal, t);
+      m.cur.lerp(s.rest, t);
       m.curQuat.slerp(s.restQuat, t);
-      if (!held && m.cur.distanceTo(s.rest) < 0.0008) {
+      if (m.cur.distanceTo(s.rest) < 0.0008) {
         m.cur.copy(s.rest);
         m.curQuat.copy(s.restQuat);
       }
     }
+    m.wasHeld = held;
 
     group.position.copy(parent.worldToLocal(s.target.copy(m.cur)));
     // World = parent · local, so local = parent⁻¹ · world.

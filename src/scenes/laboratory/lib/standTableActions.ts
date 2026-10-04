@@ -188,10 +188,13 @@ export function clickWorkbenchRackTube(index: number, instanceId: string, origin
   toggleTubePick(instanceId);
 }
 
-/** How close (horizontally) a held tube must come to the clamp's axis to go into it. */
-const CLAMP_REACH = 0.07;
-/** How close a held bottle must come to the clamped tube's mouth to pour into it. */
-const POUR_REACH = 0.1;
+/**
+ * How close (horizontally, over the worktop) the hand must come to the
+ * clamp's axis for the held item to snap to it — the tube over the clamp,
+ * a bottle beside the clamped tube (`PourMotion`). Generous on purpose: the
+ * player brings the item to the stand, the magnet does the aiming.
+ */
+const MAGNET_REACH = 0.13;
 
 /** The stand target a held item becomes when brought to the stand. */
 function heldAsTarget(held: HeldItem): StandTarget {
@@ -208,10 +211,9 @@ function heldAsTarget(held: HeldItem): StandTarget {
  */
 export function handActionFor(held: HeldItem, point: THREE.Vector3): StandAction | null {
   if (!CLAMP_TUBE_MOUTH.valid) return null;
-  const reach = held.kind === "bottle" ? POUR_REACH : CLAMP_REACH;
   const dx = point.x - CLAMP_TUBE_MOUTH.point.x;
   const dz = point.z - CLAMP_TUBE_MOUTH.point.z;
-  if (Math.hypot(dx, dz) > reach) return null;
+  if (Math.hypot(dx, dz) > MAGNET_REACH) return null;
   return standActionFor(heldAsTarget(held), { fromHand: true });
 }
 

@@ -42,6 +42,9 @@ export const HAND = {
   /** Where the held item rests, published by the item itself (`PourMotion`) — the worktop's height. */
   home: new THREE.Vector3(),
   homeValid: false,
+  /** Where the held item itself is (its base), as drawn — snapped to a target or on the hand. */
+  itemPos: new THREE.Vector3(),
+  itemPosValid: false,
   /** Where the hand is on screen, in CSS px, for the caption next to the item. */
   screen: new THREE.Vector2(),
   /** What a click would do right now — `handActionFor`, refreshed every frame. */
@@ -85,6 +88,7 @@ export const useHandStore = create<HandState>((set) => ({
     HAND.ndc.set(0, 0);
     HAND.valid = false;
     HAND.homeValid = false;
+    HAND.itemPosValid = false;
     HAND.action = null;
     set({ held, home });
   },
