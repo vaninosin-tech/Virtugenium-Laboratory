@@ -9,6 +9,7 @@ import * as THREE from "three";
 // verify live at all given this session's environment issues). A simple
 // on-object glow has none of those dependencies — it just renders.
 const HOVER_RIM_COLOR = new THREE.Color("#1D4ED8").multiplyScalar(3);
+const REFUSED_RIM_COLOR = new THREE.Color("#DC2626").multiplyScalar(3);
 
 /** Local-space transform of `node` relative to `root`, from each ancestor's own `.matrix` — same technique as `HoverFresnelRim`. */
 function relativeMatrix(node: THREE.Object3D, root: THREE.Object3D): THREE.Matrix4 {
@@ -26,12 +27,12 @@ function relativeMatrix(node: THREE.Object3D, root: THREE.Object3D): THREE.Matri
 const DEFAULT_RIM_OPACITY = 2.2;
 
 /** Builds one rim `ShaderMaterial` at the given peak opacity — factored out of the module-level default so a single caller can ask for a dimmer (or brighter) rim via `ReagentHoverRim`'s `opacity` prop without touching the shared material every other caller still renders with. */
-function createRimMaterial(opacity: number): THREE.ShaderMaterial {
+function createRimMaterial(opacity: number, color: THREE.Color = HOVER_RIM_COLOR): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     // Pure Fresnel edge glow — no flat fill across the face. Lower power than
     // the original (3.0 → 1.5) widens the glowing band near the silhouette,
     // and the brightness bump is mostly in `HOVER_RIM_COLOR`/`opacity`.
-    uniforms: { color: { value: HOVER_RIM_COLOR }, opacity: { value: opacity } },
+    uniforms: { color: { value: color }, opacity: { value: opacity } },
     vertexShader: `
       varying vec3 vNormalView;
       varying vec3 vViewDir;
@@ -78,15 +79,21 @@ export function ReagentHoverRim({
   object,
   active,
   opacity,
+  tone = "normal",
 }: {
   readonly object: THREE.Object3D | null;
   readonly active: boolean;
   /** Overrides the default peak Fresnel opacity (2.2) for THIS instance only — every other `ReagentHoverRim` keeps sharing the one default `rimMaterial`. */
   readonly opacity?: number;
+  /** "refused" — red: what the player is aiming at cannot be done (VL-015). */
+  readonly tone?: "normal" | "refused";
 }) {
   const material = useMemo(
-    () => (opacity === undefined ? rimMaterial : createRimMaterial(opacity)),
-    [opacity],
+    () =>
+      opacity === undefined && tone === "normal"
+        ? rimMaterial
+        : createRimMaterial(opacity ?? DEFAULT_RIM_OPACITY, tone === "refused" ? REFUSED_RIM_COLOR : HOVER_RIM_COLOR),
+    [opacity, tone],
   );
   useEffect(() => {
     if (material === rimMaterial) return;
@@ -120,7 +127,9 @@ export function ReagentHoverRim({
       // entirely and renders one mis-placed granule silhouette per batch
       // instead of a clean container outline.
       if (child instanceof THREE.Mesh && child.visible && !(child instanceof THREE.InstancedMesh)) {
-        const rim = new THREE.Mesh(child.geometry, rimMaterial);
+        // The caller's material (opacity, tone) — this used to be the shared
+        // default regardless, so `opacity` never took effect.
+        const rim = new THREE.Mesh(child.geometry, material);
         relativeMatrix(child, object).decompose(pos, quat, scale);
         rim.position.copy(pos);
         rim.quaternion.copy(quat);
@@ -136,7 +145,7 @@ export function ReagentHoverRim({
       }
     });
     return g;
-  }, [object]);
+  }, [object, material]);
 
   if (!group) return null;
   group.visible = active;

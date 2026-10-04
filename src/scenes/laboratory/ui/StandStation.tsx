@@ -18,7 +18,9 @@ import type { StoredTestTube, TubeLocation } from "../lib/useTestTubeStorageStor
 import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { FLAME_BASE_Y, FLAME_HEIGHT, SpiritBurner } from "./SpiritBurner";
 import { standTargetEvents } from "./standTargetEvents";
-import { ArrivalFlight } from "./StandMotion";
+import { ArrivalFlight, GlassRim } from "./StandMotion";
+import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useHandStore } from "../lib/useHandStore";
 import { CLAMP_TUBE_MOUTH, useStandMotionStore } from "../lib/useStandMotionStore";
 
 /**
@@ -187,6 +189,7 @@ function HeldClampRig({
   readonly children: ReactNode;
 }) {
   const { scene } = useGLTF(TUBE_CLAMP_MODEL_PATH);
+  const aim = useHandStore((state) => state.aim);
   const clamp = useMemo(() => {
     const clone = scene.clone(true);
     clone.traverse((object) => {
@@ -234,7 +237,11 @@ function HeldClampRig({
   return (
     <>
       <group ref={rigRef}>
-        <primitive object={clamp} position={[-CLAMP_TUBE_AXIS_X, 0, 0]} />
+        <group position={[-CLAMP_TUBE_AXIS_X, 0, 0]}>
+          <primitive object={clamp} />
+          {/* Lit while a tube in the hand is brought to the empty clamp (VL-015). */}
+          <ReagentHoverRim object={clamp} active={aim?.part === "clamp"} tone={aim?.refused ? "refused" : "normal"} />
+        </group>
         <group position={[0, -TUBE_RING_INSERT_DEPTH, 0]}>
           {children}
           <TubeMouthAnchor />
@@ -267,6 +274,7 @@ export function StandStation({
   // left behind on the table when the stand went into the hood.
   const lampHere = useBurnerStore((state) => state.place === location);
   const clampArrival = useStandMotionStore((state) => state.clampArrival);
+  const aim = useHandStore((state) => state.aim);
 
   return (
     <>
@@ -280,15 +288,18 @@ export function StandStation({
           // the event, so a click here never falls through to the stand's.
           // Lamp lit — heat it; otherwise — back to the rack (VL-014).
           <group {...standTargetEvents(`clamped:${tube.instanceId}`, { kind: "clamped-tube" })}>
-            <ArrivalFlight arrival={clampArrival}>
-              <LabTestTubeInstance
-                contents={tube.contents}
-                key={tube.instanceId}
-                chemistryId={tube.instanceId}
-                crackSpot={crackZone === null ? null : crackSpotForZone(crackZone)}
-                inStand
-              />
-            </ArrivalFlight>
+            {/* Lit while a bottle (or a tube to pour) is brought to it (VL-015). */}
+            <GlassRim active={aim?.part === "tube"} tone={aim?.refused ? "refused" : "normal"}>
+              <ArrivalFlight arrival={clampArrival}>
+                <LabTestTubeInstance
+                  contents={tube.contents}
+                  key={tube.instanceId}
+                  chemistryId={tube.instanceId}
+                  crackSpot={crackZone === null ? null : crackSpotForZone(crackZone)}
+                  inStand
+                />
+              </ArrivalFlight>
+            </GlassRim>
           </group>
         )}
       </HeldClampRig>

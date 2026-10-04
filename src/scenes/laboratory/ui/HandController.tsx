@@ -5,14 +5,19 @@ import * as THREE from "three";
 import { handActionFor, standActionFor } from "../lib/standTableActions";
 import { HAND, useHandStore, type HeldItem } from "../lib/useHandStore";
 import { CLAMP_TUBE_MOUTH } from "../lib/useStandMotionStore";
+import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 
 /** How high above the worktop the held item is carried with no stand around. */
 const CARRY_LIFT = 0.06;
 /** The clamped tube's base below its mouth — the 15 cm tube. Things are carried with their base there. */
 const TUBE_LENGTH = 0.15;
-/** The hand stays this close (horizontally) to the item's place: over the worktop, not off across the room. */
-const REACH = 0.75;
+/**
+ * The hand stays this close (horizontally) to the item's place: across the
+ * whole worktop (a bottle at the hood's far end is ~0.7 m from the stand),
+ * not off across the room.
+ */
+const REACH = 1.3;
 /** Mouse travel (px) that moves the hand across half the screen — a little slower than the raw cursor, for aiming at a 2 cm tube mouth. */
 const HALF_SCREEN_PX = 700;
 /** Two clicks this close together put the item back. */
@@ -135,6 +140,12 @@ export function HandController() {
       HAND.valid = true;
       const action = handActionFor(held, HAND.point);
       HAND.action = action ? { label: action.label, blocked: action.blocked } : null;
+      // A bottle always aims at the tube in the clamp; a tube at the clamp
+      // while it is empty, else at the tube in it (to pour into).
+      const clampTaken = useBunsenStandStorageStore.getState().attachedTubeSlotIndex !== null;
+      useHandStore
+        .getState()
+        .setAim(action ? { part: held.kind === "bottle" || clampTaken ? "tube" : "clamp", refused: action.blocked } : null);
       s.projected.copy(HAND.point).project(camera);
     }
     const rect = gl.domElement.getBoundingClientRect();

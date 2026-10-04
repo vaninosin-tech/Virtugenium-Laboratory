@@ -46,6 +46,9 @@ const LABEL_BACKGROUND_COLOR = "#20242a";
 const LABEL_FONT_FAMILY = '"Unbounded", "Russo One", "Exo 2", sans-serif';
 const LABEL_LETTER_SPACING = "0.04em";
 
+/** How much of the clear sash shows: enough for its edge and reflections to read as glass. */
+const SASH_GLASS_OPACITY = 0.12;
+
 /**
  * Lower glass sash — `FumeHood_Sash_Lower` in the source blend, the front
  * layer directly in front of the (fixed) `FumeHood_Sash_Upper`. Its glass
@@ -169,10 +172,19 @@ export function FumeHood() {
           return material;
         }
         const glass = material.clone();
-        // Polished clear sash: no blurred transmission or diffuse milky layer.
+        // Polished clear sash: no milky layer — and no transmission either.
+        // A transmissive material is drawn like an opaque one (it writes
+        // depth) and shows what is behind it only through the transmission
+        // pass, which leaves out everything transparent: from the hood's own
+        // view, the tubes, the bottles' glass and every hover/aim outline
+        // behind the raised sash simply vanished. Plain alpha-blended glass
+        // instead — the same trade the reagent jars and the spirit lamp make.
         glass.roughness = 0;
         glass.roughnessMap = null;
-        glass.transmission = 1;
+        glass.transmission = 0;
+        glass.transparent = true;
+        glass.opacity = SASH_GLASS_OPACITY;
+        glass.depthWrite = false;
         glass.color.set("#ffffff");
         glass.specularColor.set("#ffffff");
         glassCopies.push(glass);

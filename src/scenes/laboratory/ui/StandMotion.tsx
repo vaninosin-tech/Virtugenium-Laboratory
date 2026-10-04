@@ -308,18 +308,6 @@ export function PourMotion({
 export function HandFollow({ instanceId, children }: { readonly instanceId: string; readonly children: ReactNode }) {
   const groupRef = useRef<THREE.Group>(null);
   const held = useHandStore((state) => state.held?.instanceId === instanceId);
-  // The outline goes round the tube's glass only (not its contents and
-  // reaction effects), drawn beside the glass in the glass's own parent.
-  const [glass, setGlass] = useState<THREE.Mesh | null>(null);
-  useEffect(() => {
-    if (!held) return;
-    let found: THREE.Mesh | null = null;
-    groupRef.current?.traverse((object) => {
-      if (!found && object instanceof THREE.Mesh && object.name === "Tube_Glass") found = object;
-    });
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- found once the tube is taken, in the loaded scene graph
-    setGlass(found);
-  }, [held]);
   const motion = useRef({ away: false, cur: new THREE.Vector3() });
   const rest = useMemo(() => new THREE.Vector3(), []);
 
@@ -351,8 +339,45 @@ export function HandFollow({ instanceId, children }: { readonly instanceId: stri
 
   return (
     <group ref={groupRef}>
+      <GlassRim active={held}>{children}</GlassRim>
+    </group>
+  );
+}
+
+/** A 2 cm tube's edge glow at the default strength (2.2) is lost at the hood's viewing distance. */
+const GLASS_RIM_OPACITY = 6;
+
+/**
+ * Outlines the glass of the tube inside it — only the glass, not its
+ * contents and reaction effects — while `active`. The outline is drawn
+ * beside the glass, in the glass's own parent.
+ */
+export function GlassRim({
+  active,
+  tone = "normal",
+  children,
+}: {
+  readonly active: boolean;
+  readonly tone?: "normal" | "refused";
+  readonly children: ReactNode;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const [glass, setGlass] = useState<THREE.Mesh | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    let found: THREE.Mesh | null = null;
+    groupRef.current?.traverse((object) => {
+      if (!found && object instanceof THREE.Mesh && object.name === "Tube_Glass") found = object;
+    });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- looked up once lit, in the loaded scene graph
+    setGlass(found);
+  }, [active]);
+  return (
+    <group ref={groupRef}>
       {children}
-      {glass?.parent ? createPortal(<ReagentHoverRim object={glass} active={held} />, glass.parent) : null}
+      {glass?.parent
+        ? createPortal(<ReagentHoverRim object={glass} active={active} tone={tone} opacity={GLASS_RIM_OPACITY} />, glass.parent)
+        : null}
     </group>
   );
 }

@@ -52,8 +52,20 @@ export const HAND = {
   canvas: null as HTMLCanvasElement | null,
 };
 
+/**
+ * What the held item is brought to, so the target itself lights up (blue —
+ * a click does it; red — it can't): the tube in the clamp (to pour into) or
+ * the empty clamp (to put a tube in).
+ */
+export interface HandAim {
+  readonly part: "tube" | "clamp";
+  readonly refused: boolean;
+}
+
 interface HandState {
   readonly held: HeldItem | null;
+  readonly aim: HandAim | null;
+  setAim: (aim: HandAim | null) => void;
   /** Where the held item rests, in the world: the worktop height, and where it goes back to. */
   readonly home: Position3 | null;
   take: (item: HeldItem, home: Position3) => void;
@@ -63,6 +75,11 @@ interface HandState {
 
 export const useHandStore = create<HandState>((set) => ({
   held: null,
+  aim: null,
+  setAim: (aim) =>
+    set((state) =>
+      state.aim?.part === aim?.part && state.aim?.refused === aim?.refused ? state : { aim },
+    ),
   home: null,
   take: (held, home) => {
     HAND.ndc.set(0, 0);
@@ -73,7 +90,7 @@ export const useHandStore = create<HandState>((set) => ({
   },
   release: () => {
     HAND.releasedAt = Date.now();
-    set({ held: null, home: null });
+    set({ held: null, home: null, aim: null });
   },
 }));
 
