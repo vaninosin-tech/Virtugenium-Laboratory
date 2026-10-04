@@ -27,8 +27,8 @@ function readAccessor(index: number, itemSize: number) {
 }
 
 describe("exterior glass shell", () => {
-  it.each(asset.nodes.filter((node: { name: string }) => /^(Bottle_Glass|Jar_Glass)/.test(node.name)))
-    ("keeps a continuous wall and closed bottom: $name", (node) => {
+  it.each(asset.nodes.filter((node: { name: string }) => /^(Bottle_Glass|Jar_Glass)/.test(node.name)))(
+    "keeps a continuous wall and closed bottom: $name", (node) => {
       const primitive = asset.meshes[node.mesh].primitives[0];
       const source = new THREE.BufferGeometry();
       source.setAttribute("position", new THREE.BufferAttribute(readAccessor(primitive.attributes.POSITION, 3), 3));

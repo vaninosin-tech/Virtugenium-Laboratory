@@ -17,13 +17,15 @@ describe("game lighting", () => {
     for (const on of [true, false, true, false]) {
       useFumeHoodControlsStore.getState().setLight("fume-hood", on);
       expect(binding.light.intensity > 0).toBe(on);
-      expect(binding.light.visible).toBe(on);
+      // Never toggled: hiding the light would defer its shadow-program compile to the switch click.
+      expect(binding.light.visible).toBe(true);
+      expect(binding.light.shadow.autoUpdate).toBe(on);
       expect((led.material as THREE.MeshStandardMaterial).emissiveIntensity > 0).toBe(on);
       expect(original.emissiveIntensity).toBe(1);
     }
     for (const on of [true, false, true, false]) {
       useFumeHoodControlsStore.getState().toggleLight("fume-hood");
-      expect(binding.light.visible).toBe(on);
+      expect(binding.light.visible).toBe(true);
       expect(binding.light.intensity).toBe(on ? 7 : 0);
       expect((led.material as THREE.MeshStandardMaterial).emissiveIntensity).toBe(on ? 2.5 : 0);
     }

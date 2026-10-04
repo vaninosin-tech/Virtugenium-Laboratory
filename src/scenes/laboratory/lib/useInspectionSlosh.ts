@@ -48,7 +48,6 @@ export function useInspectionSlosh(instance: THREE.Object3D, instanceId: string)
         group.quaternion.copy(s.base);
         s.active = false;
         // Three.js shader uniforms are intentionally mutable frame state.
-        // eslint-disable-next-line react-hooks/immutability
         if (u) u.uSloshX.value = u.uSloshZ.value = u.uSloshStrength.value = 0;
         copper?.shake(0, 0, 0);
       }

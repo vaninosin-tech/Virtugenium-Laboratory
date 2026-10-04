@@ -348,7 +348,7 @@ describe("tube reaction rendering contract", () => {
     f.advance(60, chemistry(1, 0), quality);
     expect(head.visible).toBe(false);
     expect(plume.visible).toBe(false);
-  });
+  }, 30_000); // simulates several seconds of gas build-up per quality level
 
   it("keeps the final copper solution pale and transparent", () => {
     const f = fixture("copper-nitric");

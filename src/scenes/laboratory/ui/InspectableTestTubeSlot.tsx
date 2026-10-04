@@ -464,7 +464,6 @@ export function InspectableTestTubeSlot({
         const dz = tubeWorldPos.z - ringWorldZ;
         // A plain ref write inside `useFrame` вЂ” see `useInspectionSlosh`'s own
         // precedent for this same false positive on mutable per-frame state.
-        // eslint-disable-next-line react-hooks/immutability
         nearRingRef.current = Math.hypot(dx, dz) < TUBE_RING_ATTACH_RADIUS;
       } else {
         nearRingRef.current = false;

@@ -253,6 +253,7 @@ export function ReagentStaticDisplay({
   // the stale hover state and cursor instead of leaving them stuck.
   useEffect(() => {
     if (anyInspected && hovered) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-off reset on an external change, not a render loop
       setHovered(false);
       document.body.style.cursor = "auto";
     }

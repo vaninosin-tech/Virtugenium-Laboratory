@@ -3,7 +3,7 @@ globalThis.typeInto = async (page, label, tokens) => {
   await page.locator(`[role=textbox][aria-label="${label}"]`).first().click();
   await page.waitForTimeout(200);
   for (const t of tokens) {
-    const btn = page.locator("button:not([disabled])").filter({ hasText: new RegExp("^" + t.replace(/[()+\-]/g, (c) => "\\" + c) + "$", "i") }).first();
+    const btn = page.locator("button:not([disabled])").filter({ hasText: new RegExp("^" + t.replace(/[()+-]/g, (c) => "\\" + c) + "$", "i") }).first();
     await btn.click({ timeout: 3000 });
     await page.waitForTimeout(60);
   }
@@ -16,7 +16,6 @@ globalThis.screenOf = async (page, name) => page.evaluate((name) => {
   scene.traverse((o) => { if (!obj && o.name === name && o.visible) obj = o; });
   if (!obj) return null;
   const THREE = Object.getPrototypeOf(camera.position).constructor;
-  const box = { x: 0, y: 0, z: 0 };
   const v = new THREE(); obj.getWorldPosition(v); v.project(camera);
   const r = gl.domElement.getBoundingClientRect();
   return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height, z: v.z };

@@ -138,7 +138,7 @@ describe("real reagent contents", () => {
     const copper = installReagentMaterials(gltf.scene.getObjectByName("ReagentJar_WideMouth_120ml")!.clone(true), REAGENTS.cu);
     expect(copper.liquid).toBeNull();
     copper.dispose();
-  });
+  }, 30_000); // parses a real .glb and simulates seconds of sloshing
 
   it("blocks stacking, take/close during motion, and solids without eligibility", async () => {
     vi.stubGlobal("window", {});

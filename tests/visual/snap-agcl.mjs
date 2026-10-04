@@ -12,6 +12,7 @@ const page = await (await browser.newContext({ viewport: { width: 1600, height: 
 page.on("pageerror", (e) => console.log("pageerror", e.message));
 const wait = (s) => page.waitForTimeout(s * 1000);
 const shot = (name) => page.screenshot({ path: `${out}/${name}.png` });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for toggling the burner by hand
 const burner = (lit) => page.evaluate(async (lit) => {
   const m = await import("/src/scenes/laboratory/lib/useBurnerStore.ts");
   if (lit === "open") m.useBurnerStore.setState({ phase: "open", lit: false });
