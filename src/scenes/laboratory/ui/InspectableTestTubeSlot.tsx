@@ -19,6 +19,8 @@ import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { clickWorkbenchRackTube } from "../lib/standTableActions";
 import { useStandHintStore } from "../lib/useStandHintStore";
+import { useStandMotionStore } from "../lib/useStandMotionStore";
+import { ArrivalFlight } from "./StandMotion";
 import { consumePickablePressed, sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { useTestTubeHoverStore } from "../lib/useTestTubeHoverStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
@@ -184,6 +186,9 @@ export function InspectableTestTubeSlot({
   // visual reassignment, not a removal (see `attachedTubeSlotIndex`'s doc).
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
   const isAttachedHere = attachedTubeSlotIndex === index;
+  const rackArrival = useStandMotionStore((state) =>
+    state.rackArrival?.location === "workbench" && state.rackArrival.index === index ? state.rackArrival : null,
+  );
   const visuallyFilled = filled && !isAttachedHere;
   const canHover = interactive && visuallyFilled;
   const tablePosition = useFurniturePositionStore((state) => state.getOverride("table").position);
@@ -529,8 +534,11 @@ export function InspectableTestTubeSlot({
 
   return (
     <group ref={groupRef} position={localPosition}>
-      <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered} />
+      {/* Back from the clamp: seen flying home to its slot. */}
+      <ArrivalFlight arrival={rackArrival}>
+        <primitive object={instance} />
+        <ReagentHoverRim object={instance} active={hovered} />
+      </ArrivalFlight>
       {/* The ONLY raycast target (the real glass had raycasting disabled
           above) вЂ” noticeably bigger than the tube itself, see
           `HITBOX_HALF_WIDTH`/`HITBOX_HALF_DEPTH`'s doc. */}
@@ -543,7 +551,8 @@ export function InspectableTestTubeSlot({
           canHover
             ? (event: ThreeEvent<MouseEvent>) => {
                 event.stopPropagation();
-                clickWorkbenchRackTube(index, instanceId);
+                const at = groupRef.current?.getWorldPosition(new THREE.Vector3());
+                clickWorkbenchRackTube(index, instanceId, at ? [at.x, at.y, at.z] : undefined);
               }
             : undefined
         }

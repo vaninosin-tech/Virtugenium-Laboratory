@@ -24,6 +24,8 @@ import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { runStandAction } from "../lib/standTableActions";
 import { useStandHintStore } from "../lib/useStandHintStore";
 import { StandActionHint } from "./StandActionHint";
+import { PourMotion } from "./StandMotion";
+import { POUR_POINT_HEIGHT, standBusy } from "../lib/useStandMotionStore";
 import { SceneStepAutoAdvance } from "../../../features/tablet/lib/SceneStepAutoAdvance";
 import { SandboxPanel } from "../sandbox/SandboxPanel";
 import { setupSandbox, teardownSandbox } from "../sandbox/setupSandbox";
@@ -281,6 +283,8 @@ function DraggableWorkbenchReagent({
   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
     if (event.button !== 0) return;
     event.stopPropagation();
+    // A pour (maybe this very jar's) is under way at the stand.
+    if (standBusy()) return;
     // A held tube fills by hovering it near a jar (`InspectableTestTubeSlot`'s
     // own `useFrame` proximity check) — grabbing the jar itself out from
     // under it at the same time fought that gesture and, before the
@@ -302,7 +306,7 @@ function DraggableWorkbenchReagent({
     const handleUp = (up: PointerEvent) => {
       window.removeEventListener("pointerup", handleUp);
       if (Math.hypot(up.clientX - clientX, up.clientY - clientY) > JAR_CLICK_SLOP_PX) return;
-      runStandAction({ kind: "bottle", location: "workbench", reagentId: reagent.id });
+      runStandAction({ kind: "bottle", location: "workbench", reagentId: reagent.id, instanceId });
     };
     window.addEventListener("pointerup", handleUp);
   };
@@ -313,20 +317,22 @@ function DraggableWorkbenchReagent({
     // mount). A declarative position using the live target would reassert
     // itself on every re-render and cancel the smoothing mid-glide.
     <group ref={groupRef} scale={prewarm ? 0.0001 : 1}>
-      <ReagentStaticDisplay
-        reagent={reagent}
-        rotationY={rotationY}
-        scale={scale}
-        hoverable={!prewarm}
-        highlighted={!prewarm && (isDragging || isSwapTarget)}
-        onPointerDown={prewarm ? undefined : handlePointerDown}
-        onHoverChange={(hovered) =>
-          hovered
-            ? useStandHintStore.getState().show(instanceId, { kind: "bottle", location: "workbench", reagentId: reagent.id })
-            : useStandHintStore.getState().hide(instanceId)
-        }
-        interactionRef={prewarm ? undefined : pickTargetRef}
-      />
+      <PourMotion instanceId={instanceId} pourPointHeight={POUR_POINT_HEIGHT[reagent.containerType] * scale}>
+        <ReagentStaticDisplay
+          reagent={reagent}
+          rotationY={rotationY}
+          scale={scale}
+          hoverable={!prewarm}
+          highlighted={!prewarm && (isDragging || isSwapTarget)}
+          onPointerDown={prewarm ? undefined : handlePointerDown}
+          onHoverChange={(hovered) =>
+            hovered
+              ? useStandHintStore.getState().show(instanceId, { kind: "bottle", location: "workbench", reagentId: reagent.id, instanceId })
+              : useStandHintStore.getState().hide(instanceId)
+          }
+          interactionRef={prewarm ? undefined : pickTargetRef}
+        />
+      </PourMotion>
       {/* `hoverable` creates the display's shared invisible hitbox without
           enabling the tray-only click-to-shelf action. CameraRig raycasts
           this same hitbox for drag pickup, while the display owns hover. */}

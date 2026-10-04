@@ -20,6 +20,8 @@ import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
 import { SpiritBurner } from "./SpiritBurner";
 import { StandStation, lampLayout } from "./StandStation";
 import { standTargetEvents } from "./standTargetEvents";
+import { ArrivalFlight, PourMotion } from "./StandMotion";
+import { POUR_POINT_HEIGHT, useStandMotionStore } from "../lib/useStandMotionStore";
 
 const DEF = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
 
@@ -135,6 +137,7 @@ export function FumeHoodWorkArea() {
   const sandbox = useLaboratoryStore((state) => state.mode === "sandbox");
   const crackZone = useHeatingStore((state) => (state.phase === "cracked" ? state.crackZone : null));
   const lampInHood = useBurnerStore((state) => state.place === "fumeHood");
+  const rackArrival = useStandMotionStore((state) => (state.rackArrival?.location === "fumeHood" ? state.rackArrival : null));
 
   const clampedIndex = standInHood ? attachedTubeSlotIndex : null;
   const hasContent = hoodTubes.length > 0 || hoodItems.length > 0 || standInHood || lampInHood;
@@ -161,10 +164,12 @@ export function FumeHoodWorkArea() {
                 key={tube.instanceId}
                 {...standTargetEvents(tube.instanceId, { kind: "rack-tube", location: "fumeHood", index })}
               >
-                <LabTestTubeInstance
-                  position={computeTubeSlotLocalOffset(index)}
-                  contents={tube.contents}
-                />
+                <group position={computeTubeSlotLocalOffset(index)}>
+                  {/* Back from the clamp: seen flying home to its slot. */}
+                  <ArrivalFlight arrival={rackArrival?.index === index ? rackArrival : null}>
+                    <LabTestTubeInstance contents={tube.contents} />
+                  </ArrivalFlight>
+                </group>
               </group>
             ),
           )}
@@ -193,28 +198,33 @@ export function FumeHoodWorkArea() {
       {hoodItems.map((item, index) => {
         const reagent = reagentConfig(item.reagentId);
         if (!reagent) return null;
-        const target = { kind: "bottle", location: "fumeHood", reagentId: item.reagentId } as const;
+        const target = { kind: "bottle", location: "fumeHood", reagentId: item.reagentId, instanceId: item.instanceId } as const;
         const { onClick } = standTargetEvents(item.instanceId, target);
         return (
           <group key={item.instanceId} onClick={onClick}>
-            <ReagentStaticDisplay
-              // Without `hoverable` the display renders no hitbox, and every
-              // one of its own meshes has raycasting disabled — the click
-              // handler on the wrapping group above could never fire. Always
-              // on: a bottle that can't be poured yet still says why.
-              hoverable
-              onHoverChange={(hovered) =>
-                hovered
-                  ? useStandHintStore.getState().show(item.instanceId, target)
-                  : useStandHintStore.getState().hide(item.instanceId)
-              }
-              reagent={reagent}
+            <PourMotion
+              instanceId={item.instanceId}
+              pourPointHeight={POUR_POINT_HEIGHT[reagent.containerType]}
               position={
                 sandbox
                   ? sandboxBottlePosition(index)
-                  :[BOTTLES_LOCAL[0] + index * BOTTLE_SPACING_X, BOTTLES_LOCAL[1], BOTTLES_LOCAL[2]]
+                  : [BOTTLES_LOCAL[0] + index * BOTTLE_SPACING_X, BOTTLES_LOCAL[1], BOTTLES_LOCAL[2]]
               }
-            />
+            >
+              <ReagentStaticDisplay
+                // Without `hoverable` the display renders no hitbox, and every
+                // one of its own meshes has raycasting disabled — the click
+                // handler on the wrapping group above could never fire. Always
+                // on: a bottle that can't be poured yet still says why.
+                hoverable
+                onHoverChange={(hovered) =>
+                  hovered
+                    ? useStandHintStore.getState().show(item.instanceId, target)
+                    : useStandHintStore.getState().hide(item.instanceId)
+                }
+                reagent={reagent}
+              />
+            </PourMotion>
           </group>
         );
       })}

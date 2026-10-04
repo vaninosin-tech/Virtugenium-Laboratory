@@ -18,6 +18,8 @@ import type { StoredTestTube, TubeLocation } from "../lib/useTestTubeStorageStor
 import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { FLAME_BASE_Y, FLAME_HEIGHT, SpiritBurner } from "./SpiritBurner";
 import { standTargetEvents } from "./standTargetEvents";
+import { ArrivalFlight } from "./StandMotion";
+import { CLAMP_TUBE_MOUTH, useStandMotionStore } from "../lib/useStandMotionStore";
 
 /**
  * Everything that makes the stand a working station, wherever the stand is —
@@ -120,6 +122,35 @@ function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefin
   return null;
 }
 
+/** The 15 cm tube's mouth above its base — `LabTestTube.glb`'s height (`tests/measure-model.mjs`). */
+const TUBE_MOUTH_HEIGHT = 0.15;
+
+/** Publishes the stand's rod base for a pouring bottle — see `CLAMP_TUBE_MOUTH`. At the stand's own origin. */
+function RodAnchor() {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    if (ref.current) ref.current.getWorldPosition(CLAMP_TUBE_MOUTH.rod);
+  });
+  return <group ref={ref} />;
+}
+
+/** Publishes the clamped tube's mouth for a pouring bottle — see `CLAMP_TUBE_MOUTH`. */
+function TubeMouthAnchor() {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    if (!ref.current) return;
+    ref.current.getWorldPosition(CLAMP_TUBE_MOUTH.point);
+    CLAMP_TUBE_MOUTH.valid = true;
+  });
+  useEffect(
+    () => () => {
+      CLAMP_TUBE_MOUTH.valid = false;
+    },
+    [],
+  );
+  return <group ref={ref} position={[0, TUBE_MOUTH_HEIGHT, 0]} />;
+}
+
 /** Publishes the station's focus point for `CameraRig`'s close-up — see `TUBE_FOCUS`. Positioned by its owner. */
 function TubeFocusAnchor({ anchorRef }: { readonly anchorRef: RefObject<THREE.Group | null> }) {
   useFrame(() => {
@@ -204,7 +235,10 @@ function HeldClampRig({
     <>
       <group ref={rigRef}>
         <primitive object={clamp} position={[-CLAMP_TUBE_AXIS_X, 0, 0]} />
-        <group position={[0, -TUBE_RING_INSERT_DEPTH, 0]}>{children}</group>
+        <group position={[0, -TUBE_RING_INSERT_DEPTH, 0]}>
+          {children}
+          <TubeMouthAnchor />
+        </group>
       </group>
       <TubeFocusAnchor anchorRef={focusRef} />
     </>
@@ -232,10 +266,12 @@ export function StandStation({
   // The lamp is its own item (VL-014): it may still be in the cabinet, or
   // left behind on the table when the stand went into the hood.
   const lampHere = useBurnerStore((state) => state.place === location);
+  const clampArrival = useStandMotionStore((state) => state.clampArrival);
 
   return (
     <>
       {lampHere && <SpiritBurner position={lamp} />}
+      <RodAnchor />
       <HeatingRuntime />
       <TubeReactionRuntime tube={tube} />
       <HeldClampRig away={away} hotSpot={hotSpot}>
@@ -244,13 +280,15 @@ export function StandStation({
           // the event, so a click here never falls through to the stand's.
           // Lamp lit — heat it; otherwise — back to the rack (VL-014).
           <group {...standTargetEvents(`clamped:${tube.instanceId}`, { kind: "clamped-tube" })}>
-            <LabTestTubeInstance
-              contents={tube.contents}
-              key={tube.instanceId}
-              chemistryId={tube.instanceId}
-              crackSpot={crackZone === null ? null : crackSpotForZone(crackZone)}
-              inStand
-            />
+            <ArrivalFlight arrival={clampArrival}>
+              <LabTestTubeInstance
+                contents={tube.contents}
+                key={tube.instanceId}
+                chemistryId={tube.instanceId}
+                crackSpot={crackZone === null ? null : crackSpotForZone(crackZone)}
+                inStand
+              />
+            </ArrivalFlight>
           </group>
         )}
       </HeldClampRig>

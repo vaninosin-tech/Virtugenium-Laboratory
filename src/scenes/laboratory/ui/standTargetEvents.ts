@@ -1,4 +1,5 @@
 import type { ThreeEvent } from "@react-three/fiber";
+import * as THREE from "three";
 
 import { runStandAction, type StandTarget } from "../lib/standTableActions";
 import { useStandHintStore } from "../lib/useStandHintStore";
@@ -15,7 +16,9 @@ export function standTargetEvents(owner: string, target: StandTarget) {
   return {
     onClick: (event: ThreeEvent<MouseEvent>) => {
       event.stopPropagation();
-      runStandAction(target);
+      // Where the clicked object is — a tube flies into the clamp from there.
+      const at = event.object.getWorldPosition(new THREE.Vector3());
+      runStandAction(target, [at.x, at.y, at.z]);
     },
     onPointerOver: (event: ThreeEvent<PointerEvent>) => {
       event.stopPropagation();

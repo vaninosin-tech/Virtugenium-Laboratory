@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import { runStandAction, standActionFor } from "./standTableActions";
 import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
 import { useBurnerStore } from "./useBurnerStore";
 import { useHeatingStore } from "./useHeatingStore";
+import { POUR_COMMIT_MS, POUR_MS, useStandMotionStore } from "./useStandMotionStore";
 import { useTestTubeDragStore } from "./useTestTubeDragStore";
 import { useTestTubeStorageStore, type StoredTestTube } from "./useTestTubeStorageStore";
 
@@ -16,7 +17,12 @@ const hoodTubes = () => useTestTubeStorageStore.getState().fumeHoodTestTubes;
 const rackTube = (index: number) => ({ kind: "rack-tube", location: "fumeHood", index }) as const;
 const bottle = (reagentId: string) => ({ kind: "bottle", location: "fumeHood", reagentId }) as const;
 
+/** Lets every running motion at the stand finish. */
+const settle = () => vi.advanceTimersByTime(POUR_MS + 100);
+
 beforeEach(() => {
+  vi.useFakeTimers();
+  useStandMotionStore.setState({ busyUntil: 0, pour: null, clampArrival: null, rackArrival: null });
   useLaboratoryStore.setState({ selectedExperimentId: EXP1 });
   useTestTubeStorageStore.setState({
     workbenchTestTubes: [],
@@ -26,6 +32,10 @@ beforeEach(() => {
   useBurnerStore.setState({ phase: "capped", lit: false, place: "fumeHood" });
   useHeatingStore.setState({ active: false });
   useTestTubeDragStore.setState({ heldInstanceId: null });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("stand actions on the table (VL-014)", () => {
@@ -41,6 +51,7 @@ describe("stand actions on the table (VL-014)", () => {
     useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
     expect(standActionFor(bottle("hno3"))).toMatchObject({ blocked: false, label: "Прилить HNO₃ в пробирку в лапке" });
     runStandAction(bottle("hno3"));
+    settle();
     expect(hoodTubes()[0].contents).toEqual(["cu", "hno3"]);
     expect(standActionFor(bottle("hno3"))).toMatchObject({ blocked: true });
   });
@@ -93,9 +104,33 @@ describe("stand actions on the table (VL-014)", () => {
   it("steps the lamp: cap off, light, put out", () => {
     expect(standActionFor({ kind: "burner" })?.label).toBe("Снять колпачок со спиртовки");
     runStandAction({ kind: "burner" });
+    settle();
     expect(standActionFor({ kind: "burner" })?.label).toBe("Зажечь спиртовку");
     runStandAction({ kind: "burner" });
     expect(useBurnerStore.getState().lit).toBe(true);
+  });
+
+  it("a bottle pours when it is tipped over the tube, and the stand takes no clicks until it is back", () => {
+    useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
+    runStandAction({ ...bottle("hno3"), instanceId: "jar-hno3" });
+    expect(useStandMotionStore.getState().pour?.instanceId).toBe("jar-hno3");
+    expect(standActionFor({ kind: "burner" })).toBeNull();
+    expect(hoodTubes()[0].contents).toEqual(["cu"]);
+
+    vi.advanceTimersByTime(POUR_COMMIT_MS + 10);
+    expect(hoodTubes()[0].contents).toEqual(["cu", "hno3"]);
+    expect(standActionFor({ kind: "burner" })).toBeNull();
+
+    settle();
+    expect(useStandMotionStore.getState().pour).toBeNull();
+    expect(standActionFor({ kind: "burner" })).not.toBeNull();
+  });
+
+  it("a tube clamped from the rack flies in from where it stood", () => {
+    runStandAction(rackTube(1), [1, 2, 3]);
+    expect(useBunsenStandStorageStore.getState().attachedTubeSlotIndex).toBe(1);
+    expect(useStandMotionStore.getState().clampArrival?.world).toEqual([1, 2, 3]);
+    expect(standActionFor(rackTube(0))).toBeNull();
   });
 
   it("stays out of the way where there is no stand, while heating, and while a tube is carried", () => {

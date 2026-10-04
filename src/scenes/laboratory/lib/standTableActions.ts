@@ -1,5 +1,6 @@
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+import type { Position3 } from "./layout";
 import { judgeMix, reagentName } from "./mixingRules";
 import { tryAddToTube, tryPourBetweenTubes } from "./pourIntoTube";
 import { standLocation } from "./standStationActions";
@@ -8,6 +9,7 @@ import { useBurnerStore, type BurnerPhase } from "./useBurnerStore";
 import { useHeatingStore } from "./useHeatingStore";
 import { useStandStationStore } from "./useStandStationStore";
 import { useReagentInspectionStore } from "./useReagentInspectionStore";
+import { CAP_MS, CLAMP_TUBE_MOUTH, standBusy, useStandMotionStore } from "./useStandMotionStore";
 import { toggleTubePick, useTestTubeDragStore } from "./useTestTubeDragStore";
 import { useTestTubeStorageStore, type StoredTestTube, type TubeLocation } from "./useTestTubeStorageStore";
 
@@ -28,7 +30,8 @@ import { useTestTubeStorageStore, type StoredTestTube, type TubeLocation } from 
  */
 export type StandTarget =
   | { readonly kind: "rack-tube"; readonly location: TubeLocation; readonly index: number }
-  | { readonly kind: "bottle"; readonly location: TubeLocation; readonly reagentId: string }
+  /** `instanceId` — the bottle itself, so it can be seen coming to the tube and pouring (`PourMotion`). */
+  | { readonly kind: "bottle"; readonly location: TubeLocation; readonly reagentId: string; readonly instanceId?: string }
   | { readonly kind: "clamped-tube" }
   | { readonly kind: "burner" };
 
@@ -36,12 +39,16 @@ export interface StandAction {
   /** What the click will do, or why it won't — the hover caption. */
   readonly label: string;
   readonly blocked: boolean;
-  readonly run: () => void;
+  /** @param origin where the clicked object is in the world, when known — a tube flies from there */
+  readonly run: (origin?: Position3) => void;
 }
 
 const NOTHING = () => {};
 const blocked = (label: string): StandAction => ({ label, blocked: true, run: NOTHING });
-const action = (label: string, run: () => void): StandAction => ({ label, blocked: false, run });
+const action = (label: string, run: (origin?: Position3) => void): StandAction => ({ label, blocked: false, run });
+
+/** The tube in the clamp hangs this far below its mouth: its base, where it is seen leaving from. */
+const TUBE_LENGTH = 0.15;
 
 const reagentConfig = (id: string): ReagentContainerConfig | undefined =>
   (REAGENTS as Record<string, ReagentContainerConfig | undefined>)[id];
@@ -74,6 +81,8 @@ const BURNER_LABEL: Record<BurnerPhase, string> = {
 export function standActionFor(target: StandTarget): StandAction | null {
   // While heating, the heating panel owns the stand.
   if (useHeatingStore.getState().active) return null;
+  // Something is still moving at the stand (a pour, a tube in flight, the cap).
+  if (standBusy()) return null;
   // A tube carried on the workbench fills from a jar by being brought to it;
   // clicks then belong to that gesture, not to the stand.
   if (target.kind !== "burner" && useTestTubeDragStore.getState().heldInstanceId !== null) return null;
@@ -81,7 +90,10 @@ export function standActionFor(target: StandTarget): StandAction | null {
 
   if (target.kind === "burner") {
     const phase = useBurnerStore.getState().phase;
-    return action(BURNER_LABEL[phase], () => useBurnerStore.getState().advance());
+    return action(BURNER_LABEL[phase], () => {
+      useStandMotionStore.getState().hold(CAP_MS);
+      useBurnerStore.getState().advance();
+    });
   }
 
   const clampedIndex = useBunsenStandStorageStore.getState().attachedTubeSlotIndex;
@@ -94,6 +106,9 @@ export function standActionFor(target: StandTarget): StandAction | null {
       return action("Нагреть пробирку над спиртовкой", () => useHeatingStore.getState().enter());
     }
     return action("Вернуть пробирку в штатив для пробирок", () => {
+      // Seen flying back from where it hangs now.
+      const mouth = CLAMP_TUBE_MOUTH.valid ? CLAMP_TUBE_MOUTH.point : null;
+      if (mouth) useStandMotionStore.getState().arriveInRack(location, clampedIndex, [mouth.x, mouth.y - TUBE_LENGTH, mouth.z]);
       useBunsenStandStorageStore.getState().detachTestTube();
       // Nothing left to look at closely.
       useStandStationStore.getState().close();
@@ -113,7 +128,10 @@ export function standActionFor(target: StandTarget): StandAction | null {
     if (foreign) return blocked(foreignLabel(foreign));
     const verb = reagentConfig(reagentId)?.contentsKind === "solid" ? "Насыпать" : "Прилить";
     return action(`${verb} ${formula(reagentId)} в пробирку в лапке`, () => {
-      tryAddToTube(location, clampedIndex, reagentId);
+      const pour = () => tryAddToTube(location, clampedIndex, reagentId);
+      // The reagent goes in when the bottle is tipped over the mouth, not on the click.
+      if (target.instanceId) useStandMotionStore.getState().startPour(target.instanceId, pour);
+      else pour();
     });
   }
 
@@ -122,8 +140,9 @@ export function standActionFor(target: StandTarget): StandAction | null {
   const tube = tubes[index];
   if (!tube || index === clampedIndex) return null;
   if (clampedIndex === null) {
-    return action("Закрепить пробирку в лапке штатива", () => {
-      useBunsenStandStorageStore.getState().attachTestTube(index, [0, 0, 0]);
+    return action("Закрепить пробирку в лапке штатива", (origin) => {
+      useBunsenStandStorageStore.getState().attachTestTube(index, origin ?? [0, 0, 0]);
+      if (origin) useStandMotionStore.getState().arriveInClamp(origin);
     });
   }
   if (tube.contents.length === 0) {
@@ -138,10 +157,10 @@ export function standActionFor(target: StandTarget): StandAction | null {
 }
 
 /** Runs what `standActionFor` offers; returns whether the click was the stand's. */
-export function runStandAction(target: StandTarget): boolean {
+export function runStandAction(target: StandTarget, origin?: Position3): boolean {
   const next = standActionFor(target);
   if (!next) return false;
-  next.run();
+  next.run(origin);
   return true;
 }
 
@@ -151,9 +170,9 @@ export function runStandAction(target: StandTarget): boolean {
  * close-up closes so the player sees it happen at the stand; otherwise the
  * tube is picked up as before — an empty one is carried to a jar to fill.
  */
-export function clickWorkbenchRackTube(index: number, instanceId: string): void {
+export function clickWorkbenchRackTube(index: number, instanceId: string, origin?: Position3): void {
   const carrying = useTestTubeDragStore.getState().heldInstanceId !== null;
-  if (!carrying && runStandAction({ kind: "rack-tube", location: "workbench", index })) {
+  if (!carrying && runStandAction({ kind: "rack-tube", location: "workbench", index }, origin)) {
     useReagentInspectionStore.getState().requestClose();
     return;
   }
