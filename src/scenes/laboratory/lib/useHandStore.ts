@@ -39,7 +39,7 @@ export const HAND = {
   ndc: new THREE.Vector2(),
   point: new THREE.Vector3(),
   valid: false,
-  /** Where the held item rests, published by the item itself (`HandFollow`/`PourMotion`) — the worktop's height. */
+  /** Where the held item rests, published by the item itself (`PourMotion`) — the worktop's height. */
   home: new THREE.Vector3(),
   homeValid: false,
   /** Where the hand is on screen, in CSS px, for the caption next to the item. */

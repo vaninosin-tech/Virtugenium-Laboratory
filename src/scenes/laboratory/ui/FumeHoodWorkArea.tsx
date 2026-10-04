@@ -21,7 +21,7 @@ import { SpiritBurner } from "./SpiritBurner";
 import { StandStation, lampLayout } from "./StandStation";
 import { takeTargetEvents } from "./standTargetEvents";
 import { useHandStore } from "../lib/useHandStore";
-import { ArrivalFlight, HandFollow, PourMotion } from "./StandMotion";
+import { ArrivalFlight, GlassRim, PourMotion } from "./StandMotion";
 import { POUR_POINT_HEIGHT, useStandMotionStore } from "../lib/useStandMotionStore";
 
 const DEF = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
@@ -65,6 +65,9 @@ const AWAY_FROM_PLAYER = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Ve
 
 /** Stand-local spot of a lamp in the hood without the stand — where `StandStation` would put it. */
 const LONE_LAMP_POSITION = lampLayout(AWAY_FROM_PLAYER).lamp;
+
+/** A tube's mouth above its base — the 15 cm `LabTestTube.glb`. */
+const TUBE_MOUTH_HEIGHT = 0.15;
 
 const reagentConfig = (id: string): ReagentContainerConfig | undefined =>
   (REAGENTS as Record<string, ReagentContainerConfig | undefined>)[id];
@@ -171,12 +174,15 @@ export function FumeHoodWorkArea() {
                 )}
               >
                 <group position={computeTubeSlotLocalOffset(index)}>
-                  <HandFollow instanceId={tube.instanceId}>
-                    {/* Back from the clamp: seen flying home to its slot. */}
-                    <ArrivalFlight arrival={rackArrival?.index === index ? rackArrival : null}>
-                      <LabTestTubeInstance contents={tube.contents} />
-                    </ArrivalFlight>
-                  </HandFollow>
+                  {/* In the hand it follows it, outlined, and pours like a bottle (VL-015). */}
+                  <PourMotion instanceId={tube.instanceId} pourPointHeight={TUBE_MOUTH_HEIGHT}>
+                    <GlassRim active={heldId === tube.instanceId}>
+                      {/* Back from the clamp: seen flying home to its slot. */}
+                      <ArrivalFlight arrival={rackArrival?.index === index ? rackArrival : null}>
+                        <LabTestTubeInstance contents={tube.contents} />
+                      </ArrivalFlight>
+                    </GlassRim>
+                  </PourMotion>
                 </group>
               </group>
             ),

@@ -106,6 +106,8 @@ interface BottleRest {
  *   (`POUR_COMMIT_MS`), straightens and goes home.
  * - Let go or put back: it goes home and gets its cap back.
  *
+ * Tubes taken from the hood's rack use it too: no cap, their mouth is their top.
+ *
  * @param pourPointHeight the bottle's `PourPoint` above its base, at the scale it is drawn —
  *   used only for a container without a cap; with one, the cap's rim is the mouth
  */
@@ -296,50 +298,6 @@ export function PourMotion({
   return (
     <group ref={groupRef} position={position}>
       {children}
-    </group>
-  );
-}
-
-/**
- * A tube that can be taken into the hand (VL-015): flies to the hand and
- * follows it (`HAND.point`), outlined; let go, it goes back to its place.
- * Wrap it at its resting place — its base at this group's origin.
- */
-export function HandFollow({ instanceId, children }: { readonly instanceId: string; readonly children: ReactNode }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const held = useHandStore((state) => state.held?.instanceId === instanceId);
-  const motion = useRef({ away: false, cur: new THREE.Vector3() });
-  const rest = useMemo(() => new THREE.Vector3(), []);
-
-  useFrame((_, rawDelta) => {
-    const group = groupRef.current;
-    const parent = group?.parent;
-    if (!group || !parent) return;
-    const m = motion.current;
-    group.position.set(0, 0, 0);
-    group.updateWorldMatrix(true, false);
-    group.getWorldPosition(rest);
-    if (!m.away && !held) return;
-    if (!m.away) {
-      m.away = true;
-      m.cur.copy(rest);
-    }
-    if (held) {
-      HAND.home.copy(rest);
-      HAND.homeValid = true;
-    }
-    const goal = held && HAND.valid ? HAND.point : rest;
-    m.cur.lerp(goal, 1 - Math.exp(-FOLLOW_RATE * Math.min(rawDelta, 0.1)));
-    if (!held && m.cur.distanceTo(rest) < 0.0008) {
-      m.away = false;
-      return;
-    }
-    group.position.copy(parent.worldToLocal(m.cur.clone()));
-  });
-
-  return (
-    <group ref={groupRef}>
-      <GlassRim active={held}>{children}</GlassRim>
     </group>
   );
 }

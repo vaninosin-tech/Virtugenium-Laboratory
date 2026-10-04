@@ -59,7 +59,7 @@ export function HandController() {
     };
     const putBack = () => {
       // A workbench rack tube's own carry takes it back to its slot; the
-      // others go home by themselves once let go (`PourMotion`, `HandFollow`).
+      // others go home by themselves once let go (`PourMotion`).
       if (held.kind === "workbench-tube") useTestTubeDragStore.getState().releaseIfHeld(held.instanceId);
       letGo();
     };

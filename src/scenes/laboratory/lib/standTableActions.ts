@@ -155,8 +155,11 @@ export function standActionFor(target: StandTarget, { fromHand = false }: { read
   }
   const foreign = foreignIn(tube.contents);
   if (foreign) return blocked(foreignLabel(foreign));
-  return action("Перелить в пробирку в лапке", () => {
-    tryPourBetweenTubes(location, index, clampedIndex);
+  return action("Перелить в пробирку в лапке", (origin) => {
+    const pour = () => tryPourBetweenTubes(location, index, clampedIndex);
+    // From the hand the tube is seen pouring, like a bottle: it goes in at the tipping point.
+    if (origin) useStandMotionStore.getState().startPour(tube.instanceId, pour, origin);
+    else pour();
   });
 }
 
