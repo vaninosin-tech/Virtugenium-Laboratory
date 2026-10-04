@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { LiquidMaterial, type LiquidOptions } from "./reagentMaterials";
 
 export const TUBE_LIQUID = { clearAlpha: 0.17, edgeAlpha: 0.42, meniscusAlpha: 0.22, clearHighlight: 0.30 };
+const emptyTransport = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
+emptyTransport.needsUpdate = true;
 
 /** Tube-only optics: no framebuffer copy or change to the reagent bottles. */
 export class TubeLiquidMaterial extends LiquidMaterial {
@@ -15,6 +17,9 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uLevel: { value: this.uniforms.uBoundsMin.value.y + this.uniforms.uBoundsSize.value.y },
       uReactionKind: { value: 0 }, uRate: { value: 0 }, uTemperature: { value: 0 },
       uResidualHaze: { value: 0 }, uWallFilm: { value: 0 },
+      uTransport: { value: emptyTransport }, uTransportActive: { value: 0 },
+      uTransportDye: { value: 0 }, uTransportQuality: { value: 1 },
+      uCameraLocal: { value: new THREE.Vector3(0, 0, 1) },
     });
     this.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
@@ -44,7 +49,26 @@ uniform float uClearAlpha; uniform float uEdgeAlpha; uniform float uMeniscusAlph
 uniform vec3 uUp; uniform float uLevel; uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
 uniform float uReactionKind; uniform float uRate; uniform float uTemperature; uniform float uTime;
 uniform float uResidualHaze; uniform float uWallFilm;
+uniform sampler2D uTransport; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality;
+uniform vec3 uCameraLocal;
 varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
+vec2 transported(vec3 point) {
+  vec3 center = uBoundsMin + uBoundsSize * 0.5;
+  vec3 direction = normalize(point - uCameraLocal);
+  vec2 edge = point.xz - center.xz;
+  float depth = clamp(-2.0 * dot(edge, direction.xz) / max(dot(direction.xz, direction.xz), 0.0001), 0.0, uBoundsSize.x);
+  float stepLength = depth / uTransportQuality;
+  vec2 transmittance = vec2(1.0);
+  for (int i = 0; i < 16; i++) {
+    if (float(i) >= uTransportQuality) break;
+    vec3 samplePoint = point + direction * ((float(i) + 0.5) * stepLength);
+    vec2 uv = vec2(clamp((samplePoint.x - uBoundsMin.x) / uBoundsSize.x, 0.0, 1.0),
+      clamp((samplePoint.y - uBoundsMin.y) / uBoundsSize.y, 0.0, 1.0));
+    vec2 concentration = texture2D(uTransport, uv).rg;
+    transmittance *= exp(-concentration * stepLength / max(uBoundsSize.x, 0.0001) * 3.2);
+  }
+  return 1.0 - transmittance;
+}
 float tubeNoise(vec3 p) {
   vec3 i = floor(p), f = smoothstep(0.0, 1.0, fract(p));
   float n = dot(i, vec3(1.0, 57.0, 113.0));
@@ -59,17 +83,23 @@ if (vCap < 0.5 && surfaceDistance > 0.0004) discard;`)
         .replace("#include <color_fragment>", `#include <color_fragment>
 float h = clamp((vTubePoint.y - uBoundsMin.y) / uBoundsSize.y, 0.0, 1.0);
 vec2 radial = (vTubePoint.xz - uBoundsMin.xz - uBoundsSize.xz * 0.5) / uBoundsSize.xz;
+vec2 transportedMatter = uTransportActive > 0.01
+  ? transported(vTubePoint) : vec2(0.0);
 float p = uReactionProgress;
 float n = tubeNoise(vec3(radial * 10.0, h * 6.0 - uTime * (0.14 + uTemperature * 0.24)));
 float stream = sin(radial.x * 16.0 + sin(h * 10.0 - uTime * (0.7 + uTemperature)) + radial.y * 9.0)
   + (n - 0.5) * 0.8;
 float localMix = p;
 float cloud = uCloudiness;
+float dyeCloud = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
-  // Cu2+ travels out from the metal; convection carries narrow blue fingers upward.
-  float front = p * 1.65 + stream * 0.12 * sin(p * 3.14159);
-  localMix = smoothstep(h - 0.22, h + 0.22, front) * min(1.0, p * 3.0);
-  localMix = mix(localMix, 1.0, smoothstep(0.7, 1.0, p));
+  // Rising gas mixes Cu2+ through the entire column from the outset.
+  // Keep only a soft enrichment near the granule and in the rising wake.
+  float mixed = 1.0 - exp(-p * 11.0);
+  float wake = exp(-pow(radial.x * 3.0 + 0.15 * stream, 2.0))
+    * (1.0 - smoothstep(0.35, 0.95, h));
+  localMix = mixed * (0.79 + 0.21 * (1.0 - h) + 0.035 * wake);
+  localMix = mix(localMix, 1.0, smoothstep(0.72, 1.0, p));
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   // The initial milk fills the tube. Later, flocs clear the supernatant
   // from the top down, with only soft turbulence at the boundary.
@@ -84,32 +114,52 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   cloud *= 1.0 - clearFront;
   cloud *= 0.97 + 0.06 * n;
 } else if (uReactionKind > 3.5) {
-  // Sulfite enters at the top; retain violet below the moving mixing front.
-  localMix = smoothstep(1.0 - h - 0.18, 1.0 - h + 0.18,
-    p * 1.36 - 0.18 + stream * 0.12 * sin(p * 3.14159));
+  // Only the advected dye is raspberry. The reaction fades each plume
+  // after it has had time to curl below the inlet.
+  vec2 dyeUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x
+    + 0.045 * sin(h * 32.0 - uTime * 3.1), 0.0, 1.0), h);
+  float nearDye = texture2D(uTransport, dyeUv).r;
+  // Beer-Lambert absorption: a thicker path through a plume looks denser,
+  // while dilute edges remain translucent instead of becoming a hard mask.
+  dyeCloud = 1.0 - exp(-nearDye * 1.3 - transportedMatter.r * 4.2);
+  dyeCloud *= 1.0 - smoothstep(0.70, 1.0, p);
+  localMix = 1.0 - dyeCloud;
 }
-if (p <= 0.0) { localMix = 0.0; cloud = 0.0; }
+if (p <= 0.0 && uReactionKind < 3.5) { localMix = 0.0; cloud = 0.0; }
+if (uReactionKind > 1.5 && uReactionKind < 2.5 && uTransportActive > 0.01)
+  cloud *= 0.85 + 0.15 * smoothstep(0.015, 0.65, transportedMatter.g);
+if (uReactionKind > 1.5 && uReactionKind < 2.5)
+  cloud *= 0.84 + 0.16 * smoothstep(0.05, 0.40, h);
+if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTransportActive > 0.01)
+  cloud *= smoothstep(0.015, 0.65, transportedMatter.g);
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 tubeColor = mix(uBaseColor, uReactionColor, localMix);
+if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), uBaseColor, dyeCloud);
 float baseChroma = max(max(uBaseColor.r, uBaseColor.g), uBaseColor.b) - min(min(uBaseColor.r, uBaseColor.g), uBaseColor.b);
 float endChroma = max(max(uReactionColor.r, uReactionColor.g), uReactionColor.b) - min(min(uReactionColor.r, uReactionColor.g), uReactionColor.b);
 float pigment = mix(smoothstep(0.15, 0.3, baseChroma), smoothstep(0.15, 0.3, endChroma), localMix);
+if (uReactionKind > 3.5) pigment = dyeCloud;
 diffuseColor.rgb = tubeColor;
 float waterEdge = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.4);
+vec2 tracerUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x, 0.0, 1.0), h);
+float tracerRidge = uTransportActive > 0.01 && uTransportDye < 0.5
+  ? abs(texture2D(uTransport, tracerUv - vec2(0.055, 0.0)).g
+    - texture2D(uTransport, tracerUv + vec2(0.055, 0.0)).g) : 0.0;
 float meniscus = (1.0 - smoothstep(0.0003, 0.0015, abs(surfaceDistance))) * (1.0 - vCap);
 float capRadius = length((vTubePoint.xz - uBoundsMin.xz - uBoundsSize.xz * 0.5) / (uBoundsSize.xz * 0.5));
 float capRim = vCap * smoothstep(0.77, 0.94, capRadius);
 float waterAlpha = uClearAlpha + waterEdge * uEdgeAlpha + meniscus * uMeniscusAlpha
-  + vCap * 0.12 + capRim * 0.30;
+  + vCap * 0.12 + capRim * 0.30 + tracerRidge * 0.22;
 waterAlpha += smoothstep(0.6, 0.9, uTemperature) * (n - 0.5) * 0.07;
 float milk = uReactionKind > 2.5 && uReactionKind < 3.5 ? 1.0 : 0.0;
-float raspberry = uReactionKind > 3.5 ? 1.0 - localMix : 0.0;
+float raspberry = uReactionKind > 3.5 ? dyeCloud : 0.0;
 // A stationary chalky veil. No animated or high-frequency patch mask: only
 // the filtered film amount changes, so the wall cannot develop crawling marks.
 float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
   * 0.45;
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity)
-  + cloud * mix(1.25, 0.72, milk) + raspberry * 0.28 + film * 0.60
+  + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 0.72, milk))
+  + raspberry * 0.28 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
 float edgeSoft = vCap > 0.5 ? max(0.42, clamp(abs(vTubeWaveSlope) * 8.0, 0.0, 1.0))
@@ -128,6 +178,7 @@ outgoingLight = mix(mix(clearLight, coloredLight, pigment),
   mix(vec3(0.91 + 0.07 * relief), vec3(0.80 + 0.06 * relief), milk),
   clamp(cloud * mix(1.0, 0.88, milk), 0.0, 1.0));
 outgoingLight = mix(outgoingLight, vec3(0.93), film * 0.80);
+outgoingLight = mix(outgoingLight, vec3(0.85, 0.97, 1.0), tracerRidge * 0.32);
 float underRim = (1.0 - vCap) * (1.0 - smoothstep(0.0005, 0.0017, -surfaceDistance));
 outgoingLight = mix(outgoingLight, vec3(0.10, 0.19, 0.22), underRim * 0.63);
 outgoingLight = mix(outgoingLight, vec3(0.82, 0.95, 0.98), capRim * 0.68);
@@ -135,8 +186,12 @@ float waveBright = vCap * clamp(vTubeWaveSlope * 10.0, 0.0, 1.0);
 float waveDark = vCap * clamp(-vTubeWaveSlope * 10.0, 0.0, 1.0);
 outgoingLight = mix(outgoingLight, vec3(0.90, 0.97, 1.0), waveBright * 0.85);
 outgoingLight *= 1.0 - waveDark * 0.55;
-#include <opaque_fragment>`);
+#include <opaque_fragment>
+if (uReactionKind > 1.5 && uReactionKind < 2.5) {
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.92), cloud * 0.82);
+  gl_FragColor.a = max(gl_FragColor.a, cloud * 0.83);
+}`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v10-meniscus"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v11-transport"; }
 }

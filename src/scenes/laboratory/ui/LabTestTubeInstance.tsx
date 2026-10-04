@@ -82,6 +82,7 @@ export function LabTestTubeInstance({
   }, [instance, inStand]);
 
   const visuals = useRef<ReturnType<typeof createTubeReactionVisuals>>(null);
+  const previousContents = useRef<readonly string[] | null>(null);
   const displayedChemistry = useRef({ progress: 0, rate: 0, temperature: 0, age: 0 });
   const splashStart = useRef(-Infinity);
   useEffect(() => {
@@ -98,12 +99,20 @@ export function LabTestTubeInstance({
   useEffect(() => {
     displayedChemistry.current = { progress: 0, rate: 0, temperature: 0, age: 0 };
     const configs = resolveTubeContents(contents);
+    const previous = previousContents.current;
+    const incoming = previous && configs.length > previous.length
+      && previous.every((id, index) => id === contents?.[index]) ? configs[configs.length - 1] : undefined;
+    const incomingLiquid = incoming && incoming.contentsKind !== "solid" ? incoming : undefined;
+    const liquidCount = configs.filter(config => config.contentsKind !== "solid").length;
+    previousContents.current = contents?.slice() ?? [];
     const binding = fillTestTubeContents(instance, configs);
     const kind = reactionKindFor(contents ?? []);
     visuals.current = configs.length || inStand
       ? createTubeReactionVisuals(instance, kind, {
         activeSurface: inStand && !(import.meta.env.DEV && import.meta.env.VITE_TUBE_WAVES === "0"),
-        pour: inStand && configs.length > 0,
+        pour: inStand && !!incomingLiquid,
+        liquidCount,
+        incomingDyed: !!incomingLiquid && incomingLiquid.id === "kmno4",
       }) : null;
     return () => {
       visuals.current?.dispose();
@@ -114,7 +123,7 @@ export function LabTestTubeInstance({
 
   const groupRef = useRef<THREE.Group>(null);
   const parentWorldScale = useMemo(() => new THREE.Vector3(), []);
-  useFrame(({ clock }, delta) => {
+  useFrame(({ clock, camera }, delta) => {
     const tuning = useTubeVisualTuningStore.getState();
     const group = groupRef.current;
     const parent = group?.parent;
@@ -149,7 +158,7 @@ export function LabTestTubeInstance({
       && (useTubeCloseUpStore.getState().viewing || useHeatingStore.getState().active);
     for (const mesh of glassBackdrops.current) mesh.visible = refraction;
     visuals.current?.update(displayed, clock.elapsedTime, quality,
-      performance.now() / 1000 - splashStart.current, refraction);
+      performance.now() / 1000 - splashStart.current, refraction, camera.position);
     if (inStand) {
       for (const uniform of crackUniforms.current) uniform.value.set(crackSpot?.side ?? 0, crackSpot?.height ?? -1);
     }

@@ -2,6 +2,9 @@ import * as THREE from "three";
 import { REAGENTS } from "../../../entities/laboratory/reagents";
 import { deferDispose } from "./deferredDispose";
 import { TubeLiquidMaterial } from "./tubeLiquidMaterial";
+import { TubeMixingField } from "./tubeMixingField";
+import { TubeImmersion } from "./tubeImmersion";
+import { testTubeLiquidFill } from "./testTubeContents";
 import type { ReactionKind, TubeChemistry } from "./tubeReactions";
 import type { RuntimeQuality } from "./useRuntimeQualityStore";
 
@@ -165,7 +168,7 @@ class TubeSurfaceWaves {
 }
 
 /** Opaque-scene displacement drawn before the original transparent water. */
-function createWaterBackdropMaterial(radius: number) {
+function createWaterBackdropMaterial(radius: number, minY: number, height: number, transport: TubeMixingField | null) {
   const material = new THREE.MeshPhysicalMaterial({
     color: "#ffffff", roughness: 0, metalness: 0, ior: 1.333,
     transmission: 1, thickness: radius * 1.8, depthWrite: false,
@@ -173,9 +176,12 @@ function createWaterBackdropMaterial(radius: number) {
   });
   const up = { value: new THREE.Vector3(0, 1, 0) };
   const level = { value: 0 };
+  const tracerStrength = { value: 0 };
   material.onBeforeCompile = shader => {
     shader.uniforms.uBackdropUp = up;
     shader.uniforms.uBackdropLevel = level;
+    shader.uniforms.uTracer = { value: transport?.texture ?? null };
+    shader.uniforms.uTracerStrength = tracerStrength;
     shader.vertexShader = `attribute float tubeSurface; attribute float tubeWave; attribute float tubeWaveSlope;
 uniform vec3 uBackdropUp; uniform float uBackdropLevel;
 varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
@@ -187,6 +193,7 @@ if (tubeSurface > 0.5) transformed.y =
   + 0.0008 * pow(clamp((length(position.xz) / ${radius.toFixed(7)} - 0.67) / 0.33, 0.0, 1.0), 2.0) + tubeWave;
 vBackdropPoint = transformed;`);
     shader.fragmentShader = `uniform vec3 uBackdropUp; uniform float uBackdropLevel;
+uniform sampler2D uTracer; uniform float uTracerStrength;
 varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
 if (vBackdropCap < 0.5 && dot(uBackdropUp, vBackdropPoint) > uBackdropLevel + 0.0004) discard;`)
@@ -194,6 +201,11 @@ if (vBackdropCap < 0.5 && dot(uBackdropUp, vBackdropPoint) > uBackdropLevel + 0.
 vec2 screenUv = gl_FragCoord.xy / transmissionSamplerSize;
 vec2 bend = vBackdropCap > 0.5 ? vec2(vNormal.x * 14.0, vNormal.z * 8.0)
   : vec2(vNormal.x * 24.0, 0.0);
+vec2 tracerUv = vec2(clamp(0.5 + length(vBackdropPoint.xz) / ${(radius * 2).toFixed(7)}, 0.0, 1.0),
+  clamp((vBackdropPoint.y - ${minY.toFixed(7)}) / ${height.toFixed(7)}, 0.0, 1.0));
+float tracerLeft = texture2D(uTracer, tracerUv - vec2(0.025, 0.0)).g;
+float tracerRight = texture2D(uTracer, tracerUv + vec2(0.025, 0.0)).g;
+bend.x += (tracerRight - tracerLeft) * 11.0 * uTracerStrength;
 vec3 backdrop = texture2D(transmissionSamplerMap,
   clamp(screenUv + bend / transmissionSamplerSize, vec2(0.001), vec2(0.999))).rgb * 1.32;
 vec3 straight = texture2D(transmissionSamplerMap, clamp(screenUv, vec2(0.001), vec2(0.999))).rgb;
@@ -204,7 +216,7 @@ backdrop = mix(straight, backdrop, edgeSoft);
 gl_FragColor = vec4(backdrop, 1.0);`);
   };
   material.customProgramCacheKey = () => "tube-water-backdrop-v1";
-  return { material, up, level };
+  return { material, up, level, tracerStrength };
 }
 
 function createCausticMaterial() {
@@ -239,7 +251,7 @@ void main() {
 
 /** Fixed pools survive progress updates, including seeking backwards in F8. */
 export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKind | null,
-  options: { activeSurface?: boolean; pour?: boolean } = {}) {
+  options: { activeSurface?: boolean; pour?: boolean; liquidCount?: number; incomingDyed?: boolean } = {}) {
   let cavity: THREE.Mesh | undefined;
   let shell: THREE.Mesh | undefined;
   root.traverse((object) => {
@@ -297,6 +309,13 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
     capGeometry.setAttribute("tubeWaveSlope", new THREE.Float32BufferAttribute(new Float32Array(capGeometry.attributes.position.count), 1));
   }
   const hasLiquid = base instanceof TubeLiquidMaterial && volume.visible;
+  const targetFill = testTubeLiquidFill(options.liquidCount ?? 1);
+  const startFill = options.pour ? testTubeLiquidFill((options.liquidCount ?? 1) - 1) : targetFill;
+  let pourAge = 0;
+  const transportDisabled = import.meta.env.DEV && typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).has("noTubeTransport");
+  const transport = options.pour && hasLiquid && !transportDisabled ? new TubeMixingField() : null;
+  transport?.start(!!options.incomingDyed);
   if (hasLiquid) volume.geometry = wallGeometry;
 
   const group = new THREE.Group();
@@ -305,7 +324,7 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   group.quaternion.copy(volume.quaternion);
   group.scale.copy(volume.scale);
   volume.parent?.add(group);
-  const backdrop = options.activeSurface && hasLiquid ? createWaterBackdropMaterial(radius) : null;
+  const backdrop = options.activeSurface && hasLiquid ? createWaterBackdropMaterial(radius, box.min.y, size.y, transport) : null;
   const backdropWall = backdrop ? new THREE.Mesh(wallGeometry, backdrop.material) : null;
   const backdropCap = backdrop ? new THREE.Mesh(capGeometry, backdrop.material) : null;
   if (backdropWall && backdropCap) {
@@ -323,18 +342,46 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   cap.frustumCulled = false;
   cap.raycast = () => {};
   group.add(cap);
+  const filmGeometry = new THREE.PlaneGeometry(1, 1, 8, 48);
+  const filmMaterial = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide, toneMapped: false,
+    uniforms: { uAge: { value: 0 }, uFade: { value: 0 },
+      uColor: { value: new THREE.Color(options.incomingDyed ? REAGENTS.kmno4.contentsColor : "#d7e8eb") } },
+    vertexShader: `varying vec2 vUv;
+void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform float uAge; uniform float uFade; uniform vec3 uColor; varying vec2 vUv;
+void main() {
+  float irregular = sin(vUv.y * 17.0 - uAge * 4.0) * 0.018;
+  float cross = abs(vUv.x - 0.5 - irregular);
+  float wet = 1.0 - smoothstep(0.32, 0.50, cross);
+  float glint = exp(-pow((vUv.x - 0.22 - irregular) / 0.09, 2.0));
+  float shadow = exp(-pow((vUv.x - 0.77 - irregular) / 0.11, 2.0));
+  float down = smoothstep(0.0, 0.07, vUv.y) * (1.0 - smoothstep(0.88, 1.0, vUv.y));
+  float wave = 0.94 + 0.06 * sin(vUv.y * 24.0 - uAge * 8.0);
+  float alpha = (wet * 0.62 + glint * 0.12 + shadow * 0.08) * down * wave * uFade;
+  gl_FragColor = vec4(mix(uColor, vec3(0.23, 0.34, 0.38), shadow * 0.60), alpha);
+  #include <colorspace_fragment>
+}`,
+  });
+  const film = new THREE.Mesh(filmGeometry, filmMaterial);
+  film.name = "TubePourWallFilm";
+  film.visible = false;
+  film.frustumCulled = false;
+  film.renderOrder = 12;
+  film.raycast = () => {};
+  group.add(film);
   const bottomCausticGeometry = new THREE.PlaneGeometry(radius * 1.7, radius * 1.7);
-  const standCausticGeometry = new THREE.PlaneGeometry(radius * 2.5, 0.105);
+  const standCausticGeometry = new THREE.PlaneGeometry(radius * 2.5, radius * 2.5);
   bottomCausticGeometry.rotateX(-Math.PI / 2);
+  standCausticGeometry.rotateX(-Math.PI / 2);
   const bottomCausticMaterial = createCausticMaterial();
   const standCausticMaterial = createCausticMaterial();
-  standCausticMaterial.uniforms.uBillboard.value = 1;
   const bottomCaustic = new THREE.Mesh(bottomCausticGeometry, bottomCausticMaterial);
   const standCaustic = new THREE.Mesh(standCausticGeometry, standCausticMaterial);
   bottomCaustic.name = "TubeBottomCaustic";
   standCaustic.name = "TubeStandCaustic";
   bottomCaustic.position.set(center.x, box.min.y + radius * 0.34, center.z);
-  standCaustic.position.set(center.x, box.min.y - 0.055, center.z);
+  standCaustic.visible = false;
   bottomCaustic.raycast = standCaustic.raycast = () => {};
   group.add(bottomCaustic, standCaustic);
   const geometry = new THREE.IcosahedronGeometry(1, 1);
@@ -361,17 +408,20 @@ if (vSedimentPoint.y < uSedimentBottom || length(bowlPoint) > uSedimentRadius) d
     // response before bloom and keep normal-based relief instead of hot spots.
     shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
 float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
-float powderGrain = sin(vSedimentPoint.x * 12000.0) * sin(vSedimentPoint.z * 10800.0) * 0.012 * uPowder;
-outgoingLight = vec3(uSedimentWhite) * (relief + powderGrain);
-#include <opaque_fragment>`);
+ float powderGrain = sin(vSedimentPoint.x * 12000.0) * sin(vSedimentPoint.z * 10800.0) * 0.012 * uPowder;
+ outgoingLight = vec3(uSedimentWhite) * (relief + powderGrain);
+ diffuseColor.a *= mix(0.40 + 0.60 * smoothstep(0.0, 0.68,
+   abs(dot(normalize(normal), normalize(vViewPosition)))), 1.0, uPowder);
+ #include <opaque_fragment>`);
   };
   // Lobed, asymmetric AgCl flocs cast their own small shading variations.
-  const curdGeometry = new THREE.IcosahedronGeometry(1, 2);
+  const curdGeometry = new THREE.IcosahedronGeometry(1, 3);
   const vertices = curdGeometry.getAttribute("position");
   for (let i = 0; i < vertices.count; i++) {
     const x = vertices.getX(i), y = vertices.getY(i), z = vertices.getZ(i);
-    const lump = 0.8 + 0.18 * Math.sin(x * 11 + y * 7) * Math.cos(z * 12 - y * 5) + 0.12 * Math.sin(z * 7 + x * 5);
-    vertices.setXYZ(i, x * lump, y * lump * 0.75, z * lump);
+    const lump = 0.75 + 0.23 * Math.sin(x * 5.8 + y * 3.7) * Math.cos(z * 6.4 - y * 4.1)
+      + 0.16 * Math.sin(z * 8.1 + x * 4.8) + 0.12 * Math.sin(x * 12 + z * 9);
+    vertices.setXYZ(i, x * lump, y * lump * 0.66, z * lump);
   }
   curdGeometry.computeVertexNormals();
   const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e8f7fa", transparent: true, opacity: 0.85, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
@@ -496,6 +546,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uResidue * wallBand * smoothstep(0.0
   flakes.name = "TubePrecipitate";
   const bubbles = makePool(bubbleMaterial);
   bubbles.name = "TubeNOBubbles";
+  const pourAir = makePool(bubbleMaterial, 12);
+  pourAir.name = "TubePourAirBubbles";
   const attachedBubbles = makePool(bubbleMaterial, 192);
   // The copper is drawn after refraction; draw the adhering bubbles after it.
   // Depth testing still hides the bubbles on its far side.
@@ -595,7 +647,14 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   const velocity = new THREE.Vector2();
   const gravity = new THREE.Vector3();
   const inverse = new THREE.Matrix4();
+  const cameraLocal = new THREE.Vector3();
   const copper = root.getObjectByName("TubeCopperGranules");
+  const immersion = new TubeImmersion(center, radius, box.min.y, size.y);
+  const detachImmersion = [immersion.attach(white), immersion.attach(bubbleMaterial)];
+  if (copper) copper.traverse(object => {
+    if (object instanceof THREE.Mesh && object.material instanceof THREE.Material)
+      detachImmersion.push(immersion.attach(object.material));
+  });
   const copperPoints = copper?.children.map(child => new THREE.Vector3(child.position.x,
     typeof child.userData.dropTargetY === "number" ? child.userData.dropTargetY : child.position.y, child.position.z)) ?? [];
   const copperBounds = copper?.children.map(child => {
@@ -608,9 +667,16 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   }) ?? [];
   const source = new THREE.Vector3();
   const bubblePoint = new THREE.Vector3();
+  const causticRay = new THREE.Raycaster();
+  const causticOrigin = new THREE.Vector3();
+  const causticPoint = new THREE.Vector3();
+  const causticNormal = new THREE.Vector3();
+  const lastCausticOrigin = new THREE.Vector3(Infinity, Infinity, Infinity);
+  let causticProbed = false;
+  let causticSurfaceStrength = 0;
   return {
     update(chemistry: TubeChemistry, time: number, quality: RuntimeQuality, splashAge: number,
-      refraction = false) {
+      refraction = false, cameraPosition?: THREE.Vector3) {
       const { progress } = chemistry;
       const rate = Number.isFinite(chemistry.rate) ? THREE.MathUtils.clamp(chemistry.rate, 0, 1) : 0;
       const temperature = Number.isFinite(chemistry.temperature) ? THREE.MathUtils.clamp(chemistry.temperature, 0, 1) : 0;
@@ -618,8 +684,38 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const reverseTime = lastTime !== undefined && time < lastTime;
       const dt = lastTime === undefined ? 0 : THREE.MathUtils.clamp(time - lastTime, 0, 0.1);
       lastTime = time;
+      pourAge += dt;
+      const fill = THREE.MathUtils.lerp(startFill, targetFill,
+        THREE.MathUtils.smoothstep(pourAge, 0, 1.3));
+      transport?.advance(dt, fill);
       waveSurface?.setQuality(quality);
       volume.updateWorldMatrix(true, false);
+      causticOrigin.set(center.x, box.min.y, center.z).applyMatrix4(volume.matrixWorld);
+      if (hasLiquid && quality !== "LOW" && (!causticProbed
+        || causticOrigin.distanceToSquared(lastCausticOrigin) > 0.0001)) {
+        causticProbed = true;
+        lastCausticOrigin.copy(causticOrigin);
+        causticSurfaceStrength = 0;
+        standCaustic.visible = false;
+        let scene: THREE.Object3D = root;
+        while (scene.parent) scene = scene.parent;
+        causticRay.set(causticPoint.copy(causticOrigin).add(new THREE.Vector3(0, 0.003, 0)),
+          new THREE.Vector3(0, -1, 0));
+        causticRay.far = 0.153;
+        for (const hit of causticRay.intersectObjects(scene.children, true)) {
+          let ancestor: THREE.Object3D | null = hit.object;
+          while (ancestor && ancestor !== root) ancestor = ancestor.parent;
+          if (ancestor === root || !hit.face) continue;
+          causticNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
+          if (causticNormal.y < 0.75) continue;
+          const gap = causticOrigin.y - hit.point.y;
+          if (gap < 0 || gap > 0.15) continue;
+          causticPoint.copy(hit.point).addScaledVector(causticNormal, 0.001);
+          standCaustic.position.copy(group.worldToLocal(causticPoint));
+          causticSurfaceStrength = 1 - THREE.MathUtils.smoothstep(gap, 0.01, 0.15);
+          break;
+        }
+      }
       const e = volume.matrixWorld.elements;
       const targetX = -e[1] / Math.max(0.001, e[5]);
       const targetZ = -e[9] / Math.max(0.001, e[5]);
@@ -634,16 +730,26 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         slope.addScaledVector(velocity, step);
       }
       up.value.set(-slope.x, 1, -slope.y).normalize();
-      level.value = up.value.x * center.x + up.value.y * box.max.y + up.value.z * center.z;
+      level.value = up.value.x * center.x + up.value.y * (box.min.y + size.y * fill) + up.value.z * center.z;
       if (backdrop && backdropWall && backdropCap) {
         backdrop.up.value.copy(up.value);
         backdrop.level.value = level.value;
+        backdrop.tracerStrength.value = transport && !options.incomingDyed && transport.running ? 1 : 0;
         backdropWall.visible = refraction && quality !== "LOW";
         // Its flat transmission pass draws an opaque line in the player's
         // near-horizontal view. The physical liquid cap still carries waves.
         backdropCap.visible = false;
       }
       inverse.copy(volume.matrixWorld).invert();
+      if (cameraPosition) cameraLocal.copy(cameraPosition).applyMatrix4(inverse);
+      immersion.uniforms.uImmersionWorldToLocal.value.copy(inverse);
+      immersion.uniforms.uImmersionCamera.value.copy(cameraLocal);
+      immersion.uniforms.uImmersionUp.value.copy(up.value);
+      immersion.uniforms.uImmersionLevel.value = level.value;
+      immersion.uniforms.uImmersionProgress.value = p;
+      immersion.uniforms.uImmersionKind.value = kind === "copper-nitric" ? 1 : options.incomingDyed ? 2 : 0;
+      immersion.uniforms.uImmersionDyeActive.value = transport?.running ? 1 : 0;
+      if (transport) immersion.uniforms.uImmersionDye.value = transport.texture;
       gravity.set(0, 1, 0).transformDirection(inverse);
       sedimentGravity.value.copy(gravity);
       // A visual reservoir outlives the instantaneous chemical rate. Seeking
@@ -672,6 +778,52 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
             radius * 0.025, 0.22);
         }
       }
+      film.visible = !!options.pour && pourAge < 2.5;
+      if (film.visible) {
+        const lower = box.min.y + size.y * fill;
+        const top = lip.y - 0.004;
+        const leading = THREE.MathUtils.lerp(top, lower,
+          THREE.MathUtils.smoothstep(pourAge, 0, 0.72));
+        const trailing = THREE.MathUtils.lerp(top, lower,
+          THREE.MathUtils.smoothstep(pourAge, 1.28, 2.45));
+        const positions = filmGeometry.getAttribute("position") as THREE.BufferAttribute;
+        const uv = filmGeometry.getAttribute("uv");
+        const towardCameraX = cameraLocal.x - center.x;
+        const towardCameraZ = cameraLocal.z - center.z;
+        const cameraDistance = Math.max(0.001, Math.hypot(towardCameraX, towardCameraZ));
+        const wallX = towardCameraX / cameraDistance;
+        const wallZ = towardCameraZ / cameraDistance;
+        for (let vertex = 0; vertex < positions.count; vertex++) {
+          const width = (uv.getX(vertex) - 0.5) * radius * 0.75;
+          const y = THREE.MathUtils.lerp(leading, trailing, uv.getY(vertex));
+          const theta = 0.55 + width / radius + Math.sin(y * 100 + pourAge * 4) * 0.005;
+          const x = center.x + radius * 0.983 * (wallX * Math.cos(theta) - wallZ * Math.sin(theta));
+          const z = center.z + radius * 0.983 * (wallZ * Math.cos(theta) + wallX * Math.sin(theta));
+          positions.setXYZ(vertex, x, y, z);
+        }
+        positions.needsUpdate = true;
+        filmMaterial.uniforms.uAge.value = pourAge;
+        filmMaterial.uniforms.uFade.value = THREE.MathUtils.smoothstep(pourAge, 0, 0.18)
+          * (1 - THREE.MathUtils.smoothstep(pourAge, 1.35, 2.5));
+        if (waveSurface && pourAge > 0.65 && pourAge < 1.45 && Math.floor((pourAge - dt) * 8) !== Math.floor(pourAge * 8))
+          waveSurface.impulse(0.22, 0.70, radius * 0.055, 0.22);
+      }
+      pourAir.visible = !!options.pour && pourAge > 0.66 && pourAge < 2.15 && hasLiquid;
+      pourAir.count = quality === "LOW" ? 6 : 12;
+      if (pourAir.visible) {
+        const surfaceY = box.min.y + size.y * fill;
+        for (let i = 0; i < pourAir.count; i++) {
+          const age = pourAge - 0.70 - i * 0.06;
+          const x = center.x + radius * (0.13 + 0.20 * random(i + 228));
+          const z = center.z + radius * (0.30 + 0.28 * random(i + 452));
+          const y = Math.min(surfaceY - 0.0005, surfaceY - 0.012 + Math.max(0, age) * 0.07);
+          const scale = age > 0 && age < 0.8 && y < surfaceY - 0.0006
+            ? radius * (0.024 + random(i + 611) * 0.035)
+              * THREE.MathUtils.smoothstep(age, 0, 0.12) : 0;
+          place(pourAir, i, x, y, z, scale, scale, scale);
+        }
+        pourAir.instanceMatrix.needsUpdate = true;
+      }
       bubblePhase += dt;
       const drive = kind === "copper-nitric" && p > 0 && p < 0.999 ? rate : 0;
       const producingBubbles = drive > 0.005;
@@ -691,7 +843,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const count = TUBE_VISUALS.particleCounts[quality];
       const precipitate = kind === "silver-chloride" || kind === "barium-sulfate";
       const curds = kind === "silver-chloride";
-      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.10 : 0.018);
+      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.025 : 0.018);
       const settled = precipitate ? THREE.MathUtils.smoothstep(p,
         curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
       if (kind === "barium-sulfate") bariumCompletionAge = p >= 0.999
@@ -708,6 +860,15 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         activeLiquid.uniforms.uRate.value = rate;
         activeLiquid.uniforms.uTemperature.value = temperature;
         activeLiquid.uniforms.uTime.value = time;
+      }
+      if (transport) for (const material of [base, liquid]) {
+        if (!(material instanceof TubeLiquidMaterial)) continue;
+        material.uniforms.uTransport.value = transport.texture;
+        material.uniforms.uTransportActive.value = transport.running
+          ? 1 - THREE.MathUtils.smoothstep(transport.age, 8, 12) : 0;
+        material.uniforms.uTransportDye.value = options.incomingDyed ? 1 : 0;
+        material.uniforms.uTransportQuality.value = quality === "LOW" ? 6 : 16;
+        material.uniforms.uCameraLocal.value.copy(cameraLocal);
       }
       if (liquid) {
         liquid.uniforms.uTime.value = time;
@@ -732,13 +893,16 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         [bottomCaustic, bottomCausticMaterial, 0.30],
         [standCaustic, standCausticMaterial, 0.16],
       ] as const) {
-        mesh.visible = hasLiquid && quality !== "LOW";
+        mesh.visible = hasLiquid && quality !== "LOW" && !curds
+          && (mesh !== standCaustic || causticSurfaceStrength > 0.001);
         material.uniforms.uTint.value.set(causticTint);
-        material.uniforms.uStrength.value = causticStrength * scale;
+        material.uniforms.uStrength.value = causticStrength * scale
+          * (mesh === standCaustic ? causticSurfaceStrength : 1);
         material.uniforms.uWave.value = surfaceActivity;
         material.uniforms.uTime.value = time;
       }
-      bed.visible = precipitate && settled > 0;
+      // AgCl's deposit is made by the same settling flocs, never a smooth cap.
+      bed.visible = kind === "barium-sulfate" && settled > 0;
       sedimentLevel.value = box.min.y + size.y * (curds ? settled * 0.155 : Math.sqrt(settled) * 0.10);
       sedimentDrift.value = radius * settled * 0.55;
       flakes.visible = curds && p > 0;
@@ -842,21 +1006,34 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         foam.visible ? foam.count : 0);
       for (let i = 0; i < activeCount; i++) {
         const angle = random(i + 1) * Math.PI * 2;
-        const radial = radius * 0.64 * Math.sqrt(random(i + 93));
-        const x = center.x + Math.cos(angle) * radial;
-        const z = center.z + Math.sin(angle) * radial;
-        const grain = radius * (curds ? (0.34 + random(i + 31) * 0.13) * (0.45 + settled * 0.55) : 0.06);
-        const floor = box.min.y + size.y * (curds ? 0.10 + random(i + 14) * (TUBE_VISUALS.curdLayerHeight - 0.13) : 0.07 + random(i + 14) * 0.025);
+        const radial = radius * 0.94 * Math.sqrt(random(i + 93));
+        const x = curds ? center.x + (2 * ((i * 0.61803398875) % 1) - 1) * radius * 0.90
+          : center.x + Math.cos(angle) * radial;
+        const z = curds ? center.z + (2 * random(i + 413) - 1)
+          * Math.sqrt(Math.max(0, radius * radius * 0.88 - (x - center.x) ** 2))
+          : center.z + Math.sin(angle) * radial;
+        const grain = radius * (curds ? (0.17 + random(i + 31) * 0.19)
+          * (0.55 + 0.45 * THREE.MathUtils.smoothstep(p, 0.02, 0.35)) : 0.06);
+        const floor = box.min.y + size.y * (curds ? 0.045 + random(i + 14) * 0.11
+          : 0.07 + random(i + 14) * 0.025);
         const drift = Math.sin(time * 0.75 + i * 2.4) * radius * 0.07 * (1 - settled);
         const ingress = curds ? THREE.MathUtils.smoothstep(p * 8, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
         if (flakes.visible) {
-          const settledX = x + drift - gravity.x * radius * settled * 0.6;
-          const settledZ = z - gravity.z * radius * settled * 0.6;
+          const individualSettled = curds ? THREE.MathUtils.smoothstep(p,
+            0.16 + random(i + 205) * 0.26, 0.57 + random(i + 371) * 0.28) : settled;
+          const settledX = x + drift - gravity.x * radius * individualSettled * 0.3;
+          const settledZ = z - gravity.z * radius * individualSettled * 0.3;
+          const arrival = transport?.concentratedTracerPoint(i + 17);
+          const birthX = arrival && arrival.concentration > 0
+            ? THREE.MathUtils.lerp(x, center.x + (arrival.x - 0.5) * radius * 1.3, 0.08) : x;
+          const birthY = box.min.y + size.y * (0.25 + random(i + 71) * 0.64);
+          const birthZ = z * 0.82 + center.z * 0.18;
           const radialSq = (settledX - center.x) ** 2 + (settledZ - center.z) ** 2;
           const bowlY = box.min.y + radius - Math.sqrt(Math.max(0, radius * radius - radialSq));
           const settledY = Math.max(floor, bowlY + grain * 0.3);
-          place(flakes, i, settledX, THREE.MathUtils.lerp(box.min.y + size.y * (0.12 + random(i + 71) * 0.78), settledY, settled), settledZ,
-            grain * onset * ingress, grain * onset * ingress * (curds ? 1.5 : 0.65), grain * onset * ingress);
+          place(flakes, i, THREE.MathUtils.lerp(birthX, settledX, individualSettled),
+            THREE.MathUtils.lerp(birthY, settledY, individualSettled), THREE.MathUtils.lerp(birthZ, settledZ, individualSettled),
+            grain * onset * ingress, grain * onset * ingress * (curds ? 1.15 : 0.65), grain * onset * ingress);
         }
         if (bubbles.visible && !producingBubbles && i < bubbles.count) {
           const { position, scale } = releasedBubbles[i];
@@ -976,15 +1153,18 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       disposed = true;
       volume.material = baseline;
       volume.geometry = originalGeometry;
+      detachImmersion.forEach(detach => detach());
+      immersion.dispose();
       group.removeFromParent();
       deferDispose(group, () => {
         geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();
         wallGeometry.dispose(); capGeometry.dispose(); headGeometry.dispose(); headMaterial.dispose(); dropletMaterial.dispose(); splashMaterial.dispose();
+        filmGeometry.dispose(); filmMaterial.dispose(); transport?.dispose();
         gasGeometry.dispose(); bedMaterial.dispose(); bottomCausticGeometry.dispose(); standCausticGeometry.dispose();
         bottomCausticMaterial.dispose(); standCausticMaterial.dispose();
         curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
-        for (const mesh of [flakes, bubbles, attachedBubbles, gas, splash, condensate, foam]) mesh.dispose();
+        for (const mesh of [flakes, bubbles, pourAir, attachedBubbles, gas, splash, condensate, foam]) mesh.dispose();
       });
     },
   };

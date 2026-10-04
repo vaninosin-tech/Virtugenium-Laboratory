@@ -125,6 +125,11 @@ export interface TestTubeContentsBinding {
   readonly granules: THREE.Group | null;
 }
 
+/** The authored ContentsVolume is the accepted resting fill for every nonempty tube. */
+export function testTubeLiquidFill(liquidCount: number): number {
+  return liquidCount > 0 ? 1 : 0;
+}
+
 /**
  * Fills a test tube's `ContentsVolume` mesh from everything currently in the
  * tube, reusing each reagent's own `ReagentContainerConfig` (the SAME config
