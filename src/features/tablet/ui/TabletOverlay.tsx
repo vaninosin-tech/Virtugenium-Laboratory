@@ -10,6 +10,7 @@ import {
 } from "../../../stores/laboratory/types";
 import { getExperimentById, totalScore } from "../lib/experimentRuntime";
 import { ResultsPanel } from "./ResultsPanel";
+import { TabletCloseContext } from "./tabletCloseContext";
 import { ScoreProgressBar } from "./ScoreProgressBar";
 import { TabletBezel } from "./TabletBezel";
 import { EquationTab } from "./tabs/EquationTab";
@@ -236,8 +237,9 @@ export function TabletOverlay({ chrome = true, shellClassName, onClose }: Tablet
     </div>
   );
 
-  if (!chrome) return screen;
-  return <TabletBezel className={shellClassName}>{screen}</TabletBezel>;
+  const content = <TabletCloseContext.Provider value={handleClose}>{screen}</TabletCloseContext.Provider>;
+  if (!chrome) return content;
+  return <TabletBezel className={shellClassName}>{content}</TabletBezel>;
 }
 
 const frameStyle: CSSProperties = {

@@ -9,7 +9,6 @@ import { Tablet } from "../../../features/tablet/ui/Tablet";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import { Cabinet } from "./Cabinet";
 import { CameraRig } from "./CameraRig";
-import { DevExperimentShortcut } from "./DevExperimentShortcut";
 import { DevMenuPanel } from "./DevMenuPanel";
 import { FumeHood } from "./FumeHood";
 import { FumeHoodWorkArea } from "./FumeHoodWorkArea";
@@ -46,7 +45,7 @@ import { BunsenStandWorkbenchDisplay, LoneSpiritLampOnWorkbench } from "./Bunsen
 import { WorkbenchInstance } from "./WorkbenchInstance";
 import { WorkbenchTestTubeRackInstance } from "./WorkbenchTestTubeRackInstance";
 import { SHOW_REAGENT_CONTAINER_PREVIEW } from "../lib/debugFlags";
-import { CABINETS, CAMERA_TARGETS, TABLE_TRAY_POSITION, TRAY_ROTATION_Y, type SceneTargetId } from "../lib/layout";
+import { CABINETS, CAMERA_TARGETS, TABLE_TRAY_POSITION, TRAY_ROTATION_Y } from "../lib/layout";
 import { REAGENTS, type ReagentContainerConfig, type ReagentId } from "../../../entities/laboratory/reagents";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
@@ -94,19 +93,6 @@ import { loadCabinetFonts } from "../lib/loadCabinetFonts";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { QUALITY_LEVELS, useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
-
-const TARGET_LABELS: Record<Exclude<SceneTargetId, "overview">, string> = {
-  table: "Рабочий стол",
-  "cabinet-acids": "Шкаф: Кислоты",
-  "cabinet-bases": "Шкаф: Основания",
-  "cabinet-oxides": "Шкаф: Оксиды",
-  "cabinet-salts": "Шкаф: Соли",
-  "cabinet-simple": "Шкаф: Простые вещества",
-  "cabinet-glassware": "Шкаф: Хим. посуда",
-  "cabinet-lab-equipment": "Шкаф: Лаб. оборудование",
-  "fume-hood": "Вытяжной шкаф",
-  "ppe-cabinet": "Шкаф: СИЗ",
-};
 
 /** Exponential-smoothing time constant for a workbench jar gliding to a new grid slot after the table's jar count changes — see `DraggableWorkbenchReagent`'s doc. */
 const GRID_REFLOW_TIME_CONSTANT_S = 0.18;
@@ -613,7 +599,6 @@ export function Laboratory() {
   };
 
   const showCrosshair = isPointerLocked && activeTargetId === "overview" && !crosshairHidden;
-  const showZonePanel = activeTargetId !== "overview";
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", touchAction: "none" }}>
@@ -713,7 +698,6 @@ export function Laboratory() {
         }}
       />
       <DevMenuPanel />
-      <DevExperimentShortcut />
       <PPEStatusOverlay />
       <HeatingControls />
       <StandActionPanel />
@@ -730,29 +714,9 @@ export function Laboratory() {
       {tubeCloseUp || handHeld ? null : <InspectionControls onBack={returnToOverview} />}
       <ReagentInspectionOverlay />
 
-      {showZonePanel ? (
-        <div style={zonePanelStyle}>
-          <span style={{ fontWeight: 600 }}>{TARGET_LABELS[activeTargetId as Exclude<SceneTargetId, "overview">]}</span>
-        </div>
-      ) : null}
     </div>
   );
 }
-
-const zonePanelStyle: CSSProperties = {
-  position: "absolute",
-  top: 20,
-  right: 20,
-  zIndex: 10,
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-  backgroundColor: "rgba(15, 23, 42, 0.85)",
-  padding: "10px 16px",
-  borderRadius: 10,
-  color: "#e2e8f0",
-  border: "1px solid rgba(56, 189, 248, 0.4)",
-};
 
 const crosshairStyle: CSSProperties = {
   position: "absolute",

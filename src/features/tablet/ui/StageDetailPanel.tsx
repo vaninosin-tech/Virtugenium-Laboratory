@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties } from "react";
+import { useContext, useRef, useState, type CSSProperties } from "react";
 import { AlertCircle, Check, FlaskConical, Microscope, Shield, TestTube } from "lucide-react";
 
 import type { Experiment, ExperimentStep } from "../../../entities/laboratory";
@@ -22,6 +22,7 @@ import { isSceneCompletedStep } from "../lib/stageSceneConfig";
 import { useStageSceneState } from "../lib/useStageSceneState";
 import { ComposerTextField, type ComposerFieldHandle } from "./ComposerTextField";
 import { SubstanceNameKeyboard } from "./SubstanceNameKeyboard";
+import { TabletCloseContext } from "./tabletCloseContext";
 import {
   colors,
   mutedTextStyle,
@@ -74,6 +75,7 @@ export function StageDetailPanel({
   const addInventoryItem = useLaboratoryStore((state) => state.addInventoryItem);
   const removeInventoryItem = useLaboratoryStore((state) => state.removeInventoryItem);
   const physical = usePhysicalCollectionState();
+  const backToLab = useContext(TabletCloseContext);
   const sceneState = useStageSceneState(step?.id ?? null);
 
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
@@ -135,6 +137,12 @@ export function StageDetailPanel({
     requiredItems && requiredItems.length > 0
       ? getRequiredItemsProgress(step.id, inventoryItemIds, physical)
       : null;
+
+  // A checklist gathered by hand in the lab (PPE, reagents, glassware), not yet complete.
+  const gatherInLab =
+    !!requiredProgress &&
+    requiredProgress.current < requiredProgress.total &&
+    (requiredItems ?? []).some((item) => isPhysicalOnlyRequiredItem(step.id, item.catalogItemId));
 
   const canSubmitStep = (() => {
     if (!isCurrent || isDone) return false;
@@ -311,14 +319,23 @@ export function StageDetailPanel({
           // Done in the lab, closed by the lab (`SceneStepAutoAdvance`).
           <span style={{ ...mutedTextStyle, margin: 0 }}>Этап засчитается сам, когда вы выполните его в лаборатории</span>
         ) : isCurrent ? (
-          <button
-            type="button"
-            style={ctaButtonStyle(canSubmitStep)}
-            onClick={handleComplete}
-            disabled={!canSubmitStep}
-          >
-            Выполнить шаг
-          </button>
+          <div style={actionRowStyle}>
+            {/* PPE and the «Необходимо» list are collected in the lab, not here:
+                back to it, until everything is in hand. */}
+            {gatherInLab && backToLab ? (
+              <button type="button" style={ctaButtonStyle(true)} onClick={backToLab}>
+                Приступить
+              </button>
+            ) : null}
+            <button
+              type="button"
+              style={ctaButtonStyle(canSubmitStep)}
+              onClick={handleComplete}
+              disabled={!canSubmitStep}
+            >
+              Выполнить шаг
+            </button>
+          </div>
         ) : (
           <span style={{ ...mutedTextStyle, margin: 0 }}>Сначала завершите текущий шаг</span>
         )}
@@ -427,6 +444,8 @@ const fieldLabelStyle: CSSProperties = {
   color: colors.textPrimary,
   whiteSpace: "nowrap",
 };
+
+const actionRowStyle: CSSProperties = { display: "flex", gap: 8 };
 
 const ctaButtonStyle = (ready: boolean): CSSProperties => ({
   ...splitDetailCtaButtonStyle,

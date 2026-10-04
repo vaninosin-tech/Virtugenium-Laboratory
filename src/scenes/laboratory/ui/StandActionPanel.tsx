@@ -25,7 +25,7 @@ export function StandActionPanel() {
 const leaveStyle: CSSProperties = {
   position: "absolute",
   right: 20,
-  top: 70,
+  top: 20,
   zIndex: 11,
   padding: "9px 14px",
   borderRadius: 10,
