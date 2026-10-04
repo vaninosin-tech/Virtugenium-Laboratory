@@ -6,8 +6,9 @@ import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laborat
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import { TUBE_CLAMP_PIVOT, useBunsenStandScene } from "../lib/bunsenStandAssembly";
 import { EQUIPMENT, type Position3 } from "../lib/layout";
-import { tryAddToTube, tryPourBetweenTubes } from "../lib/pourIntoTube";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { useBurnerStore } from "../lib/useBurnerStore";
+import { useStandHintStore } from "../lib/useStandHintStore";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { useStandStationStore } from "../lib/useStandStationStore";
@@ -16,7 +17,9 @@ import { computeTubeSlotLocalOffset, useTestTubeStorageStore } from "../lib/useT
 import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
-import { StandStation } from "./StandStation";
+import { SpiritBurner } from "./SpiritBurner";
+import { StandStation, lampLayout } from "./StandStation";
+import { standTargetEvents } from "./standTargetEvents";
 
 const DEF = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
 
@@ -56,6 +59,9 @@ const STAND_ROTATION_Y = -Math.PI / 2 + STAND_TURN_ASIDE;
 
 /** "Away from the player" (the hood's back wall, hood -Z) in the stand's own turned space. */
 const AWAY_FROM_PLAYER = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), -STAND_ROTATION_Y);
+
+/** Stand-local spot of a lamp in the hood without the stand — where `StandStation` would put it. */
+const LONE_LAMP_POSITION = lampLayout(AWAY_FROM_PLAYER).lamp;
 
 const reagentConfig = (id: string): ReagentContainerConfig | undefined =>
   (REAGENTS as Record<string, ReagentContainerConfig | undefined>)[id];
@@ -128,33 +134,17 @@ export function FumeHoodWorkArea() {
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
   const sandbox = useLaboratoryStore((state) => state.mode === "sandbox");
   const crackZone = useHeatingStore((state) => (state.phase === "cracked" ? state.crackZone : null));
+  const lampInHood = useBurnerStore((state) => state.place === "fumeHood");
 
   const clampedIndex = standInHood ? attachedTubeSlotIndex : null;
-  const hasContent = hoodTubes.length > 0 || hoodItems.length > 0 || standInHood;
+  const hasContent = hoodTubes.length > 0 || hoodItems.length > 0 || standInHood || lampInHood;
 
-  // Walking up to the stand: the camera comes in close and the stand's
-  // action panel (`StandActionPanel`) offers what can be done there.
+  // The stand itself only brings the camera in close, to watch the
+  // reaction. Everything done AT the stand is a click on the object it is
+  // done with — the rack's tubes, the bottles, the lamp, the clamped tube
+  // (VL-014, `standTableActions`).
   const handleStandClick = () => {
     if (!useHeatingStore.getState().active) useStandStationStore.getState().open();
-  };
-
-  // Clicking a bottle pours it into whatever is clamped in the stand. A
-  // click rather than a drag: the tube is fixed in the ring, so there is
-  // exactly one possible destination and nothing to aim at. The ORDER of
-  // these clicks is what the mixing-order rules read.
-  const pourIntoClampedTube = (reagentId: string) => {
-    if (clampedIndex === null || !hoodTubes[clampedIndex]) return;
-    tryAddToTube("fumeHood", clampedIndex, reagentId);
-  };
-
-  const canPourFrom = (index: number) =>
-    clampedIndex !== null && index !== clampedIndex && (hoodTubes[index]?.contents.length ?? 0) > 0;
-
-  // The ToR's own procedure: the acid is prepared in a second tube and
-  // poured onto the copper, not tipped straight out of the bottle.
-  const pourTubeIntoClamped = (index: number) => {
-    if (clampedIndex === null || !canPourFrom(index)) return;
-    tryPourBetweenTubes("fumeHood", index, clampedIndex);
   };
 
   if (!hasContent) return null;
@@ -169,19 +159,7 @@ export function FumeHoodWorkArea() {
             index === clampedIndex ? null : (
               <group
                 key={tube.instanceId}
-                onClick={(event: ThreeEvent<MouseEvent>) => {
-                  event.stopPropagation();
-                  pourTubeIntoClamped(index);
-                }}
-                onPointerOver={(event: ThreeEvent<PointerEvent>) => {
-                  event.stopPropagation();
-                  if (!canPourFrom(index)) return;
-                  document.body.style.cursor = "pointer";
-                }}
-                onPointerOut={(event: ThreeEvent<PointerEvent>) => {
-                  event.stopPropagation();
-                  document.body.style.cursor = "auto";
-                }}
+                {...standTargetEvents(tube.instanceId, { kind: "rack-tube", location: "fumeHood", index })}
               >
                 <LabTestTubeInstance
                   position={computeTubeSlotLocalOffset(index)}
@@ -197,6 +175,7 @@ export function FumeHoodWorkArea() {
         <group position={STAND_LOCAL} rotation={[0, STAND_ROTATION_Y, 0]}>
           <StandInFumeHood onActivate={handleStandClick} />
           <StandStation
+            location="fumeHood"
             away={AWAY_FROM_PLAYER}
             tube={clampedIndex === null ? undefined : hoodTubes[clampedIndex]}
             crackZone={crackZone}
@@ -204,31 +183,31 @@ export function FumeHoodWorkArea() {
         </group>
       )}
 
+      {/* Carried in without the stand: it stands where it will be beside it. */}
+      {lampInHood && !standInHood && (
+        <group position={STAND_LOCAL} rotation={[0, STAND_ROTATION_Y, 0]}>
+          <SpiritBurner position={LONE_LAMP_POSITION} />
+        </group>
+      )}
+
       {hoodItems.map((item, index) => {
         const reagent = reagentConfig(item.reagentId);
         if (!reagent) return null;
+        const target = { kind: "bottle", location: "fumeHood", reagentId: item.reagentId } as const;
+        const { onClick } = standTargetEvents(item.instanceId, target);
         return (
-          <group
-            key={item.instanceId}
-            onClick={(event: ThreeEvent<MouseEvent>) => {
-              event.stopPropagation();
-              pourIntoClampedTube(item.reagentId);
-            }}
-            onPointerOver={(event: ThreeEvent<PointerEvent>) => {
-              event.stopPropagation();
-              if (clampedIndex === null) return;
-              document.body.style.cursor = "pointer";
-            }}
-            onPointerOut={(event: ThreeEvent<PointerEvent>) => {
-              event.stopPropagation();
-              document.body.style.cursor = "auto";
-            }}
-          >
+          <group key={item.instanceId} onClick={onClick}>
             <ReagentStaticDisplay
               // Without `hoverable` the display renders no hitbox, and every
               // one of its own meshes has raycasting disabled — the click
-              // handler on the wrapping group above could never fire.
-              hoverable={clampedIndex !== null}
+              // handler on the wrapping group above could never fire. Always
+              // on: a bottle that can't be poured yet still says why.
+              hoverable
+              onHoverChange={(hovered) =>
+                hovered
+                  ? useStandHintStore.getState().show(item.instanceId, target)
+                  : useStandHintStore.getState().hide(item.instanceId)
+              }
               reagent={reagent}
               position={
                 sandbox

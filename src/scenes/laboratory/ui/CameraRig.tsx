@@ -26,6 +26,7 @@ import {
 import { useDevMenuStore, type DevMenuCategory } from "../lib/useDevMenuStore";
 import { useFumeHoodControlsStore } from "../lib/useFumeHoodControlsStore";
 import { useFurniturePositionStore, type FurnitureId } from "../lib/useFurniturePositionStore";
+import { useBurnerStore } from "../lib/useBurnerStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useHotspotObjectsStore } from "../lib/useHotspotObjectsStore";
@@ -757,6 +758,7 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
     useReagentStorageStore.getState().transferTrayToWorkbench();
     useTestTubeStorageStore.getState().transferTrayToWorkbench();
     useBunsenStandStorageStore.getState().transferToWorkbench();
+    useBurnerStore.getState().transferToWorkbench();
 
     tweenFromPosition.current.copy(camera.position);
     const forward = new THREE.Vector3();

@@ -68,7 +68,10 @@ globalThis.collect1 = async (page) => {
   await page.mouse.click(648, 340); await page.waitForTimeout(2500); await page.mouse.click(676, 340); await page.waitForTimeout(2500);
   await focus(page, "cabinet-lab-equipment"); await page.waitForTimeout(800);
   await page.mouse.click(743, 330); await page.waitForTimeout(3000);
+  await takeLamp(page);
 };
+// The spirit lamp is its own item on the equipment shelf (VL-014); the only lamp in the scene while it is there.
+globalThis.takeLamp = async (page) => { await clickObj(page, "LampBody"); await page.waitForTimeout(2000); };
 globalThis.back = async (page) => {
   await page.locator('button[aria-label="Назад"]').click();
   await page.waitForFunction(() => window.__sceneStore.getState().cabinetPhase === "room", null, { timeout: 30000 });
@@ -85,10 +88,36 @@ globalThis.toTable = async (page) => {
   await page.evaluate(() => window.__sceneStore.getState().setActiveTarget("table"));
   await page.waitForTimeout(2500);
 };
-globalThis.panel = async (page) => console.log("PANEL:", JSON.stringify(await page.evaluate(() => {
-  const el = document.querySelector('[data-testid="stand-panel"]'); return el ? [...el.querySelectorAll("button")].map((b) => (b.disabled ? "(x) " : "") + b.innerText) : null;
-})));
-globalThis.act = async (page, text) => { await page.locator('[data-testid="stand-panel"] button', { hasText: text }).first().click(); await page.waitForTimeout(900); };
+// The stand has no menu any more (VL-014): every action is a click on an object, decided by
+// `standTableActions`. `act` keeps the old menu wording and runs the same action a click would.
+// «Отойти» leaves the close-up via its button.
+globalThis.panel = async (page) => console.log("HINT:", await page.evaluate(() => document.querySelector('[data-testid="stand-hint"]')?.textContent ?? null));
+globalThis.act = async (page, text) => {
+  if (text.startsWith("Отойти")) {
+    const leave = page.locator('[data-testid="stand-leave"]');
+    if (await leave.count()) await leave.click();
+    await page.waitForTimeout(900);
+    return;
+  }
+  const done = await page.evaluate(async (text) => {
+    const { runStandAction } = await import("/src/scenes/laboratory/lib/standTableActions.ts");
+    const { standLocation } = await import("/src/scenes/laboratory/lib/standStationActions.ts");
+    const { REAGENTS } = await import("/src/entities/laboratory/reagents/index.ts");
+    const location = standLocation();
+    const plain = (formula) => formula.replace(/[₀-₉]/g, (d) => String("₀₁₂₃₄₅₆₇₈₉".indexOf(d)));
+    let m;
+    if ((m = text.match(/^(?:Закрепить|Перелить из) пробирк[уи] (\d+)/))) return runStandAction({ kind: "rack-tube", location, index: Number(m[1]) - 1 });
+    if ((m = text.match(/^(?:Насыпать|Прилить) (\S+)/))) {
+      const reagent = Object.values(REAGENTS).find((r) => plain(r.formula).startsWith(plain(m[1])));
+      return reagent ? runStandAction({ kind: "bottle", location, reagentId: reagent.id }) : false;
+    }
+    if (/^(Снять колпачок|Зажечь|Погасить)/.test(text)) return runStandAction({ kind: "burner" });
+    if (/^(Снять лапку и нагреть|Вынуть пробирку)/.test(text)) return runStandAction({ kind: "clamped-tube" });
+    return false;
+  }, text);
+  if (!done) throw new Error("act: no stand action for «" + text + "»");
+  await page.waitForTimeout(900);
+};
 globalThis.standAtTable = async (page) => {
   await page.mouse.move(560, 488); await page.mouse.down(); await page.mouse.up(); await page.waitForTimeout(2000);
 };

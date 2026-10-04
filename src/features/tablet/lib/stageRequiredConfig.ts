@@ -102,8 +102,10 @@ export type RequirementProgress = {
 export type PhysicalCollectionState = {
   readonly takenReagentIds?: readonly string[];
   readonly takenTestTubeCount?: number;
-  /** The stand has left the equipment cabinet — it brings its clamp and spirit lamp with it. */
+  /** The stand has left the equipment cabinet — it brings its clamp with it. */
   readonly standTaken?: boolean;
+  /** The spirit lamp has left the equipment cabinet — taken on its own (VL-014). */
+  readonly lampTaken?: boolean;
 };
 
 /**
@@ -118,7 +120,7 @@ const PHYSICAL_ONLY_STEPS: ReadonlySet<EntityId> = new Set(["step-1-ppe", "step-
 /**
  * Every item on these checklists counts only once the player has actually
  * done it in the 3D scene — worn the PPE, taken the reagent, the tubes, the
- * stand (which brings its clamp and spirit lamp). The tablet cannot tick them.
+ * stand (which brings its clamp), the spirit lamp. The tablet cannot tick them.
  */
 export function isPhysicalOnlyRequiredItem(stepId: EntityId, catalogItemId: EntityId): boolean {
   return PHYSICAL_ONLY_STEPS.has(stepId) && (STAGE_REQUIRED_ITEMS[stepId]?.some((item) => item.catalogItemId === catalogItemId) ?? false);
@@ -135,7 +137,8 @@ export function isStageRequiredItemCollected(
     const reagentId = REAGENT_STORE_ID[catalogItemId];
     if (reagentId) return physical.takenReagentIds?.includes(reagentId) ?? false;
     if (catalogItemId === "glassware-test-tube") return (physical.takenTestTubeCount ?? 0) >= (TUBES_NEEDED[stepId] ?? 1);
-    if (catalogItemId === "equipment-holder" || catalogItemId === "equipment-burner") return physical.standTaken ?? false;
+    if (catalogItemId === "equipment-holder") return physical.standTaken ?? false;
+    if (catalogItemId === "equipment-burner") return physical.lampTaken ?? false;
     // PPE still lives in the inventory; "physical-only" here means the
     // tablet may not tick it, not that it is tracked somewhere else.
     return inventoryItemIds.includes(catalogItemId);

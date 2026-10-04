@@ -1,5 +1,5 @@
 import { useGLTF } from "@react-three/drei";
-import { useFrame, type ThreeEvent } from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
 import * as THREE from "three";
 
@@ -12,12 +12,12 @@ import { TUBE_RING_INSERT_DEPTH, TUBE_RING_LOCAL_OFFSET } from "../lib/useBunsen
 import { useBurnerStore } from "../lib/useBurnerStore";
 import { bottomInFlame, crackSpotForZone, useHeatingStore } from "../lib/useHeatingStore";
 import { useLabNoticeStore } from "../lib/useLabNoticeStore";
-import { useStandStationStore } from "../lib/useStandStationStore";
 import { TUBE_FOCUS } from "../lib/useTubeCloseUpStore";
 import { ROOM_TEMPERATURE_CHEMISTRY, advanceChemistry, useTubeReactionStore } from "../lib/tubeReactions";
-import type { StoredTestTube } from "../lib/useTestTubeStorageStore";
+import type { StoredTestTube, TubeLocation } from "../lib/useTestTubeStorageStore";
 import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { FLAME_BASE_Y, FLAME_HEIGHT, SpiritBurner } from "./SpiritBurner";
+import { standTargetEvents } from "./standTargetEvents";
 
 /**
  * Everything that makes the stand a working station, wherever the stand is —
@@ -211,45 +211,39 @@ function HeldClampRig({
   );
 }
 
-const cursor = (value: string) => (event: ThreeEvent<PointerEvent>) => {
-  event.stopPropagation();
-  document.body.style.cursor = value;
-};
-
 /**
+ * @param location where the stand is; the lamp stands beside it only if it is there too
  * @param away horizontal direction away from the player, in the stand's space
  * @param tube the tube in the clamp, if any
  * @param crackZone where the glass cracked, while it is cracked
  */
 export function StandStation({
+  location,
   away,
   tube,
   crackZone,
 }: {
+  readonly location: TubeLocation;
   readonly away: THREE.Vector3;
   readonly tube: StoredTestTube | undefined;
   readonly crackZone: number | null;
 }) {
   const { lamp, hotSpot } = useMemo(() => lampLayout(away), [away]);
-  const openStation = useStandStationStore((state) => state.open);
+  // The lamp is its own item (VL-014): it may still be in the cabinet, or
+  // left behind on the table when the stand went into the hood.
+  const lampHere = useBurnerStore((state) => state.place === location);
 
   return (
     <>
-      <SpiritBurner position={lamp} />
+      {lampHere && <SpiritBurner position={lamp} />}
       <HeatingRuntime />
       <TubeReactionRuntime tube={tube} />
       <HeldClampRig away={away} hotSpot={hotSpot}>
         {tube && (
-          <group
-            onClick={(event: ThreeEvent<MouseEvent>) => {
-              // The tube stands in front of the stand's rod, so this must
-              // not fall through to the stand's own click.
-              event.stopPropagation();
-              if (!useHeatingStore.getState().active) openStation();
-            }}
-            onPointerOver={cursor("zoom-in")}
-            onPointerOut={cursor("auto")}
-          >
+          // The tube stands in front of the stand's rod: its handlers stop
+          // the event, so a click here never falls through to the stand's.
+          // Lamp lit — heat it; otherwise — back to the rack (VL-014).
+          <group {...standTargetEvents(`clamped:${tube.instanceId}`, { kind: "clamped-tube" })}>
             <LabTestTubeInstance
               contents={tube.contents}
               key={tube.instanceId}

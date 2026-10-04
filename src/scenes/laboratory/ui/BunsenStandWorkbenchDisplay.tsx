@@ -13,7 +13,8 @@ import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useWorkbenchReagentAreaStore } from "../lib/useWorkbenchReagentAreaStore";
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
-import { StandStation } from "./StandStation";
+import { SpiritBurner } from "./SpiritBurner";
+import { StandStation, lampLayout } from "./StandStation";
 
 /**
  * "Away from the player" at the table: the table viewpoint's own look
@@ -192,8 +193,33 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
       >
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      <StandStation away={AWAY_AT_TABLE} tube={clampedTube} crackZone={crackZone} />
+      <StandStation location="workbench" away={AWAY_AT_TABLE} tube={clampedTube} crackZone={crackZone} />
     </group>
   );
 }
 
+
+/** Table-local spot of a lamp on the table without the stand — where `StandStation` would put it. */
+const LONE_LAMP_OFFSET = lampLayout(AWAY_AT_TABLE).lamp;
+
+/**
+ * The spirit lamp on the table while the stand is not (still in the cabinet,
+ * or already in the hood). It stands where it will be beside the stand —
+ * the spot it moves to when the stand arrives — and works the same: cap,
+ * light, put out (`standTableActions`).
+ */
+export function LoneSpiritLampOnWorkbench({ tableWorldPosition }: { readonly tableWorldPosition: Position3 }) {
+  const tablePosition = useBunsenStandStorageStore((state) => state.tablePosition);
+  const counterSurfaceY = useWorkbenchReagentAreaStore((state) => state.config.originY);
+  return (
+    <group
+      position={[
+        tableWorldPosition[0] + tablePosition.x,
+        tableWorldPosition[1] + counterSurfaceY,
+        tableWorldPosition[2] + tablePosition.z,
+      ]}
+    >
+      <SpiritBurner position={LONE_LAMP_OFFSET} />
+    </group>
+  );
+}

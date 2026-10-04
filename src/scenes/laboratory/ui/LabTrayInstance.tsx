@@ -13,8 +13,10 @@ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { computeTubeSlotPosition, TRAY_RACK_ANCHOR, useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { computeTrayReagentPosition, useTrayReagentAreaStore } from "../lib/useTrayReagentAreaStore";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { useBurnerStore } from "../lib/useBurnerStore";
 import { REAGENTS, type ReagentId } from "../../../entities/laboratory/reagents";
 import { BunsenStandTrayDisplay } from "./BunsenStandTrayDisplay";
+import { SpiritLampTrayDisplay } from "./SpiritLampItem";
 import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
 import { TrayReturnZone } from "./TrayReturnZone";
@@ -183,6 +185,7 @@ export function LabTrayInstance({
   }, [mode]);
 
   const bunsenStandOnTray = useBunsenStandStorageStore((state) => state.onTray);
+  const lampOnTray = useBurnerStore((state) => state.place === "tray");
   const liveTrayReagentItems = useReagentStorageStore((state) => state.trayItems);
   const inspectedId = useReagentInspectionStore((state) => state.inspectedId);
   const liveTrayTestTubeItems = useTestTubeStorageStore((state) => state.trayTestTubes);
@@ -564,6 +567,7 @@ export function LabTrayInstance({
           reagent/test-tube stores above. Same `showContents` gate (hidden
           off-screen/mid-transition the same way those are). */}
       {showContents && bunsenStandOnTray && <BunsenStandTrayDisplay />}
+      {showContents && lampOnTray && <SpiritLampTrayDisplay />}
       {mode === "table" && <TrayReturnZone />}
     </group>
   );

@@ -36,7 +36,7 @@ await caption("Идём к вытяжке — панель «Перенести�
 await page.evaluate(() => window.__sceneStore.getState().setActiveTarget("overview")); await wait(1.5);
 await focus(page, "fume-hood"); await wait(3);
 await caption("Переносим штатив, вторую пробирку и кислоту");
-for (const t of ["Штатив со спиртовкой", "Пробирка 2", "HNO₃ разб."]) { await page.getByText(t).first().click(); await wait(0.6); }
+for (const t of ["Штатив", "Спиртовка", "Пробирка 2", "HNO₃ разб."]) { await page.getByText(t).first().click(); await wait(0.6); }
 await page.getByText("Перенести выбранное").click(); await wait(1.5);
 await page.evaluate(() => window.__laboratoryStore.getState().closeTablet()); await wait(2.5);
 await caption("Подходим к штативу в вытяжке");

@@ -1,4 +1,5 @@
 import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
+import { useBurnerStore } from "./useBurnerStore";
 import { useReagentStorageStore } from "./useReagentStorageStore";
 import { useTestTubeStorageStore } from "./useTestTubeStorageStore";
 
@@ -6,6 +7,8 @@ export interface FumeHoodTransferSelection {
   readonly reagentInstanceIds: readonly string[];
   readonly tubeInstanceIds: readonly string[];
   readonly includeStand: boolean;
+  /** The spirit lamp — its own item since VL-014, carried in on its own. */
+  readonly includeLamp?: boolean;
 }
 
 /**
@@ -49,6 +52,7 @@ export function transferSelectionToFumeHood(selection: FumeHoodTransferSelection
     useBunsenStandStorageStore.getState().transferStandToFumeHood();
     useBunsenStandStorageStore.getState().remapAttachedTube(remappedIndex);
   }
+  if (selection.includeLamp) useBurnerStore.getState().transferToFumeHood();
 }
 
 export interface FumeHoodContents {

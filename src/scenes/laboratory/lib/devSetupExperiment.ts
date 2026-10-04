@@ -92,6 +92,7 @@ export function devSetupExperimentOne(): void {
     attachedTubeSlotIndex: 0,
   });
 
+  useBurnerStore.setState({ place: "fumeHood", returnRequest: null });
   useBurnerStore.getState().setLit(true);
   useHeatingStore.getState().reset();
 

@@ -17,7 +17,9 @@ import {
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
-import { consumePickablePressed, sharedMouseNdc, toggleTubePick, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
+import { clickWorkbenchRackTube } from "../lib/standTableActions";
+import { useStandHintStore } from "../lib/useStandHintStore";
+import { consumePickablePressed, sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { useTestTubeHoverStore } from "../lib/useTestTubeHoverStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useWorkbenchReagentDragStore } from "../lib/useWorkbenchReagentDragStore";
@@ -534,14 +536,14 @@ export function InspectableTestTubeSlot({
           `HITBOX_HALF_WIDTH`/`HITBOX_HALF_DEPTH`'s doc. */}
       <mesh
         geometry={hoverHitboxGeometry}
-        // Same `toggleTubePick` the 2D button in `ReagentInspectionOverlay`
+        // Same `clickWorkbenchRackTube` the 2D button in `ReagentInspectionOverlay`
         // uses вЂ” clicking the tube directly, right here in the inspecting
         // view, is a second entry point to the exact same pick-up behavior.
         onClick={
           canHover
             ? (event: ThreeEvent<MouseEvent>) => {
                 event.stopPropagation();
-                toggleTubePick(instanceId);
+                clickWorkbenchRackTube(index, instanceId);
               }
             : undefined
         }
@@ -564,6 +566,7 @@ export function InspectableTestTubeSlot({
             ? (event: ThreeEvent<PointerEvent>) => {
                 event.stopPropagation();
                 useTestTubeHoverStore.getState().setHovered(instanceId);
+                useStandHintStore.getState().show(instanceId, { kind: "rack-tube", location: "workbench", index });
               }
             : undefined
         }
@@ -572,6 +575,7 @@ export function InspectableTestTubeSlot({
             ? (event: ThreeEvent<PointerEvent>) => {
                 event.stopPropagation();
                 useTestTubeHoverStore.getState().clearIfHovered(instanceId);
+                useStandHintStore.getState().hide(instanceId);
               }
             : undefined
         }

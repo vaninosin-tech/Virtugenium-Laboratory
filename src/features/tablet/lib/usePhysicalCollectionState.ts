@@ -1,4 +1,5 @@
 import { useBunsenStandStorageStore } from "../../../scenes/laboratory/lib/useBunsenStandStorageStore";
+import { useBurnerStore } from "../../../scenes/laboratory/lib/useBurnerStore";
 import { useReagentStorageStore } from "../../../scenes/laboratory/lib/useReagentStorageStore";
 import { useTestTubeStorageStore } from "../../../scenes/laboratory/lib/useTestTubeStorageStore";
 import type { PhysicalCollectionState } from "./stageRequiredConfig";
@@ -18,11 +19,13 @@ export function usePhysicalCollectionState(): PhysicalCollectionState {
   const fumeHoodItems = useReagentStorageStore((state) => state.fumeHoodItems);
   const fumeHoodTestTubes = useTestTubeStorageStore((state) => state.fumeHoodTestTubes);
   const standTaken = useBunsenStandStorageStore((state) => state.onTray || state.onWorkbench || state.onFumeHood);
+  const lampTaken = useBurnerStore((state) => state.place !== "shelf");
 
   // The fume hood counts too: carrying things on into it must not un-collect them.
   return {
     takenReagentIds: [...trayItems, ...workbenchItems, ...fumeHoodItems].map((item) => item.reagentId),
     takenTestTubeCount: trayTestTubes.length + workbenchTestTubes.length + fumeHoodTestTubes.length,
     standTaken,
+    lampTaken,
   };
 }

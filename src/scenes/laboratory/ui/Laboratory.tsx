@@ -19,7 +19,11 @@ import { LabAudioRuntime } from "./LabAudioRuntime";
 import { LabNoticeOverlay } from "./LabNoticeOverlay";
 import { StandActionPanel } from "./StandActionPanel";
 import { useHeatingStore } from "../lib/useHeatingStore";
+import { useBurnerStore } from "../lib/useBurnerStore";
 import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
+import { runStandAction } from "../lib/standTableActions";
+import { useStandHintStore } from "../lib/useStandHintStore";
+import { StandActionHint } from "./StandActionHint";
 import { SceneStepAutoAdvance } from "../../../features/tablet/lib/SceneStepAutoAdvance";
 import { SandboxPanel } from "../sandbox/SandboxPanel";
 import { setupSandbox, teardownSandbox } from "../sandbox/setupSandbox";
@@ -33,7 +37,7 @@ import { PPEStatusOverlay } from "./PPEStatusOverlay";
 import { ReagentContainerPreviewRow } from "./ReagentContainerPreviewRow";
 import { ReagentInspectionOverlay } from "./ReagentInspectionOverlay";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
-import { BunsenStandWorkbenchDisplay } from "./BunsenStandWorkbenchDisplay";
+import { BunsenStandWorkbenchDisplay, LoneSpiritLampOnWorkbench } from "./BunsenStandWorkbenchDisplay";
 import { WorkbenchInstance } from "./WorkbenchInstance";
 import { WorkbenchTestTubeRackInstance } from "./WorkbenchTestTubeRackInstance";
 import { SHOW_REAGENT_CONTAINER_PREVIEW } from "../lib/debugFlags";
@@ -103,6 +107,8 @@ const TARGET_LABELS: Record<Exclude<SceneTargetId, "overview">, string> = {
 const GRID_REFLOW_TIME_CONSTANT_S = 0.18;
 /** Fixed duration of a swap-into-place tween (semicircular position arc, no rotation) — see `DraggableWorkbenchReagent`'s handling of `useWorkbenchReagentDragStore`'s `swaps`. A deterministic tween (not the exponential `GRID_REFLOW_TIME_CONSTANT_S` glide above), so both jars visibly complete their trade and land exactly on their new slots at the same moment. */
 const SWAP_DURATION_S = 0.45;
+/** A press on a workbench jar that travels less than this many pixels is a click (pour at the stand), not a drag. */
+const JAR_CLICK_SLOP_PX = 5;
 /** Bulge-radius scale for the `reverseSpin` jar in a swap tween — must be anything other than `1` so its arc traces a different circle than the other jar's (see the swap-tween comment in `DraggableWorkbenchReagent` for why that's what keeps the two collision-free). */
 const REVERSE_SPIN_BULGE_SCALE = 0.6;
 
@@ -289,6 +295,16 @@ function DraggableWorkbenchReagent({
     useWorkbenchReagentDragStore
       .getState()
       .requestGrab(instanceId, event.clientX, event.clientY);
+    // The same press may turn out to be a click: then the jar pours into
+    // the tube in the stand's clamp (VL-014) and the drag that began just
+    // snaps it back home, as any short drag does.
+    const { clientX, clientY } = event;
+    const handleUp = (up: PointerEvent) => {
+      window.removeEventListener("pointerup", handleUp);
+      if (Math.hypot(up.clientX - clientX, up.clientY - clientY) > JAR_CLICK_SLOP_PX) return;
+      runStandAction({ kind: "bottle", location: "workbench", reagentId: reagent.id });
+    };
+    window.addEventListener("pointerup", handleUp);
   };
 
   return (
@@ -304,6 +320,11 @@ function DraggableWorkbenchReagent({
         hoverable={!prewarm}
         highlighted={!prewarm && (isDragging || isSwapTarget)}
         onPointerDown={prewarm ? undefined : handlePointerDown}
+        onHoverChange={(hovered) =>
+          hovered
+            ? useStandHintStore.getState().show(instanceId, { kind: "bottle", location: "workbench", reagentId: reagent.id })
+            : useStandHintStore.getState().hide(instanceId)
+        }
         interactionRef={prewarm ? undefined : pickTargetRef}
       />
       {/* `hoverable` creates the display's shared invisible hitbox without
@@ -484,6 +505,7 @@ export function Laboratory() {
   const requestCabinetReturn = useSceneInteractionStore((state) => state.requestCabinetReturn);
   const tablePosition = useFurniturePositionStore((state) => state.getOverride("table").position);
   const bunsenStandOnWorkbench = useBunsenStandStorageStore((state) => state.onWorkbench);
+  const lampOnWorkbench = useBurnerStore((state) => state.place === "workbench");
   const tubeViewing = useTubeCloseUpStore((state) => state.viewing);
   const heatingActive = useHeatingStore((state) => state.active);
   const tubeCloseUp = tubeViewing || heatingActive;
@@ -603,6 +625,7 @@ export function Laboratory() {
           <WorkbenchReagentDisplayArea />
           <WorkbenchReagentAreaAnchor />
           {bunsenStandOnWorkbench && <BunsenStandWorkbenchDisplay tableWorldPosition={tablePosition} />}
+          {lampOnWorkbench && !bunsenStandOnWorkbench && <LoneSpiritLampOnWorkbench tableWorldPosition={tablePosition} />}
         <LabTrayInstance mode="table" position={TABLE_TRAY_POSITION} rotationY={TRAY_ROTATION_Y} />
         <LabTrayInstance mode="held" position={TABLE_TRAY_POSITION} rotationY={TRAY_ROTATION_Y} />
           {CABINETS.map((cabinet) => (
@@ -661,6 +684,7 @@ export function Laboratory() {
       <PPEStatusOverlay />
       <HeatingControls />
       <StandActionPanel />
+      <StandActionHint />
       <LabNoticeOverlay />
       <SandboxPanel />
       <SceneStepAutoAdvance />

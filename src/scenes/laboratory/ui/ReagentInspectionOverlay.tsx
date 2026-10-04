@@ -4,7 +4,9 @@ import { REAGENTS } from "../../../entities/laboratory/reagents";
 import { useNavButtonCalibrationStore, type InspectionButtonConfig } from "../lib/useNavButtonCalibrationStore";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { TRAY_CAPACITY, useReagentStorageStore } from "../lib/useReagentStorageStore";
-import { toggleTubePick, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
+import { clickWorkbenchRackTube } from "../lib/standTableActions";
+import { useStandHintStore } from "../lib/useStandHintStore";
+import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { useTestTubeHoverStore } from "../lib/useTestTubeHoverStore";
 import { TEST_TUBE_TRAY_CAPACITY, tubeSlotRowCol, useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 
@@ -208,15 +210,27 @@ function TubeContentsButton({ index, filled }: { readonly index: number; readonl
         ...(hovered ? tubeButtonHoveredStyle : undefined),
         ...(held ? tubeButtonHeldStyle : undefined),
       }}
-      // Same `toggleTubePick` a direct click on the tube itself uses in the
+      // Same `clickWorkbenchRackTube` a direct click on the tube itself uses in the
       // 3D view (`InspectableTestTubeSlot`) — this button and that click are
       // two entry points to the identical behavior.
-      onClick={filled ? () => toggleTubePick(instanceId) : undefined}
+      onClick={filled ? () => clickWorkbenchRackTube(index, instanceId) : undefined}
+      // Its caption comes from `StandActionHint`, which otherwise shows only over the 3D scene.
+      data-stand-hint
       onPointerEnter={
-        filled ? () => useTestTubeHoverStore.getState().setHovered(instanceId) : undefined
+        filled
+          ? () => {
+              useTestTubeHoverStore.getState().setHovered(instanceId);
+              useStandHintStore.getState().show(instanceId, { kind: "rack-tube", location: "workbench", index });
+            }
+          : undefined
       }
       onPointerLeave={
-        filled ? () => useTestTubeHoverStore.getState().clearIfHovered(instanceId) : undefined
+        filled
+          ? () => {
+              useTestTubeHoverStore.getState().clearIfHovered(instanceId);
+              useStandHintStore.getState().hide(instanceId);
+            }
+          : undefined
       }
     >
       <span style={tubeButtonLabelStyle}>{label}</span>

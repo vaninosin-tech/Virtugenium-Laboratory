@@ -43,17 +43,18 @@ describe("PPE is worn in the cabinet, not ticked in the tablet", () => {
     ).toBe(true);
   });
 
-  it("counts the stand and spirit lamp only once the stand is taken", () => {
+  it("counts the stand and the spirit lamp each only once that item itself is taken (VL-014)", () => {
     expect(isStageRequiredItemCollected(STEP, "equipment-burner", ["equipment-burner"], {})).toBe(false);
     expect(isStageRequiredItemCollected(STEP, "equipment-holder", [], { standTaken: true })).toBe(true);
-    expect(isStageRequiredItemCollected(STEP, "equipment-burner", [], { standTaken: true })).toBe(true);
+    expect(isStageRequiredItemCollected(STEP, "equipment-burner", [], { standTaken: true })).toBe(false);
+    expect(isStageRequiredItemCollected(STEP, "equipment-burner", [], { lampTaken: true })).toBe(true);
   });
 
   it("counts a fully equipped bench as 8 of 8", () => {
     const progress = getRequiredItemsProgress(
       STEP,
       ["safety-coat", "safety-goggles", "safety-gloves", "equipment-holder", "equipment-burner"],
-      { takenReagentIds: ["cu", "hno3"], takenTestTubeCount: 2, standTaken: true },
+      { takenReagentIds: ["cu", "hno3"], takenTestTubeCount: 2, standTaken: true, lampTaken: true },
     );
     expect(progress).toEqual({ current: 8, total: 8 });
   });

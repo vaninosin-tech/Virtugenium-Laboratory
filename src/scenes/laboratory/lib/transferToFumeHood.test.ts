@@ -128,3 +128,16 @@ describe("transferSelectionToFumeHood", () => {
     expect(useBunsenStandStorageStore.getState().attachedTubeSlotIndex).toBeNull();
   });
 });
+
+describe("the spirit lamp (VL-014)", () => {
+  it("is carried in on its own, capped, and only when chosen", async () => {
+    const { useBurnerStore } = await import("./useBurnerStore");
+    useBurnerStore.setState({ place: "workbench", phase: "lit", lit: true });
+
+    transferSelectionToFumeHood({ reagentInstanceIds: [], tubeInstanceIds: [], includeStand: true });
+    expect(useBurnerStore.getState().place).toBe("workbench");
+
+    transferSelectionToFumeHood({ reagentInstanceIds: [], tubeInstanceIds: [], includeStand: false, includeLamp: true });
+    expect(useBurnerStore.getState()).toMatchObject({ place: "fumeHood", lit: false, phase: "capped" });
+  });
+});

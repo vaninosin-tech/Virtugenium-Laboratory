@@ -16,6 +16,9 @@ html {
 body {
   position: fixed;
   inset: 0;
+  /* Every overlay without its own font (zone label, heating panel, notices)
+     fell back to the browser's serif default. Loaded by tabletFonts.css. */
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
 }
 
 canvas {

@@ -1,11 +1,13 @@
 import { useGLTF } from "@react-three/drei";
-import { useFrame, type ThreeEvent } from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
 import { useBurnerStore } from "../lib/useBurnerStore";
+import { standTargetEvents } from "./standTargetEvents";
 
-const MODEL_PATH = "/assets/models/SpiritLamp.glb";
+export const SPIRIT_LAMP_MODEL_PATH = "/assets/models/SpiritLamp.glb";
+const MODEL_PATH = SPIRIT_LAMP_MODEL_PATH;
 
 /**
  * Spirit lamp (спиртовка) — `SpiritLamp.glb`, measurements and behaviour from
@@ -34,7 +36,7 @@ const FLAME_CORE_COLOR = "#4f73ff";
  * a whole transmission render pass per frame. Same trade the reagent jars
  * make (`reagentMaterials.ts`): plain alpha-blended glass instead.
  */
-function prepareLampMaterials(root: THREE.Object3D): THREE.Material[] {
+export function prepareLampMaterials(root: THREE.Object3D): THREE.Material[] {
   const owned: THREE.Material[] = [];
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
@@ -134,7 +136,6 @@ export function SpiritBurner({
   readonly position?: readonly [number, number, number];
 }) {
   const { scene } = useGLTF(MODEL_PATH);
-  const advance = useBurnerStore((state) => state.advance);
 
   const { instance, cap, capSeat, materials } = useMemo(() => {
     const clone = scene.clone(true);
@@ -189,18 +190,8 @@ export function SpiritBurner({
   return (
     <group
       position={position as unknown as [number, number, number]}
-      onClick={(event: ThreeEvent<MouseEvent>) => {
-        event.stopPropagation();
-        advance();
-      }}
-      onPointerOver={(event: ThreeEvent<PointerEvent>) => {
-        event.stopPropagation();
-        document.body.style.cursor = "pointer";
-      }}
-      onPointerOut={(event: ThreeEvent<PointerEvent>) => {
-        event.stopPropagation();
-        document.body.style.cursor = "auto";
-      }}
+      // Click and caption both come from `standTableActions` (VL-014).
+      {...standTargetEvents("spirit-burner", { kind: "burner" })}
     >
       <primitive object={instance} />
       <Flame strength={flameStrength} />

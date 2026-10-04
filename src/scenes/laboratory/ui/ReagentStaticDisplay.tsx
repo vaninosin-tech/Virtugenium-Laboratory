@@ -65,6 +65,7 @@ export function ReagentStaticDisplay({
   hoverable = false,
   highlighted = false,
   onPointerDown,
+  onHoverChange,
   interactionRef,
 }: {
   readonly reagent: ReagentContainerConfig;
@@ -88,6 +89,8 @@ export function ReagentStaticDisplay({
   readonly highlighted?: boolean;
   /** Optional direct press handler attached to the single interactive hitbox. */
   readonly onPointerDown?: (event: ThreeEvent<PointerEvent>) => void;
+  /** Told when the cursor enters/leaves the hitbox — hover stops here, so a wrapping group can't hear it itself. */
+  readonly onHoverChange?: (hovered: boolean) => void;
   /**
    * Exposes only the lightweight hitbox to callers that perform their own
    * raycasts. The full rendered hierarchy is deliberately not used as a
@@ -240,12 +243,14 @@ export function ReagentStaticDisplay({
     event.stopPropagation();
     document.body.style.cursor = "pointer";
     setHovered(true);
+    onHoverChange?.(true);
   };
 
   const handlePointerOut = () => {
     if (!interactive) return;
     document.body.style.cursor = "auto";
     setHovered(false);
+    onHoverChange?.(false);
   };
 
   // If an inspection starts WHILE this item is already hovered (player was
@@ -255,6 +260,7 @@ export function ReagentStaticDisplay({
     if (anyInspected && hovered) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- one-off reset on an external change, not a render loop
       setHovered(false);
+      onHoverChange?.(false);
       document.body.style.cursor = "auto";
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

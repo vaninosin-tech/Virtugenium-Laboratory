@@ -8,7 +8,7 @@ import tseslint from "typescript-eslint";
 const e2eHelpers = Object.fromEntries(
   ["accept1", "acceptExp", "act", "back", "clickObj", "collect1", "collectTubeStand", "doStep", "equation", "focus",
     "heatByDragging", "names", "panel", "ppe", "SALT", "screenOf", "setup1", "signs", "standAtTable", "startClassic",
-    "take", "toTable", "typeField", "typeInto"]
+    "take", "takeLamp", "toTable", "typeField", "typeInto"]
     .map((name) => [name, "readonly"]),
 );
 

@@ -1,9 +1,10 @@
 import { useState, type CSSProperties } from "react";
-import { Check, FlaskConical, Microscope, TestTube } from "lucide-react";
+import { Check, Flame, FlaskConical, Microscope, TestTube } from "lucide-react";
 
 import { REAGENTS, type ReagentContainerConfig } from "../../../../entities/laboratory/reagents";
 import { transferSelectionToFumeHood } from "../../../../scenes/laboratory/lib/transferToFumeHood";
 import { useBunsenStandStorageStore } from "../../../../scenes/laboratory/lib/useBunsenStandStorageStore";
+import { useBurnerStore } from "../../../../scenes/laboratory/lib/useBurnerStore";
 import { useReagentStorageStore } from "../../../../scenes/laboratory/lib/useReagentStorageStore";
 import { useTestTubeStorageStore } from "../../../../scenes/laboratory/lib/useTestTubeStorageStore";
 import { colors, mutedTextStyle, splitDetailCtaButtonStyle, typography } from "../tabletStyles";
@@ -36,10 +37,12 @@ export function TransferTab() {
   const standOnWorkbench = useBunsenStandStorageStore((state) => state.onWorkbench);
   const standOnFumeHood = useBunsenStandStorageStore((state) => state.onFumeHood);
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
+  const lampPlace = useBurnerStore((state) => state.place);
 
   const [selectedReagents, setSelectedReagents] = useState<readonly string[]>([]);
   const [selectedTubes, setSelectedTubes] = useState<readonly string[]>([]);
   const [standSelected, setStandSelected] = useState(false);
+  const [lampSelected, setLampSelected] = useState(false);
 
   const clampedTube =
     attachedTubeSlotIndex !== null ? workbenchTubes[attachedTubeSlotIndex] : undefined;
@@ -55,7 +58,7 @@ export function TransferTab() {
   };
 
   const selectionCount =
-    selectedReagents.length + selectedTubes.length + (standSelected ? 1 : 0);
+    selectedReagents.length + selectedTubes.length + (standSelected ? 1 : 0) + (lampSelected ? 1 : 0);
 
   const handleTransfer = () => {
     if (selectionCount === 0) return;
@@ -63,17 +66,20 @@ export function TransferTab() {
       reagentInstanceIds: selectedReagents,
       tubeInstanceIds: selectedTubes,
       includeStand: standSelected,
+      includeLamp: lampSelected,
     });
     setSelectedReagents([]);
     setSelectedTubes([]);
     setStandSelected(false);
+    setLampSelected(false);
   };
 
   const nothingOnBench =
-    workbenchItems.length === 0 && loudTubes.length === 0 && !standOnWorkbench;
+    workbenchItems.length === 0 && loudTubes.length === 0 && !standOnWorkbench && lampPlace !== "workbench";
 
   const hoodEntries = [
-    ...(standOnFumeHood ? ["Штатив со спиртовкой"] : []),
+    ...(standOnFumeHood ? ["Штатив"] : []),
+    ...(lampPlace === "fumeHood" ? ["Спиртовка"] : []),
     ...fumeHoodTubes.map((tube, index) => tubeLabel(tube.contents, index + 1)),
     ...fumeHoodItems.map((item) => reagentLabel(item.reagentId)),
   ];
@@ -94,11 +100,20 @@ export function TransferTab() {
                   icon={<Microscope size={16} aria-hidden />}
                   label={
                     clampedTube
-                      ? `Штатив со спиртовкой (с пробиркой: ${clampedTube.contents.map((id) => reagentConfig(id)?.formula ?? id).join(" + ") || "пустая"})`
-                      : "Штатив со спиртовкой"
+                      ? `Штатив (с пробиркой: ${clampedTube.contents.map((id) => reagentConfig(id)?.formula ?? id).join(" + ") || "пустая"})`
+                      : "Штатив"
                   }
                   selected={standSelected}
                   onToggle={() => setStandSelected(!standSelected)}
+                />
+              ) : null}
+
+              {lampPlace === "workbench" ? (
+                <SelectRow
+                  icon={<Flame size={16} aria-hidden />}
+                  label="Спиртовка"
+                  selected={lampSelected}
+                  onToggle={() => setLampSelected(!lampSelected)}
                 />
               ) : null}
 

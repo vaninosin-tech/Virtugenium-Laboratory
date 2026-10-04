@@ -16,6 +16,7 @@ import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { Select } from "@react-three/postprocessing";
 import { BunsenStandInstance } from "./BunsenStandInstance";
+import { SpiritLampShelfInstance } from "./SpiritLampItem";
 import { HoverFresnelRim } from "./HoverFresnelRim";
 import { LabTestTubeCabinetInstance } from "./LabTestTubeCabinetInstance";
 import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
@@ -81,6 +82,9 @@ const REAGENT_SHELF_Y: readonly number[] = SHELF_TOP_Y_HIGHEST_FIRST.map((y) => 
 
 /** Shelf depth center (midpoint of Shelf's own Z −0.08..0.19 bbox) — same for every slot. */
 const REAGENT_ANCHOR_Z = 0.054999999701976776;
+
+/** The spirit lamp on the equipment shelf: 0.23 m to the side of the stand's centre — clear of its 0.12 m base, on the side its clamp arm does not reach. */
+const SPIRIT_LAMP_SHELF_POSITION: Position3 = [(SHELF_MIN_X + SHELF_MAX_X) / 2 + 0.23, REAGENT_SHELF_Y[0], REAGENT_ANCHOR_Z];
 
 const REAGENT_ANCHOR_POSITIONS: readonly Position3[] = REAGENT_SHELF_Y.flatMap((y) =>
   REAGENT_COLUMN_X.map((x): Position3 => [x, y, REAGENT_ANCHOR_Z]),
@@ -390,11 +394,15 @@ export function ReagentCabinetInstance({ cabinet }: { readonly cabinet: CabinetD
         </group>
       )}
       {isLabEquipmentCabinet && (
-        <BunsenStandInstance
-          cabinetId={cabinet.id}
-          position={[(SHELF_MIN_X + SHELF_MAX_X) / 2, REAGENT_SHELF_Y[0], REAGENT_ANCHOR_Z]}
-          rotationY={Math.PI}
-        />
+        <>
+          <BunsenStandInstance
+            cabinetId={cabinet.id}
+            position={[(SHELF_MIN_X + SHELF_MAX_X) / 2, REAGENT_SHELF_Y[0], REAGENT_ANCHOR_Z]}
+            rotationY={Math.PI}
+          />
+          {/* Beside the stand, on the side away from its clamp arm (turned to −X by the half turn). */}
+          <SpiritLampShelfInstance cabinetId={cabinet.id} position={SPIRIT_LAMP_SHELF_POSITION} rotationY={Math.PI} />
+        </>
       )}
     </group>
   );

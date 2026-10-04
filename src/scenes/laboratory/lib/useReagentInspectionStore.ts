@@ -80,6 +80,6 @@ export const useReagentInspectionStore = create<ReagentInspectionState>((set) =>
   finishTake: () => set({ inspectedId: null, isTaking: false, canShake: false, isShaking: false, isShakeLocked: false }),
 }));
 
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && typeof window !== "undefined") {
   (window as unknown as { __inspectionStore?: unknown }).__inspectionStore = useReagentInspectionStore;
 }

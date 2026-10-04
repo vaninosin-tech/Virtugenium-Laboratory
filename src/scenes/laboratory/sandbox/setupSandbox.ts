@@ -73,6 +73,7 @@ export function setupSandbox(): void {
     attachedTubeSlotIndex: 0,
   });
 
+  useBurnerStore.setState({ place: "fumeHood", returnRequest: null });
   useBurnerStore.getState().setLit(true);
   useHeatingStore.getState().reset();
   useTubeReactionStore.getState().reset();
@@ -88,6 +89,7 @@ export function teardownSandbox(): void {
   useTestTubeStorageStore.setState({ fumeHoodTestTubes: [] });
   useReagentStorageStore.setState({ fumeHoodItems: [] });
   useBunsenStandStorageStore.setState({ onFumeHood: false, attachedTubeSlotIndex: null });
+  useBurnerStore.setState({ place: "shelf", returnRequest: null });
   useBurnerStore.getState().setLit(false);
   useHeatingStore.getState().reset();
   useTubeReactionStore.getState().reset();
