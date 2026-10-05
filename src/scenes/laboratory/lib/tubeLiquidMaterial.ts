@@ -113,7 +113,10 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
 } else if (uReactionKind > 2.5 && uReactionKind < 3.5) {
   // Fine BaSO4 stays evenly milky longer; its clearing front descends slowly.
   float clearing = smoothstep(0.42, 0.98, p);
-  float clearFront = smoothstep(1.0 - clearing - 0.055, 1.0 - clearing + 0.055, h);
+  float liquidH = clamp((dot(uUp, vTubePoint) - uBoundsMin.y)
+    / max(0.001, uLevel - uBoundsMin.y), 0.0, 1.0);
+  float front = mix(1.06, -0.06, clearing);
+  float clearFront = smoothstep(front - 0.055, front + 0.055, liquidH);
   cloud *= 1.0 - clearFront;
   cloud *= 0.97 + 0.06 * n;
 } else if (uReactionKind > 3.5) {
@@ -163,7 +166,10 @@ if (uReactionKind > 1.5 && uReactionKind < 2.5 && uTransportActive > 0.01)
 if (uReactionKind > 1.5 && uReactionKind < 2.5)
   cloud *= 0.84 + 0.16 * smoothstep(0.05, 0.40, h);
 if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTransportActive > 0.01)
-  cloud *= smoothstep(0.015, 0.65, transportedMatter.g);
+  // The inlet only shapes the first plume. Fine precipitate disperses through
+  // the entire column before the transport field itself has faded away.
+  cloud *= mix(0.12 + 0.88 * smoothstep(0.015, 0.65, transportedMatter.g),
+    1.0, smoothstep(0.35, 1.9, uTransportAge));
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 tubeColor = mix(uBaseColor, uReactionColor, localMix);
 if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), vec3(0.25, 0.002, 0.075),
@@ -192,7 +198,7 @@ float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
   * 0.45;
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
   + (uReactionKind > 0.5 && uReactionKind < 1.5 ? 0.40 : 0.0))
-  + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 0.72, milk))
+  + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 1.70, milk))
   + raspberry * 0.88 + dyeHalo * 0.06 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
@@ -201,6 +207,10 @@ float edgeSoft = vCap > 0.5 ? max(0.42, clamp(abs(vTubeWaveSlope) * 8.0, 0.0, 1.
 // The soft fade below the surface only hides a hard line in clear water; a
 // coloured or cloudy body keeps its colour right up to the meniscus.
 diffuseColor.a *= vCap > 0.5 ? edgeSoft : mix(edgeSoft, 1.0, clamp(max(pigment, cloud), 0.0, 1.0));
+// Dense suspension scatters up to the surface. Coloured transparent liquid
+// gets its transmitted colour in the backdrop pass, not from an opaque lid.
+float surfaceTint = vCap * clamp(max(pigment, cloud), 0.0, 1.0);
+diffuseColor.a = max(diffuseColor.a, vCap * cloud * 0.995);
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
 vec3 clearLight = mix(vec3(0.33, 0.44, 0.47), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
 // Neutral scattering keeps a white precipitate white next to the warm burner.
@@ -211,8 +221,10 @@ coloredLight = mix(coloredLight,
   tubeColor * vec3(1.32, 0.72, 1.10) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.035,
   raspberry);
 outgoingLight = mix(mix(clearLight, coloredLight, pigment),
-  mix(vec3(0.91 + 0.07 * relief), vec3(0.80 + 0.06 * relief), milk),
-  clamp(cloud * mix(1.0, 0.88, milk), 0.0, 1.0));
+  mix(vec3(0.91 + 0.07 * relief), vec3(0.91 + 0.04 * relief), milk),
+  clamp(cloud, 0.0, 1.0));
+outgoingLight = mix(outgoingLight, mix(coloredLight, vec3(0.83 + 0.06 * relief), milk),
+  surfaceTint * (1.0 - cloud) * 0.72);
 outgoingLight = mix(outgoingLight, vec3(0.93), film * 0.80);
 outgoingLight = mix(outgoingLight, vec3(0.85, 0.97, 1.0), tracerRidge * 0.32);
 // Surface lines and ripple sheen keep the hue of a coloured or cloudy body:
@@ -220,7 +232,8 @@ outgoingLight = mix(outgoingLight, vec3(0.85, 0.97, 1.0), tracerRidge * 0.32);
 float tinted = clamp(max(pigment, cloud), 0.0, 1.0);
 vec3 body = outgoingLight;
 float underRim = (1.0 - vCap) * (1.0 - smoothstep(0.0005, 0.0017, -surfaceDistance));
-outgoingLight = mix(outgoingLight, mix(vec3(0.10, 0.19, 0.22), body * 0.45, tinted), underRim * 0.63);
+outgoingLight = mix(outgoingLight, mix(vec3(0.10, 0.19, 0.22), body * 0.45, tinted),
+  underRim * 0.63 * (1.0 - milk * cloud * 0.9));
 outgoingLight = mix(outgoingLight, mix(vec3(0.82, 0.95, 0.98), body + (vec3(1.0) - body) * 0.35, tinted),
   capRim * 0.68);
 float waveBright = vCap * clamp(vTubeWaveSlope * 10.0, 0.0, 1.0);
@@ -239,5 +252,5 @@ if (uReactionKind > 1.5 && uReactionKind < 2.5) {
 }`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v16-solid-colour-to-surface"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v18-barium-clearing"; }
 }

@@ -168,7 +168,8 @@ class TubeSurfaceWaves {
 }
 
 /** Opaque-scene displacement drawn before the original transparent water. */
-function createWaterBackdropMaterial(radius: number, minY: number, height: number, transport: TubeMixingField | null) {
+function createWaterBackdropMaterial(radius: number, minY: number, height: number, transport: TubeMixingField | null,
+  optics: TubeLiquidMaterial) {
   const material = new THREE.MeshPhysicalMaterial({
     color: "#ffffff", roughness: 0, metalness: 0, ior: 1.333,
     transmission: 1, thickness: radius * 1.8, depthWrite: false,
@@ -182,6 +183,15 @@ function createWaterBackdropMaterial(radius: number, minY: number, height: numbe
     shader.uniforms.uBackdropLevel = level;
     shader.uniforms.uTracer = { value: transport?.texture ?? null };
     shader.uniforms.uTracerStrength = tracerStrength;
+    // The opaque-scene sampler contains no transparent solution. Attenuate
+    // that background along its path through the liquid before compositing
+    // the surface sheen; changing the cap alpha cannot replace this pass.
+    shader.uniforms.uOpticalCamera = optics.uniforms.uCameraLocal;
+    shader.uniforms.uOpticalKind = optics.uniforms.uReactionKind;
+    shader.uniforms.uOpticalProgress = optics.uniforms.uReactionProgress;
+    shader.uniforms.uOpticalCloud = optics.uniforms.uCloudiness;
+    shader.uniforms.uOpticalHaze = optics.uniforms.uResidualHaze;
+    shader.uniforms.uOpticalAge = optics.uniforms.uTransportAge;
     shader.vertexShader = `attribute float tubeSurface; attribute float tubeWave; attribute float tubeWaveSlope;
 uniform vec3 uBackdropUp; uniform float uBackdropLevel;
 varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
@@ -194,7 +204,48 @@ if (tubeSurface > 0.5) transformed.y =
 vBackdropPoint = transformed;`);
     shader.fragmentShader = `uniform vec3 uBackdropUp; uniform float uBackdropLevel;
 uniform sampler2D uTracer; uniform float uTracerStrength;
+uniform vec3 uOpticalCamera;
+uniform float uOpticalKind, uOpticalProgress, uOpticalCloud, uOpticalHaze, uOpticalAge;
 varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
+vec3 transmitThroughTube(vec3 background) {
+  if (uOpticalKind < 0.5 || uOpticalKind > 3.5) return background;
+  vec3 ray = normalize(vBackdropPoint - uOpticalCamera);
+  float radius = ${radius.toFixed(7)};
+  float bottom = ${minY.toFixed(7)};
+  float a = max(dot(ray.xz, ray.xz), 0.000001);
+  float b = dot(vBackdropPoint.xz, ray.xz);
+  float side = (-b + sqrt(max(0.0, b * b + a *
+    (radius * radius - dot(vBackdropPoint.xz, vBackdropPoint.xz))))) / a;
+  float distance = max(0.0, side);
+  if (ray.y < -0.00001) distance = min(distance, max(0.0, (bottom - vBackdropPoint.y) / ray.y));
+  float upRay = dot(uBackdropUp, ray);
+  if (upRay > 0.00001) distance = min(distance,
+    max(0.0, (uBackdropLevel - dot(uBackdropUp, vBackdropPoint)) / upRay));
+  distance = min(distance, ${height.toFixed(7)} * 2.0);
+  vec3 transmission = vec3(1.0);
+  float scattering = 0.0;
+  for (int sampleIndex = 0; sampleIndex < 6; sampleIndex++) {
+    vec3 q = vBackdropPoint + ray * distance * (float(sampleIndex) + 0.5) / 6.0;
+    float h = clamp((q.y - bottom) / ${height.toFixed(7)}, 0.0, 1.0);
+    if (uOpticalKind < 1.5) {
+      float mixed = 1.0 - exp(-uOpticalProgress * 11.0);
+      float concentration = mixed * (0.79 + 0.21 * (1.0 - h));
+      concentration = mix(concentration, 1.0, smoothstep(0.72, 1.0, uOpticalProgress));
+      transmission *= exp(-vec3(1.0, 0.40, 0.18) * concentration * distance / (6.0 * radius));
+    } else if (uOpticalKind > 2.5) {
+      float fill = max(0.001, uBackdropLevel - bottom);
+      float liquidH = clamp((dot(uBackdropUp, q) - bottom) / fill, 0.0, 1.0);
+      float clearing = smoothstep(0.42, 0.98, uOpticalProgress);
+      float front = mix(1.06, -0.06, clearing);
+      float cloud = uOpticalCloud * (1.0 - smoothstep(front - 0.055, front + 0.055, liquidH));
+      vec2 uv = vec2(clamp(0.5 + dot(q.xz / (radius * 2.0), vec2(0.42, 0.91)), 0.0, 1.0), h);
+      cloud *= mix(0.12 + 0.88 * smoothstep(0.015, 0.65, texture2D(uTracer, uv).g),
+        1.0, smoothstep(0.35, 1.9, uOpticalAge));
+      scattering += clamp(cloud + uOpticalHaze, 0.0, 1.0) * distance / (6.0 * radius) * 3.0;
+    }
+  }
+  return mix(background * transmission, vec3(0.94), 1.0 - exp(-scattering));
+}
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
 if (vBackdropCap < 0.5 && dot(uBackdropUp, vBackdropPoint) > uBackdropLevel + 0.0004) discard;`)
       .replace("#include <opaque_fragment>", `
@@ -213,9 +264,10 @@ float edgeSoft = vBackdropCap > 0.5
   ? clamp(abs(vBackdropWave) * 8.0, 0.0, 1.0)
   : mix(0.25, 1.0, smoothstep(0.0, 0.03, uBackdropLevel - dot(uBackdropUp, vBackdropPoint)));
 backdrop = mix(straight, backdrop, edgeSoft);
+backdrop = transmitThroughTube(backdrop);
 gl_FragColor = vec4(backdrop, 1.0);`);
   };
-  material.customProgramCacheKey = () => "tube-water-backdrop-v1";
+  material.customProgramCacheKey = () => "tube-water-backdrop-v2-solution-transmission";
   return { material, up, level, tracerStrength };
 }
 
@@ -345,7 +397,8 @@ outgoingLight *= mix(1.0, 0.32, dyeWindow);`);
   group.quaternion.copy(volume.quaternion);
   group.scale.copy(volume.scale);
   volume.parent?.add(group);
-  const backdrop = options.activeSurface && hasLiquid ? createWaterBackdropMaterial(radius, box.min.y, size.y, transport) : null;
+  const backdrop = options.activeSurface && hasLiquid
+    ? createWaterBackdropMaterial(radius, box.min.y, size.y, transport, liquid ?? base as TubeLiquidMaterial) : null;
   const backdropWall = backdrop ? new THREE.Mesh(wallGeometry, backdrop.material) : null;
   const backdropCap = backdrop ? new THREE.Mesh(capGeometry, backdrop.material) : null;
   if (backdropWall && backdropCap) {
@@ -429,8 +482,7 @@ if (vSedimentPoint.y < uSedimentBottom || length(bowlPoint) > uSedimentRadius) d
     // response before bloom and keep normal-based relief instead of hot spots.
     shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
 float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
- float powderGrain = sin(vSedimentPoint.x * 12000.0) * sin(vSedimentPoint.z * 10800.0) * 0.012 * uPowder;
- outgoingLight = vec3(uSedimentWhite) * (relief + powderGrain);
+ outgoingLight = vec3(uSedimentWhite) * relief;
  diffuseColor.a *= mix(0.40 + 0.60 * smoothstep(0.0, 0.68,
    abs(dot(normalize(normal), normalize(vViewPosition)))), 1.0, uPowder);
  #include <opaque_fragment>`);
@@ -757,9 +809,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         backdrop.level.value = level.value;
         backdrop.tracerStrength.value = transport && !options.incomingDyed && transport.running ? 1 : 0;
         backdropWall.visible = refraction && quality !== "LOW" && !options.incomingDyed;
-        // Its flat transmission pass draws an opaque line in the player's
-        // near-horizontal view. The physical liquid cap still carries waves.
-        backdropCap.visible = false;
+        // The top ray also crosses coloured liquid. Its transmitted backdrop
+        // must use the same absorption/scattering as the cylindrical wall.
+        backdropCap.visible = backdropWall.visible && p > 0.01
+          && (kind === "copper-nitric" || kind === "barium-sulfate");
       }
       inverse.copy(volume.matrixWorld).invert();
       if (cameraPosition) cameraLocal.copy(cameraPosition).applyMatrix4(inverse);
@@ -866,7 +919,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const count = TUBE_VISUALS.particleCounts[quality];
       const precipitate = kind === "silver-chloride" || kind === "barium-sulfate";
       const curds = kind === "silver-chloride";
-      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.025 : 0.018);
+      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.025 : 0.006);
       const settled = precipitate ? THREE.MathUtils.smoothstep(p,
         curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
       if (kind === "barium-sulfate") bariumCompletionAge = p >= 0.999
@@ -883,6 +936,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         activeLiquid.uniforms.uRate.value = rate;
         activeLiquid.uniforms.uTemperature.value = temperature;
         activeLiquid.uniforms.uTime.value = time;
+        activeLiquid.uniforms.uCameraLocal.value.copy(cameraLocal);
       }
       if (transport) for (const material of [base, liquid]) {
         if (!(material instanceof TubeLiquidMaterial)) continue;
@@ -901,7 +955,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         liquid.uniforms.uCloudiness.value = curds ? onset * (1 - settled)
           : kind === "barium-sulfate" ? onset : 0;
         liquid.uniforms.uResidualHaze.value = kind === "barium-sulfate"
-          ? 0.65 * THREE.MathUtils.smoothstep(p, 0.90, 1)
+          ? 0.035 * THREE.MathUtils.smoothstep(p, 0.90, 1)
             * (1 - THREE.MathUtils.smoothstep(bariumCompletionAge, 45, 195)) : 0;
         liquid.uniforms.uWallFilm.value = kind === "barium-sulfate"
           ? THREE.MathUtils.smoothstep(p, 0.33, 0.95) : 0;
@@ -927,7 +981,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       // AgCl's deposit is made by the same settling flocs, never a smooth cap.
       bed.visible = kind === "barium-sulfate" && settled > 0;
-      sedimentLevel.value = box.min.y + size.y * (curds ? settled * 0.155 : Math.sqrt(settled) * 0.10);
+      sedimentLevel.value = box.min.y + (curds ? size.y * settled * 0.155
+        : Math.sqrt(settled) * Math.min(0.003, size.y * 0.06));
       sedimentDrift.value = radius * settled * 0.55;
       flakes.visible = curds && p > 0;
       flakes.count = count;
