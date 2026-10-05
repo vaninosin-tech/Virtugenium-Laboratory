@@ -289,7 +289,7 @@ ${shader.fragmentShader}`.replace("totalEmissiveRadiance += c * uEmissionStrengt
     };
   }
 
-  customProgramCacheKey() { return "bottle-liquid-v2-axis-fix"; }
+  customProgramCacheKey() { return "bottle-liquid-v4-no-screen-capture"; }
 }
 
 /** Solve the mean height of a tilted cylindrical column, including floor/lip clipping. */
@@ -315,10 +315,12 @@ export function conservedBottleLevel(fill: number, slopeX: number, slopeZ: numbe
 }
 
 export interface ReagentMaterialBinding {
+  reagentId: string;
   glass: GlassMaterial[];
   liquid: LiquidMaterial | null;
   copper?: { shake: (tilt: number, strength: number, time: number) => void };
   setFillLevel: (level: number) => void;
+  getFillLevel: () => number;
   updateSurface: () => void;
   dispose: () => void;
 }
@@ -337,6 +339,7 @@ export function installReagentMaterials(root: THREE.Object3D, config: ReagentCon
   let initialScaleZ = 1;
   let copper: ReturnType<typeof createCopperPile> | undefined;
   let copperSource: THREE.Mesh | undefined;
+  let currentFill = config.fillLevel;
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
     if (/^Cap(?:\.?\d+)?$/.test(object.name)) {
@@ -415,6 +418,7 @@ export function installReagentMaterials(root: THREE.Object3D, config: ReagentCon
   const setFillLevel = (level: number) => {
     if (!fillMesh || !Number.isFinite(level)) return;
     const fill = THREE.MathUtils.clamp(level, 0, 1);
+    currentFill = fill;
     if (liquid) {
       liquid.uniforms.uFillLevel.value = fill;
       liquid.uniforms.uBottleLevel.value = fill;
@@ -441,7 +445,8 @@ export function installReagentMaterials(root: THREE.Object3D, config: ReagentCon
       liquid.uniforms.uFillLevel.value, e[1] / sy, e[9] / sy,
       size.x * 0.5, size.z * 0.5, size.y);
   };
-  const binding = { glass, liquid, copper: copper ? { shake: copper.shake } : undefined, setFillLevel, updateSurface, dispose: () => {
+  const binding = { reagentId: config.id, glass, liquid, copper: copper ? { shake: copper.shake } : undefined,
+    setFillLevel, getFillLevel: () => currentFill, updateSurface, dispose: () => {
     owned.forEach((material) => material.dispose());
     ownedGeometries.forEach((geometry) => geometry.dispose());
     copper?.dispose();

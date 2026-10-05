@@ -1,19 +1,42 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import type { Object3D } from "three";
+import { Quaternion, Vector3, type Object3D } from "three";
 import { useReagentShaderTuningStore } from "./useReagentShaderTuningStore";
 import type { ReagentMaterialBinding } from "./reagentMaterials";
 import { QUALITY_LEVELS, useRuntimeQualityStore } from "./useRuntimeQualityStore";
 import { cancelDeferredDispose, deferDispose } from "./deferredDispose";
+import { CLAMP_TUBE_MOUTH, POUR_MS, useStandMotionStore } from "./useStandMotionStore";
 
 /** Subscribe outside the frame loop; sliders do not rebuild bottles or shaders. */
 export function useReagentMaterials(instance: Object3D) {
   const binding = instance.userData.reagentMaterials as ReagentMaterialBinding;
+  const pourFill = useRef({ at: -1, base: binding.getFillLevel() });
+  const position = useRef(new Vector3());
+  const up = useRef(new Vector3());
+  const orientation = useRef(new Quaternion());
   useFrame(({ clock }) => {
     if (binding.liquid) {
       binding.updateSurface();
       binding.liquid.uniforms.uTime.value = clock.elapsedTime;
       binding.liquid.uniforms.uQualityNoise.value = QUALITY_LEVELS[useRuntimeQualityStore.getState().quality].noise;
+      const pour = useStandMotionStore.getState().pour;
+      if (pour && CLAMP_TUBE_MOUTH.valid &&
+          (pour.instanceId === binding.reagentId || pour.instanceId.endsWith(`-${binding.reagentId}`))) {
+        instance.getWorldPosition(position.current);
+        instance.getWorldQuaternion(orientation.current);
+        up.current.set(0, 1, 0).applyQuaternion(orientation.current);
+        // Only the bottle actually tipped at the clamp loses liquid. Shelf
+        // copies of the same reagent keep their own independent fill.
+        if (position.current.distanceTo(CLAMP_TUBE_MOUTH.point) < 0.32 &&
+            Math.abs(up.current.y) < 0.94) {
+          if (pourFill.current.at !== pour.at) {
+            pourFill.current.at = pour.at;
+            pourFill.current.base = binding.getFillLevel();
+          }
+          const phase = Math.max(0, Math.min(1, ((Date.now() - pour.at) / POUR_MS - 0.35) / 0.39));
+          binding.setFillLevel(Math.max(0.04, pourFill.current.base * (1 - 0.22 * phase)));
+        }
+      }
     }
   });
   useEffect(() => {
