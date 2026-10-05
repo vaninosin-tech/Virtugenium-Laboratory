@@ -7,6 +7,7 @@ import { HAND, useHandStore, type HeldItem } from "../lib/useHandStore";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { WORKBENCH_CARRY } from "../lib/tableTray";
 import { trayHandAction } from "../lib/trayUnloadPlace";
+import { constrainOnWorktop } from "../lib/worktopBounds";
 import { sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 
 /** How high above the worktop the held item glides — just off it, its shadow right under it. */
@@ -75,7 +76,7 @@ export function HandController() {
         putBack();
         return;
       }
-      const action = held.kind === "workbench-tube" ? null : (held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.point));
+      const action = held.kind === "workbench-tube" ? null : (held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.rawPoint));
       if (!action || action.blocked) return;
       // From where the item is drawn (snapped beside its target), not the bare hand.
       const from = HAND.itemPosValid ? HAND.itemPos : HAND.point;
@@ -134,9 +135,13 @@ export function HandController() {
       const dz = s.hit.z - HAND.home.z;
       const far = Math.hypot(dx, dz);
       if (far > REACH) s.hit.set(HAND.home.x + (dx / far) * REACH, s.hit.y, HAND.home.z + (dz / far) * REACH);
+      // Over its worktop and off everything on it (VL-018). The magnet still
+      // answers to the bare hand: the item snaps beside the tube it is kept off.
+      HAND.rawPoint.copy(s.hit);
+      constrainOnWorktop(s.hit, HAND.radius, HAND.home, new Set([held.instanceId]));
       HAND.point.copy(s.hit);
       HAND.valid = true;
-      const action = (held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.point));
+      const action = held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.rawPoint);
       HAND.action = action ? { label: action.label, blocked: action.blocked } : null;
       // A bottle always aims at the tube in the clamp; a tube at the clamp
       // while it is empty, else at the tube in it (to pour into).
@@ -163,5 +168,5 @@ function workbenchTubeHint(held: Extract<HeldItem, { kind: "workbench-tube" }>):
   const near = useTestTubeDragStore.getState().isNearHolder;
   if (near) return { label: "Поставить обратно в штатив для пробирок", blocked: false };
   const clamp = standActionFor({ kind: "rack-tube", location: "workbench", index: held.index }, { fromHand: true });
-  return clamp && !clamp.blocked ? { label: "Поднесите к лапке штатива или к склянке", blocked: false } : null;
+  return clamp && !clamp.blocked ? { label: "Поднесите к лапке штатива", blocked: false } : null;
 }

@@ -4,6 +4,7 @@ import * as THREE from "three";
 
 import type { Position3 } from "../lib/layout";
 import { HAND, useHandStore } from "../lib/useHandStore";
+import { constrainOnWorktop, registerWorktopObstacle, shownInWorld } from "../lib/worktopBounds";
 import { ReagentHoverRim } from "./ReagentHoverRim";
 import {
   CLAMP_TUBE_MOUTH,
@@ -82,6 +83,8 @@ const SNAP_RATE = 16;
 const CLAMP_HOVER = 0.04;
 /** Gap between a bottle snapped beside the clamped tube and the tube. */
 const READY_GAP = 0.02;
+/** The tube in the clamp's half-width: a bottle beside it stands this much further off. */
+const CLAMPED_TUBE_RADIUS = 0.011;
 /** Seconds for the cap to come off or go back on. */
 const CAP_SECONDS = 0.35;
 
@@ -174,6 +177,30 @@ export function PourMotion({
     [],
   );
 
+  // Standing on the worktop, it is in the way of whatever else is carried
+  // there (VL-018): a circle round it, measured once at rest.
+  useEffect(() => {
+    const footprint = { measured: false, dx: 0, dz: 0, r: 0 };
+    const at = new THREE.Vector3();
+    const box = new THREE.Box3();
+    return registerWorktopObstacle(instanceId, {
+      get: () => {
+        const group = groupRef.current;
+        if (!group || !shownInWorld(group)) return [];
+        group.getWorldPosition(at);
+        if (!footprint.measured) {
+          if (motion.current.away) return [];
+          box.setFromObject(group);
+          if (box.isEmpty()) return [];
+          const centre = box.getCenter(new THREE.Vector3());
+          const size = box.getSize(new THREE.Vector3());
+          Object.assign(footprint, { measured: true, dx: centre.x - at.x, dz: centre.z - at.z, r: Math.max(size.x, size.z) / 2 });
+        }
+        return [{ kind: "circle", x: at.x + footprint.dx, z: at.z + footprint.dz, r: footprint.r }];
+      },
+    });
+  }, [instanceId]);
+
   /** Measures the bottle at rest — its mouth, where its cap goes — before it first leaves its place. */
   const measure = (group: THREE.Group) => {
     let found: THREE.Object3D | null = null;
@@ -260,6 +287,7 @@ export function PourMotion({
     if (held) {
       HAND.home.copy(s.rest);
       HAND.homeValid = true;
+      HAND.radius = r.radius;
     }
 
     if (pouring) {
@@ -280,6 +308,10 @@ export function PourMotion({
       // The bottle sits so that its (tipped) mouth is just over the tube's, on the bottle's side.
       s.point.copy(r.mouthOffset).applyQuaternion(s.tilt);
       s.target.copy(mouth).addScaledVector(UP, above).addScaledVector(s.side, 0.004).sub(s.point);
+      // Upright, its mouth over the tube's would put its body round the tube
+      // (VL-018): until it is tipped it stands beside the tube instead, and
+      // swings over only as it tips.
+      s.target.addScaledVector(s.side, (r.radius + READY_GAP + CLAMPED_TUBE_RADIUS) * (1 - tip));
 
       if (k < UNTIP) {
         // Over to the tube from where it was — its place (arcing over), or right beside it.
@@ -327,6 +359,11 @@ export function PourMotion({
       // On its way home.
       const t = 1 - Math.exp(-FOLLOW_RATE * delta);
       m.cur.lerp(s.rest, t);
+      // Round whatever stands in the way — the tube it poured into, the
+      // stand, the lamp — not through it (VL-018); straight in at the end.
+      if (m.cur.distanceTo(s.rest) > r.radius * 1.5) {
+        constrainOnWorktop(m.cur, r.radius, s.rest, new Set([instanceId]));
+      }
       m.curQuat.slerp(s.restQuat, t);
       if (m.cur.distanceTo(s.rest) < 0.0008) {
         m.cur.copy(s.rest);

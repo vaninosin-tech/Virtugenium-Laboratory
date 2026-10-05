@@ -5,6 +5,7 @@ import * as THREE from "three";
 
 import { useBurnerStore } from "../lib/useBurnerStore";
 import { standTargetEvents } from "./standTargetEvents";
+import { useCircleObstacle } from "../lib/worktopBounds";
 
 export const SPIRIT_LAMP_MODEL_PATH = "/assets/models/SpiritLamp.glb";
 const MODEL_PATH = SPIRIT_LAMP_MODEL_PATH;
@@ -130,6 +131,9 @@ function Flame({ strength }: { readonly strength: React.MutableRefObject<number>
  *
  * One click advances the lamp: take the cap off, light it, put the cap back on.
  */
+/** `SpiritLamp.glb`: 7.6 cm across. */
+const LAMP_RADIUS = 0.038;
+
 export function SpiritBurner({
   position = [0.104, 0, 0.018],
 }: {
@@ -149,6 +153,9 @@ export function SpiritBurner({
   const capOff = useRef(useBurnerStore.getState().phase === "capped" ? 0 : 1);
   const flameStrength = useRef(useBurnerStore.getState().lit ? 1 : 0);
   const smotherTimer = useRef(0);
+  // In the way of whatever is carried over the worktop (VL-018) — the 7.6 cm lamp.
+  const bodyRef = useRef<THREE.Group>(null);
+  useCircleObstacle("spirit-burner", bodyRef, LAMP_RADIUS);
 
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 0.1);
@@ -189,6 +196,7 @@ export function SpiritBurner({
 
   return (
     <group
+      ref={bodyRef}
       position={position as unknown as [number, number, number]}
       // Click and caption both come from `standTableActions` (VL-014).
       {...standTargetEvents("spirit-burner", { kind: "burner" })}

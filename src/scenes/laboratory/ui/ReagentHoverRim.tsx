@@ -1,3 +1,4 @@
+import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 
@@ -75,11 +76,16 @@ const rimMaterial = createRimMaterial(DEFAULT_RIM_OPACITY);
  * `prepareTestTube` while empty — without this check that hidden liquid
  * mesh still rendered its own glowing rim on hover.
  */
+/** A reagent container's glass — the bottle itself, as opposed to what is in it or on it. */
+const CONTAINER_GLASS = /^(Bottle_Glass|Jar_Glass)\d*$/;
+const CONTAINER_CAP = /^Cap\d*$/;
+
 export function ReagentHoverRim({
   object,
   active,
   opacity,
   tone = "normal",
+  containerOnly = false,
 }: {
   readonly object: THREE.Object3D | null;
   readonly active: boolean;
@@ -87,6 +93,12 @@ export function ReagentHoverRim({
   readonly opacity?: number;
   /** "refused" — red: what the player is aiming at cannot be done (VL-015). */
   readonly tone?: "normal" | "refused";
+  /**
+   * A reagent bottle or jar (VL-018): outline only its glass — not the liquid
+   * or powder in it — and its cap only while the cap is on it (taken off to
+   * pour, it stands aside on the table and is not outlined).
+   */
+  readonly containerOnly?: boolean;
 }) {
   const material = useMemo(
     () =>
@@ -100,8 +112,9 @@ export function ReagentHoverRim({
     return () => material.dispose();
   }, [material]);
 
-  const group = useMemo(() => {
-    if (!object) return null;
+  const { group, caps } = useMemo(() => {
+    const caps: { cap: THREE.Object3D; seat: THREE.Vector3; rim: THREE.Mesh }[] = [];
+    if (!object) return { group: null, caps };
     const g = new THREE.Group();
     // `object` (the container clone) is itself recentered off local origin —
     // see `ReagentContainerInstance`'s bbox-centering fix, which shifts
@@ -126,6 +139,15 @@ export function ReagentHoverRim({
       // its shared base geometry into a plain rim mesh drops `instanceMatrix`
       // entirely and renders one mis-placed granule silhouette per batch
       // instead of a clean container outline.
+      if (containerOnly && child instanceof THREE.Mesh && CONTAINER_CAP.test(child.name)) {
+        // The cap moves (`PourMotion`): its rim rides on it, shown only while it sits on the bottle.
+        const rim = new THREE.Mesh(child.geometry, material);
+        rim.renderOrder = 10;
+        rim.raycast = () => {};
+        caps.push({ cap: child, seat: child.position.clone(), rim });
+        return;
+      }
+      if (containerOnly && !CONTAINER_GLASS.test(child.name)) return;
       if (child instanceof THREE.Mesh && child.visible && !(child instanceof THREE.InstancedMesh)) {
         // The caller's material (opacity, tone) — this used to be the shared
         // default regardless, so `opacity` never took effect.
@@ -144,8 +166,18 @@ export function ReagentHoverRim({
         g.add(rim);
       }
     });
-    return g;
-  }, [object, material]);
+    return { group: g, caps };
+  }, [object, material, containerOnly]);
+
+  useEffect(() => {
+    for (const { cap, rim } of caps) cap.add(rim);
+    return () => {
+      for (const { cap, rim } of caps) cap.remove(rim);
+    };
+  }, [caps]);
+  useFrame(() => {
+    for (const { cap, seat, rim } of caps) rim.visible = active && cap.position.distanceToSquared(seat) < 1e-8;
+  });
 
   if (!group) return null;
   group.visible = active;

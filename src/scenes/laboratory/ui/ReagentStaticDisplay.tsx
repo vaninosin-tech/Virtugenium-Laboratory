@@ -284,7 +284,7 @@ export function ReagentStaticDisplay({
       {...(worldScale === undefined ? { scale } : {})}
     >
       <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={showHighlight} />
+      <ReagentHoverRim object={instance} active={showHighlight} containerOnly />
       {interactive && (
         // Only interactive items need a hitbox — workbench copies (no
         // `instanceId`) and items disabled during another inspection have

@@ -22,6 +22,7 @@ import { ArrivalFlight, GlassRim } from "./StandMotion";
 import { ReagentHoverRim } from "./ReagentHoverRim";
 import { useHandStore } from "../lib/useHandStore";
 import { CLAMP_TUBE_MOUTH, useStandMotionStore } from "../lib/useStandMotionStore";
+import { registerWorktopObstacle, shownInWorld, useCircleObstacle } from "../lib/worktopBounds";
 
 /**
  * Everything that makes the stand a working station, wherever the stand is —
@@ -127,12 +128,30 @@ function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefin
 /** The 15 cm tube's mouth above its base — `LabTestTube.glb`'s height (`tests/measure-model.mjs`). */
 const TUBE_MOUTH_HEIGHT = 0.15;
 
-/** Publishes the stand's rod base for a pouring bottle — see `CLAMP_TUBE_MOUTH`. At the stand's own origin. */
-function RodAnchor() {
+/** `BunsenStand.glb`'s base: a 12 cm disc round the rod. */
+const STAND_BASE_RADIUS = 0.06;
+/** The tube in the clamp, kept clear of a held bottle (VL-018) — the 2.2 cm glass. */
+const CLAMPED_TUBE_RADIUS = 0.012;
+
+/**
+ * Publishes the stand's rod base for a pouring bottle — see `CLAMP_TUBE_MOUTH`. At the stand's own origin.
+ * Also keeps held items off the stand's base and the tube in its clamp (VL-018).
+ */
+function RodAnchor({ tubeClamped }: { readonly tubeClamped: boolean }) {
   const ref = useRef<THREE.Group>(null);
   useFrame(() => {
     if (ref.current) ref.current.getWorldPosition(CLAMP_TUBE_MOUTH.rod);
   });
+  useCircleObstacle("stand-base", ref, STAND_BASE_RADIUS);
+  useEffect(() => {
+    if (!tubeClamped) return;
+    return registerWorktopObstacle("clamped-tube", {
+      get: () =>
+        CLAMP_TUBE_MOUTH.valid && ref.current && shownInWorld(ref.current)
+          ? [{ kind: "circle", x: CLAMP_TUBE_MOUTH.point.x, z: CLAMP_TUBE_MOUTH.point.z, r: CLAMPED_TUBE_RADIUS }]
+          : [],
+    });
+  }, [tubeClamped]);
   return <group ref={ref} />;
 }
 
@@ -279,7 +298,7 @@ export function StandStation({
   return (
     <>
       {lampHere && <SpiritBurner position={lamp} />}
-      <RodAnchor />
+      <RodAnchor tubeClamped={!!tube} />
       <HeatingRuntime />
       <TubeReactionRuntime tube={tube} />
       <HeldClampRig away={away} hotSpot={hotSpot}>

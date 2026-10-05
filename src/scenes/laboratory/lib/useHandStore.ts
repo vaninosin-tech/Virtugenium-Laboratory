@@ -47,6 +47,14 @@ export const HAND = {
   /** Where the held item rests, published by the item itself (`PourMotion`) — the worktop's height. */
   home: new THREE.Vector3(),
   homeValid: false,
+  /**
+   * The bare hand over the worktop, before it was kept off the things there
+   * (`constrainOnWorktop`, VL-018): what the item is brought TO — the stand's
+   * magnet answers to it, so the item can snap beside the tube it is kept off.
+   */
+  rawPoint: new THREE.Vector3(),
+  /** Half the held item's width — how far it is kept off things; published by the item (`PourMotion`). */
+  radius: 0.03,
   /** Where the held item itself is (its base), as drawn — snapped to a target or on the hand. */
   itemPos: new THREE.Vector3(),
   itemPosValid: false,

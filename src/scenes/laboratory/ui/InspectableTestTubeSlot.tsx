@@ -7,7 +7,6 @@ import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import { clampToTableWorldXZ } from "../lib/layout";
 import { fillTestTubeContents, resolveTubeContents, stepCopperGranuleDrop } from "../lib/testTubeContents";
 import { prepareTestTube } from "../lib/testTubeMaterials";
-import { tryAddToTube } from "../lib/pourIntoTube";
 import { pushOutsideTrayReturnZone } from "../lib/trayReturnZone";
 import {
   TUBE_RING_ATTACH_RADIUS,
@@ -15,7 +14,6 @@ import {
   useBunsenStandStorageStore,
 } from "../lib/useBunsenStandStorageStore";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
-import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { clickWorkbenchRackTube } from "../lib/standTableActions";
 import { useStandHintStore } from "../lib/useStandHintStore";
@@ -27,9 +25,9 @@ import { ArrivalFlight } from "./StandMotion";
 import { consumePickablePressed, sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { useTestTubeHoverStore } from "../lib/useTestTubeHoverStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
-import { useWorkbenchReagentDragStore } from "../lib/useWorkbenchReagentDragStore";
 import { disableRaycast } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
+import { constrainOnWorktop } from "../lib/worktopBounds";
 
 const MODEL_PATH = "/assets/models/LabTestTube.glb";
 
@@ -97,7 +95,9 @@ const TUBE_DRAG_HALF_DEPTH = 0.4;
  */
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 /** How close (straight-line world distance) a held tube needs to get to a workbench jar's own registered pick target before it "fills" вЂ” jars are roughly 0.08-0.13m across, so this comfortably counts as "right next to it" without requiring a pixel-precise hover. */
-const FILL_PROXIMITY_RADIUS = 0.16;
+/** The carried 2.2 cm tube, kept off what stands on the table (VL-018). */
+const CARRIED_TUBE_RADIUS = 0.012;
+const RACK_TAG: ReadonlySet<string> = new Set(["rack"]);
 
 /**
  * One tube standing in the workbench rack's hole grid, rendered as a CHILD
@@ -293,7 +293,6 @@ export function InspectableTestTubeSlot({
   const dragWorldTargetRef = useRef(new THREE.Vector3());
   const dragPlanePointRef = useRef(new THREE.Vector3());
   const fillCheckTubeWorldPosRef = useRef(new THREE.Vector3());
-  const fillCheckJarWorldPosRef = useRef(new THREE.Vector3());
   /** Live "close enough to the ring to clip in" result from the `useFrame` proximity check above вЂ” read by the click handler below, same "proximity arms it, a click commits it" split the jar-fill/jar-click-exception pair already uses. A plain ref (not state): it's read once per click, not something that should trigger a re-render every frame it changes. */
   const nearRingRef = useRef(false);
   /** Live: the carried tube is over the tray on the table (`overTableTray`). */
@@ -428,6 +427,9 @@ export function InspectableTestTubeSlot({
         [targetX, targetZ] = pushOutsideTrayReturnZone(targetX, targetZ);
         [targetX, targetZ] = clampToTableWorldXZ(targetX, targetZ, tablePosition);
         dragWorldTargetRef.current.set(targetX, dragWorldTargetRef.current.y, targetZ);
+        // Off everything standing on the table (VL-018) — but not its own
+        // rack, which it is carried back into.
+        constrainOnWorktop(dragWorldTargetRef.current, CARRIED_TUBE_RADIUS, planePoint, new Set(), RACK_TAG);
         const localTarget = parent.worldToLocal(dragWorldTargetRef.current);
         group.position.x = THREE.MathUtils.damp(group.position.x, localTarget.x, DRAG_DAMPING, delta);
         group.position.y = THREE.MathUtils.damp(group.position.y, localTarget.y, DRAG_DAMPING, delta);
@@ -442,27 +444,8 @@ export function InspectableTestTubeSlot({
 
       const tubeWorldPos = group.getWorldPosition(fillCheckTubeWorldPosRef.current);
 
-      // Hover-to-fill: while held and still empty, check the live distance
-      // to every jar currently on the workbench (their own registered pick
-      // targets вЂ” the same `Object3D`s `CameraRig` raycasts for jar
-      // dragging, so this needs no separate position bookkeeping of its
-      // own). Close enough to one and that jar's reagent is added to this
-      // slot's contents вЂ” see `addTubeContents`'s doc. Already-present
-      // reagents are ignored there, so holding a filled tube against the
-      // same jar is harmless, but a DIFFERENT jar now pours in on top,
-      // which is how a mixture gets made at the bench.
-      {
-        const pickTargetsById = useWorkbenchReagentDragStore.getState().pickTargetsById;
-        for (const item of useReagentStorageStore.getState().workbenchItems) {
-          const jarObject = pickTargetsById[item.instanceId];
-          if (!jarObject) continue;
-          const jarWorldPos = jarObject.getWorldPosition(fillCheckJarWorldPosRef.current);
-          if (tubeWorldPos.distanceTo(jarWorldPos) < FILL_PROXIMITY_RADIUS) {
-            tryAddToTube("workbench", index, item.reagentId);
-            break;
-          }
-        }
-      }
+      // A tube is no longer filled by carrying it to a jar: the reagent is
+      // poured from the bottle into the tube in the clamp (VL-018).
 
       // Proximity to the Bunsen stand's `TubeRing`, while it's actually on
       // the table вЂ” same live-distance technique as the jar fill check

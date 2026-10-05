@@ -1,14 +1,16 @@
 import { useGLTF } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
-import { forwardRef, useEffect, useMemo, type ReactNode } from "react";
+import { forwardRef, useEffect, useId, useMemo, type ReactNode } from "react";
 import * as THREE from "three";
 
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import type { Position3 } from "../lib/layout";
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useBoxObstacle } from "../lib/worktopBounds";
 
 const MODEL_PATH = "/assets/models/LabTestTubeRack.glb";
+const RACK_FOOTPRINT = { minX: -0.185, maxX: 0.185, minZ: -0.0935, maxZ: 0.0935 } as const;
 
 /**
  * Modeled 16-tube rack (2 rows of 8) — feet, bottom rail, top rail, two side
@@ -61,6 +63,12 @@ export const LabTestTubeRackInstance = forwardRef<THREE.Group, {
   useEffect(() => {
     if (interactive) disableRaycast(instance);
   }, [instance, interactive]);
+
+  // In the way of whatever is carried over the worktop (VL-018) — the rack's
+  // 37 × 18.7 cm footprint (`LabTestTubeRack.glb`).
+  const obstacleId = useId();
+  const instanceRef = useMemo(() => ({ current: instance }), [instance]);
+  useBoxObstacle(`rack${obstacleId}`, instanceRef, RACK_FOOTPRINT, "rack");
 
   const hoverHitboxGeometry = useMemo(
     () => (interactive ? createHoverHitboxGeometry(instance) : null),

@@ -981,7 +981,7 @@ export function ReagentContainerInstance({
       {/* The surface rim provides hover feedback without a second scene
           render for a duplicate postprocessing outline. */}
       <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered && !anyInspected} />
+      <ReagentHoverRim object={instance} active={hovered && !anyInspected} containerOnly />
       {/* The ONLY raycast target for this group (see `createHoverHitboxGeometry`'s
           doc) — `instance`'s own meshes had raycasting disabled above. Fully
           transparent, but NOT `visible={false}`: R3F skips non-visible

@@ -6,6 +6,7 @@ import * as THREE from "three";
 import type { Position3 } from "../lib/layout";
 import { useHotspotObjectsStore } from "../lib/useHotspotObjectsStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
+import { registerWorktopZone } from "../lib/worktopBounds";
 
 const MODEL_PATH = "/assets/models/LaboratoryWorkbench.glb";
 
@@ -44,6 +45,12 @@ export function WorkbenchInstance({ position }: { readonly position: Position3 }
     useHotspotObjectsStore.getState().register("table", instance);
     return () => useHotspotObjectsStore.getState().unregister("table");
   }, [instance]);
+
+  // A held bottle or tube stays over the countertop (VL-018) — `Countertop`, X −1.25..1.25, Z −0.85..0.
+  useEffect(
+    () => registerWorktopZone("table", { object: instance, minX: -1.25, maxX: 1.25, minZ: -0.85, maxZ: 0 }),
+    [instance],
+  );
 
   return (
     <group position={[x, y, z]}>

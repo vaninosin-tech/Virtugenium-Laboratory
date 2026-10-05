@@ -26,6 +26,15 @@ import { TAKE_FROM_TRAY, takeFromTray } from "../lib/trayUnloadPlace";
 import { GlassRim, PourMotion } from "./StandMotion";
 import { trayUnloadPlace } from "../lib/trayUnloadPlace";
 import { TABLE_TRAY } from "../lib/tableTray";
+import { useBoxObstacle } from "../lib/worktopBounds";
+
+/** The rack built into the tray (`TRAY_RACK_ANCHOR`, turned a quarter): 18.7 × 37 cm, in the tray's own space. */
+const TRAY_RACK_FOOTPRINT = {
+  minX: TRAY_RACK_ANCHOR.x - 0.0935,
+  maxX: TRAY_RACK_ANCHOR.x + 0.0935,
+  minZ: TRAY_RACK_ANCHOR.z - 0.185,
+  maxZ: TRAY_RACK_ANCHOR.z + 0.185,
+} as const;
 import { hoodTrayWorldPose } from "../lib/hoodLayout";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 
@@ -164,6 +173,8 @@ export function LabTrayInstance({
   const { scene } = useGLTF(MODEL_PATH);
   const { camera, gl, scene: rootScene, invalidate } = useThree();
   const groupRef = useRef<THREE.Group>(null);
+  // The rack built into the tray is in the way of what is carried past it (VL-018).
+  useBoxObstacle(`tray-rack-${mode}`, groupRef, TRAY_RACK_FOOTPRINT, "tray-rack");
   // The tray on the workbench is where things are put on it (VL-017, `overTableTray`).
   useEffect(() => {
     if (mode !== "table") return;
