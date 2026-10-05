@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
+import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 
 /** Sharp band around the focus point: tight — everything is meant to blur. */
 const FOCUS_RANGE = 0.3;
@@ -17,6 +18,8 @@ const FOCUS_BEYOND = 8;
  * drawn alone, sharp, on top of it. Lights are enabled on it too.
  */
 const INSPECT_LAYER = 7;
+/** How fast the blur fades in and out (1/s, exponential) — about a quarter of a second. */
+const FOCUS_SHIFT_RATE = 12;
 
 class InspectionBlurEffect extends DepthOfFieldEffect {
   active = false;
@@ -33,7 +36,8 @@ class InspectionBlurEffect extends DepthOfFieldEffect {
 
 /**
  * Inspecting a bottle (ВЗЯТЬ / ОСТАВИТЬ): everything but the bottle and the
- * buttons blurs. A depth of field focused on the bottle could not do it —
+ * buttons blurs. So does the whole lab while the tablet is open — the focus
+ * moves to the tablet. A depth of field focused on the bottle could not do it —
  * the held tray, the stand on it and the test-tube rack sit at the bottle's
  * own distance from the camera and stayed sharp. So the bottle is taken out
  * of the main pass (its own layer), the whole view is blurred (the focus is
@@ -43,7 +47,12 @@ class InspectionBlurEffect extends DepthOfFieldEffect {
  * Keeps the composer and its shader programs stable across open/close.
  */
 export function InspectionDepthOfField() {
-  const { camera, scene, gl } = useThree();
+  const { camera, scene, gl, raycaster } = useThree();
+  // The lifted bottle must still be dragged round (to look at it from every
+  // side): pointer picking has to see its layer too, not only the camera's.
+  useEffect(() => {
+    raycaster.layers.enable(INSPECT_LAYER);
+  }, [raycaster]);
   const effect = useMemo(() => {
     const blur = new InspectionBlurEffect(camera, { focusRange: FOCUS_RANGE, bokehScale: BOKEH_SCALE });
     blur.target = new THREE.Vector3();
@@ -54,6 +63,8 @@ export function InspectionDepthOfField() {
   /** The bottle on its own layer: its objects and their original layer masks, to put back. */
   const lifted = useRef<{ readonly id: string; readonly masks: Map<THREE.Object3D, number> } | null>(null);
   const forward = useMemo(() => new THREE.Vector3(), []);
+  /** How far the blur is faded in, 0..1. */
+  const blend = useRef(0);
 
   const putBack = () => {
     lifted.current?.masks.forEach((mask, object) => {
@@ -62,15 +73,21 @@ export function InspectionDepthOfField() {
     lifted.current = null;
   };
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const inspection = useReagentInspectionStore.getState();
     // A "holder" (the workbench test tube rack) is wide, angled and meant to
     // be read whole — it is not lifted out and nothing blurs around it.
     const inspectingJar = inspection.inspectedId !== null && inspection.kind !== "holder";
-    effect.active = inspectingJar && useRuntimeQualityStore.getState().quality !== "LOW";
-    effect.blendMode.opacity.value = effect.active ? 1 : 0;
+    // The tablet too: opening it is a change of focus — the lab behind it blurs.
+    const tabletOpen = useLaboratoryStore.getState().tabletOpen;
+    const wanted = (inspectingJar || tabletOpen) && useRuntimeQualityStore.getState().quality !== "LOW";
+    // Eased in and out rather than switched, so it reads as the focus shifting.
+    blend.current = THREE.MathUtils.damp(blend.current, wanted ? 1 : 0, FOCUS_SHIFT_RATE, Math.min(delta, 0.1));
+    if (!wanted && blend.current < 0.002) blend.current = 0;
+    effect.active = blend.current > 0;
+    effect.blendMode.opacity.value = blend.current;
 
-    const id = effect.active ? inspection.inspectedId : null;
+    const id = inspectingJar && effect.active ? inspection.inspectedId : null;
     if (lifted.current?.id !== id) {
       putBack();
       if (id) {
