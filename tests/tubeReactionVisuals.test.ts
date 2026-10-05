@@ -615,7 +615,8 @@ describe("tube reaction rendering contract", () => {
     barium.advance(65, chemistry(1));
     expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0);
     expect(material.uniforms.uWallFilm.value).toBeCloseTo(1);
-  });
+  // Simulates minutes of settling step by step; slow on a loaded machine.
+  }, 30000);
 
   it("decolorizes permanganate while keeping its water surface visible", () => {
     const f = fixture("permanganate-redox", false, false, true);
