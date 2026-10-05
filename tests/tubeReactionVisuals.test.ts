@@ -176,7 +176,7 @@ describe("tube reaction rendering contract", () => {
       if (resource.mesh instanceof THREE.InstancedMesh) expect(resource.mesh.instanceMatrix.array).toBe(resource.array);
       expect(resource.mesh.visible).toBe((["TubeLiquidSurface", "TubeBottomCaustic", "TubeStandCaustic"].includes(resource.mesh.name)
         && (kind !== "silver-chloride" || resource.mesh.name === "TubeLiquidSurface"))
-        || kind === "copper-nitric" && ["TubeNO2Headspace", "TubeNOBubbles"].includes(resource.mesh.name));
+        || kind === "copper-nitric" && resource.mesh.name === "TubeNOBubbles");
     }
     expect(f.get("TubeLiquidSurface").material).toBe(held);
     f.update(chemistry(0.5));
@@ -292,152 +292,37 @@ describe("tube reaction rendering contract", () => {
     expect(waveRange(heated)).toBeGreaterThan(0);
   });
 
-  it.each<RuntimeQuality>(["LOW", "HIGH"])("accumulates headspace gas and an outlet plume, then retains and decays them at %s", quality => {
-    const f = fixture("copper-nitric");
-    f.update(chemistry(0.4, 1), quality);
+  it.each<RuntimeQuality>(["LOW", "HIGH"])("keeps dilute NO clear inside the tube at %s", quality => {
+    const f = fixture("copper-nitric", true);
+    f.update(chemistry(0.4, 0.25), quality);
+    f.advance(2, chemistry(0.4, 0.25), quality);
+    expect(f.get("TubeNO2Headspace").visible).toBe(false);
+    expect(f.get("TubeNO2").visible).toBe(false);
     expect(density(f)).toBe(0);
-    f.advance(0.02, chemistry(0.4, 1), quality);
-    f.advance(0.98, chemistry(0.4, 1), quality);
-    const first = density(f);
-    expect(first).toBeGreaterThan(0);
-    f.advance(1, chemistry(0.5, 1), quality);
-    const accumulated = density(f);
-    expect(accumulated).toBeGreaterThan(first);
-    const head = f.get("TubeNO2Headspace");
-    const plume = f.get<THREE.InstancedMesh>("TubeNO2");
-    expect(head.visible).toBe(true);
-    expect(plume.visible).toBe(true);
-    expect(front(f)).toBeGreaterThan(0.85);
-    f.advance(4, chemistry(0.5, 1), quality);
-    expect(front(f)).toBeCloseTo(1, 5);
-    expect(plume.visible).toBe(true);
-    const atLip = density(f);
-    head.geometry.computeBoundingBox();
-    // The interior gas volume spans the air column; its material clips at water.
-    expect(head.geometry.boundingBox!.max.y).toBeCloseTo(0.15, 6);
-    expect(head.geometry.boundingBox!.min.y).toBeLessThan(f.geometry.boundingBox!.max.y);
-    expect(head.geometry.boundingBox!.max.x).toBeGreaterThan(0.0085);
-    const headUniforms = (head.material as THREE.ShaderMaterial).uniforms;
-    const plumeUniforms = (plume.material as THREE.ShaderMaterial).uniforms;
-    expect(headUniforms.uDetail.value).toBe(quality === "LOW" ? 0 : 1);
-    expect(headUniforms.uMouth.value).toBeGreaterThan(0.9);
-    expect(plumeUniforms.uOpacity.value).toBeCloseTo(
-      Math.min(0.9, (1 - Math.exp(-density(f) * 1.55 * 0.92)) * headUniforms.uMouth.value * 1.25), 6);
-    expect(headUniforms.uLevel.value).toBeCloseTo(liquid(f).uniforms.uLevel.value);
-    expect(headUniforms.uUp.value.equals(liquid(f).uniforms.uUp.value)).toBe(true);
-    const matrix = new THREE.Matrix4();
-    plume.getMatrixAt(0, matrix);
-    expect(plume.count).toBe(1);
-    const plumeBottom = matrix.elements[13] - Math.hypot(matrix.elements[4], matrix.elements[5], matrix.elements[6]);
-    expect(plumeBottom).toBeCloseTo(0.144, 4);
-    expect(plumeBottom).toBeLessThan(head.geometry.boundingBox!.max.y);
-    f.advance(1, chemistry(1, 0), quality);
-    expect(density(f)).toBeLessThan(atLip);
-    expect(density(f)).toBeGreaterThan(atLip * 0.8);
-    expect(head.visible).toBe(true);
-    expect(plume.visible).toBe(true);
-    expect(headUniforms.uMouth.value).toBeGreaterThan(0);
-    expect(headUniforms.uMouth.value).toBeLessThan(0.3);
+    expect(front(f)).toBe(0);
+    expect(residue(f)).toBe(0);
     expect(f.get("TubeNOBubbles").visible).toBe(true);
-    f.advance(29, chemistry(1, 0), quality);
+    expect(f.get("TubeNOAttachedBubbles").visible).toBe(true);
+    expect(f.get("TubeSurfaceFoam").visible).toBe(false);
+  });
+
+  it("shows only a faint, short outlet wisp during vigorous heating", () => {
+    const f = fixture("copper-nitric", true);
+    f.update(chemistry(0.5, 1, 1));
+    f.advance(1, chemistry(0.5, 1, 1));
+    const plume = f.get<THREE.InstancedMesh>("TubeNO2");
+    expect(plume.visible).toBe(true);
+    expect((plume.material as THREE.ShaderMaterial).uniforms.uOpacity.value).toBeLessThan(0.06);
+    expect(f.get("TubeNO2Headspace").visible).toBe(false);
+    f.advance(2, chemistry(1, 0, 0));
     expect(plume.visible).toBe(false);
-    expect(f.get("TubeNOBubbles").visible).toBe(false);
-    expect(density(f)).toBeGreaterThan(0);
-    expect(density(f)).toBeLessThan(atLip * 0.3);
-    const atThirty = residue(f);
-    expect(atThirty).toBeGreaterThan(0.1);
-    f.advance(30, chemistry(1, 0), quality);
-    expect(head.visible).toBe(true);
-    expect(residue(f)).toBeGreaterThan(0.5);
-    expect(residue(f)).toBeGreaterThan(atThirty * 0.8);
-    f.advance(60, chemistry(1, 0), quality);
-    expect(head.visible).toBe(true);
-    expect(residue(f)).toBeGreaterThan(0.45);
-    f.advance(60, chemistry(1, 0), quality);
-    expect(head.visible).toBe(true);
-    expect(residue(f)).toBeGreaterThan(0.5);
-    f.advance(120, chemistry(1, 0), quality);
-    expect(residue(f)).toBeLessThan(0.3);
-    f.advance(60, chemistry(1, 0), quality);
-    expect(head.visible).toBe(false);
-    expect(plume.visible).toBe(false);
-  }, 30_000); // simulates several seconds of gas build-up per quality level
+  });
 
   it("keeps the final copper solution saturated yet transparent", () => {
     const f = fixture("copper-nitric");
     f.update(chemistry(1));
-    expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("268fc5");
+    expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("165071");
     expect(liquid(f).uniforms.uOpacity.value).toBeLessThan(0.5);
-  });
-
-  it("keeps accumulated gas continuous across progress and rate override jumps", () => {
-    const f = fixture("copper-nitric");
-    f.update(chemistry(0.8, 1));
-    f.advance(3, chemistry(0.8, 1));
-    const before = density(f), risen = front(f);
-    expect(before).toBeGreaterThan(0.1);
-    f.update(chemistry(0.2));
-    expect(density(f)).toBe(before);
-    expect(front(f)).toBe(risen);
-    f.advance(1, chemistry(0.2));
-    expect(density(f)).toBeLessThan(before);
-    expect(f.get("TubeNO2Headspace").visible).toBe(true);
-    expect(f.get("TubeNO2").visible).toBe(true);
-  });
-
-  it("rises from the water over seconds and delays the outlet at low rate", () => {
-    const fast = fixture("copper-nitric");
-    const slow = fixture("copper-nitric");
-    fast.update(chemistry(0.1, 1));
-    slow.update(chemistry(0.1, 0.25));
-    expect(front(fast)).toBe(0);
-    expect(density(fast)).toBe(0);
-    fast.advance(2, chemistry(0.1, 1));
-    slow.advance(2, chemistry(0.1, 0.25));
-    expect(front(fast)).toBeGreaterThan(front(slow) * 1.5);
-    expect(front(fast)).toBeGreaterThan(0.9);
-    expect(fast.get("TubeNO2").visible).toBe(true);
-    fast.advance(8, chemistry(0.1, 1));
-    expect(front(fast)).toBeCloseTo(1, 5);
-    expect(fast.get("TubeNO2").visible).toBe(true);
-    expect(slow.get("TubeNO2").visible).toBe(false);
-  });
-
-  it.each<RuntimeQuality>(["LOW", "HIGH"])("brings the mouth and plume in smoothly, then fades both at %s", quality => {
-    const f = fixture("copper-nitric");
-    const head = (f.get("TubeNO2Headspace").material as THREE.ShaderMaterial).uniforms;
-    const plume = f.get<THREE.InstancedMesh>("TubeNO2");
-    const opacity = () => (plume.material as THREE.ShaderMaterial).uniforms.uOpacity.value as number;
-    f.update(chemistry(0.5, 1), quality);
-    const onset: number[] = [];
-    for (let i = 0; i < 20; i++) {
-      f.advance(0.25, chemistry(0.5, 1), quality);
-      onset.push(opacity());
-      expect(head.uMouth.value).toBeGreaterThanOrEqual(0);
-      expect(head.uMouth.value).toBeLessThanOrEqual(1);
-    }
-    expect(onset[11]).toBeGreaterThan(0);
-    expect(onset.at(-1)!).toBeGreaterThan(onset[11]);
-    for (let i = 1; i < onset.length; i++) {
-      expect(onset[i]).toBeGreaterThanOrEqual(onset[i - 1] - 1e-6);
-      expect(onset[i] - onset[i - 1]).toBeLessThan(onset.at(-1)! * 0.25);
-    }
-    const peak = opacity();
-    f.advance(0.25, chemistry(1, 0), quality);
-    expect(plume.visible).toBe(true);
-    expect(opacity()).toBeLessThan(peak);
-    f.advance(2, chemistry(1, 0), quality);
-    expect(opacity()).toBeLessThan(peak * 0.05);
-  });
-
-  it("clears accumulated gas on reverse time seek even at the same progress", () => {
-    const f = fixture("copper-nitric");
-    f.update(chemistry(0.5, 1));
-    f.advance(3, chemistry(0.5, 1));
-    expect(density(f)).toBeGreaterThan(0.1);
-    f.visuals.update(chemistry(0.5), 0, "HIGH", Infinity);
-    expect(density(f)).toBe(0);
-    expect(f.get("TubeNO2Headspace").visible).toBe(false);
   });
 
   it.each<RuntimeQuality>(["LOW", "HIGH"])("fades bubble sizes with rate without changing the pool at %s", quality => {
@@ -701,7 +586,7 @@ describe("tube reaction rendering contract", () => {
     const barium = fixture("barium-sulfate");
     barium.update(chemistry(0.2 / 45));
     expect(liquid(barium).uniforms.uCloudiness.value).toBeGreaterThan(0);
-    expect(liquid(barium).uniforms.uCloudiness.value).toBeLessThan(0.5);
+    expect(liquid(barium).uniforms.uCloudiness.value).toBeGreaterThan(0.5);
     barium.update(chemistry(0.9 / 45));
     expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);
     barium.update(chemistry(15 / 45));
@@ -716,17 +601,17 @@ describe("tube reaction rendering contract", () => {
     expect(barium.get("TubeSediment").visible).toBe(true);
   });
 
-  it("keeps BaSO4 residue on the wall while the milky haze clears over minutes", () => {
+  it("keeps a faint BaSO4 opalescence above the settled powder, then clears it", () => {
     const barium = fixture("barium-sulfate");
     barium.update(chemistry(1));
     const material = liquid(barium);
     expect(material.uniforms.uWallFilm.value).toBeCloseTo(1);
-    expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0.65);
+    expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0.035);
     barium.advance(45, chemistry(1));
-    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.6);
+    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.03);
     barium.advance(90, chemistry(1));
-    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.1);
-    expect(material.uniforms.uResidualHaze.value).toBeLessThan(0.3);
+    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.005);
+    expect(material.uniforms.uResidualHaze.value).toBeLessThan(0.02);
     barium.advance(65, chemistry(1));
     expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0);
     expect(material.uniforms.uWallFilm.value).toBeCloseTo(1);

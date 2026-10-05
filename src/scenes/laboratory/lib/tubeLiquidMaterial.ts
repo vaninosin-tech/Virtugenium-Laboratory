@@ -98,7 +98,7 @@ float dyeHalo = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   // Rising gas mixes Cu2+ through the entire column from the outset.
   // Keep only a soft enrichment near the granule and in the rising wake.
-  float mixed = 1.0 - exp(-p * 11.0);
+  float mixed = smoothstep(0.18, 0.78, p);
   float wake = exp(-pow(radial.x * 3.0 + 0.15 * stream, 2.0))
     * (1.0 - smoothstep(0.35, 0.95, h));
   localMix = mixed * (0.79 + 0.21 * (1.0 - h) + 0.035 * wake);
@@ -171,12 +171,16 @@ if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTransportActive > 0.01)
   cloud *= mix(0.12 + 0.88 * smoothstep(0.015, 0.65, transportedMatter.g),
     1.0, smoothstep(0.35, 1.9, uTransportAge));
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
-vec3 tubeColor = mix(uBaseColor, uReactionColor, localMix);
+vec3 reactionTint = uReactionColor;
+if (uReactionKind > 0.5 && uReactionKind < 1.5)
+  reactionTint = mix(vec3(0.191, 0.402, 0.376), uReactionColor, smoothstep(0.55, 1.0, p));
+vec3 tubeColor = mix(uBaseColor, reactionTint, localMix);
 if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), vec3(0.25, 0.002, 0.075),
   max(dyeCloud, dyeHalo * 0.30));
 float baseChroma = max(max(uBaseColor.r, uBaseColor.g), uBaseColor.b) - min(min(uBaseColor.r, uBaseColor.g), uBaseColor.b);
 float endChroma = max(max(uReactionColor.r, uReactionColor.g), uReactionColor.b) - min(min(uReactionColor.r, uReactionColor.g), uReactionColor.b);
 float pigment = mix(smoothstep(0.15, 0.3, baseChroma), smoothstep(0.15, 0.3, endChroma), localMix);
+if (uReactionKind > 0.5 && uReactionKind < 1.5) pigment = localMix;
 if (uReactionKind > 3.5) pigment = max(dyeCloud, dyeHalo * 0.22);
 diffuseColor.rgb = tubeColor;
 float waterEdge = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.4);
@@ -197,7 +201,8 @@ float raspberry = uReactionKind > 3.5 ? dyeCloud : 0.0;
 float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
   * 0.45;
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
-  + (uReactionKind > 0.5 && uReactionKind < 1.5 ? 0.40 : 0.0))
+  + (uReactionKind > 0.5 && uReactionKind < 1.5
+    ? 0.40 + 0.25 * smoothstep(0.70, 1.0, p) : 0.0))
   + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 1.70, milk))
   + raspberry * 0.88 + dyeHalo * 0.06 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
