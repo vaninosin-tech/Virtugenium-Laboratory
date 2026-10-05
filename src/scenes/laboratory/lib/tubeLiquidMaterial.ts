@@ -135,11 +135,24 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
     texture2D(uTransport, dyeUv - vec2(0.13, 0.0)).r),
     max(texture2D(uTransport, dyeUv + vec2(0.0, 0.04)).r,
       texture2D(uTransport, dyeUv - vec2(0.0, 0.04)).r));
-  // Beer-Lambert absorption: a thicker path through a plume looks denser,
-  // while dilute edges remain translucent instead of becoming a hard mask.
-  dyeCloud = 1.0 - exp(-nearDye * 2.6 - transportedMatter.r * 7.0);
-  dyeCloud = max(dyeCloud, (1.0 - exp(-dyeHalo * 2.0)) * 0.52);
-  float dyeFade = 1.0 - smoothstep(4.5, 8.0, uTransportAge);
+  // Three separated descending tongues. The advected field supplies their
+  // movement, while the envelope closes small clear islands inside each
+  // tongue and leaves genuinely transparent channels between them.
+  float liquidHeight = clamp((uLevel - uBoundsMin.y) / uBoundsSize.y, 0.08, 1.0);
+  float descent = smoothstep(0.25, 2.4, uTransportAge);
+  float lobeA = exp(-pow((radial.x + 0.30 + 0.045 * sin(h * 29.0 - uTime * 1.7)) / 0.19, 2.0)
+    - pow((h - liquidHeight * (0.82 - 0.39 * descent)) / (liquidHeight * 0.31), 2.0));
+  float lobeB = exp(-pow((radial.x - 0.015 - 0.06 * sin(h * 24.0 + uTime * 1.3)) / 0.21, 2.0)
+    - pow((h - liquidHeight * (0.72 - 0.49 * descent)) / (liquidHeight * 0.37), 2.0));
+  float lobeC = exp(-pow((radial.x - 0.34 + 0.045 * sin(h * 27.0 - uTime * 1.1)) / 0.18, 2.0)
+    - pow((h - liquidHeight * (0.91 - 0.32 * descent)) / (liquidHeight * 0.28), 2.0));
+  float tongues = pow(max(max(lobeA * 0.88, lobeB), lobeC * 0.83), 0.68)
+    * smoothstep(0.15, 0.75, uTransportAge);
+  float transportedDye = 1.0 - exp(-nearDye * 2.8 - transportedMatter.r * 5.0);
+  dyeCloud = max(tongues, transportedDye * (0.08 + tongues * 0.76));
+  // A faint fringe belongs to each tongue, never a grey veil across the tube.
+  dyeHalo *= smoothstep(0.08, 0.30, tongues);
+  float dyeFade = 1.0 - smoothstep(7.0, 11.0, uTransportAge);
   dyeCloud *= dyeFade;
   dyeHalo *= dyeFade;
   localMix = 1.0 - dyeCloud;
@@ -153,7 +166,7 @@ if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTransportActive > 0.01)
   cloud *= smoothstep(0.015, 0.65, transportedMatter.g);
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 tubeColor = mix(uBaseColor, uReactionColor, localMix);
-if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), vec3(0.17, 0.006, 0.09),
+if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), vec3(0.25, 0.002, 0.075),
   max(dyeCloud, dyeHalo * 0.30));
 float baseChroma = max(max(uBaseColor.r, uBaseColor.g), uBaseColor.b) - min(min(uBaseColor.r, uBaseColor.g), uBaseColor.b);
 float endChroma = max(max(uReactionColor.r, uReactionColor.g), uReactionColor.b) - min(min(uReactionColor.r, uReactionColor.g), uReactionColor.b);
@@ -180,7 +193,7 @@ float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
   + (uReactionKind > 0.5 && uReactionKind < 1.5 ? 0.40 : 0.0))
   + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 0.72, milk))
-  + raspberry * 0.62 + dyeHalo * 0.10 + film * 0.60
+  + raspberry * 0.88 + dyeHalo * 0.06 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
 float edgeSoft = vCap > 0.5 ? max(0.42, clamp(abs(vTubeWaveSlope) * 8.0, 0.0, 1.0))
@@ -193,20 +206,30 @@ float relief = 0.7 + 0.2 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
 vec3 coloredLight = tubeColor * (0.68 + relief * 0.42) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.26;
 coloredLight += vec3(0.08, 0.13, 0.15) * (n - 0.5) * smoothstep(0.6, 0.95, uTemperature);
 coloredLight = mix(coloredLight,
-  tubeColor * vec3(1.15, 0.90, 1.05) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.08,
+  tubeColor * vec3(1.32, 0.72, 1.10) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.035,
   raspberry);
 outgoingLight = mix(mix(clearLight, coloredLight, pigment),
   mix(vec3(0.91 + 0.07 * relief), vec3(0.80 + 0.06 * relief), milk),
   clamp(cloud * mix(1.0, 0.88, milk), 0.0, 1.0));
 outgoingLight = mix(outgoingLight, vec3(0.93), film * 0.80);
 outgoingLight = mix(outgoingLight, vec3(0.85, 0.97, 1.0), tracerRidge * 0.32);
+// Surface lines and ripple sheen keep the hue of a coloured or cloudy body:
+// a lighter or darker shade of it, never the clear-water cyan over it.
+float tinted = clamp(max(pigment, cloud), 0.0, 1.0);
+vec3 body = outgoingLight;
 float underRim = (1.0 - vCap) * (1.0 - smoothstep(0.0005, 0.0017, -surfaceDistance));
-outgoingLight = mix(outgoingLight, vec3(0.10, 0.19, 0.22), underRim * 0.63);
-outgoingLight = mix(outgoingLight, vec3(0.82, 0.95, 0.98), capRim * 0.68);
+outgoingLight = mix(outgoingLight, mix(vec3(0.10, 0.19, 0.22), body * 0.45, tinted), underRim * 0.63);
+outgoingLight = mix(outgoingLight, mix(vec3(0.82, 0.95, 0.98), body + (vec3(1.0) - body) * 0.35, tinted),
+  capRim * 0.68);
 float waveBright = vCap * clamp(vTubeWaveSlope * 10.0, 0.0, 1.0);
 float waveDark = vCap * clamp(-vTubeWaveSlope * 10.0, 0.0, 1.0);
-outgoingLight = mix(outgoingLight, vec3(0.90, 0.97, 1.0), waveBright * 0.85);
-outgoingLight *= 1.0 - waveDark * 0.55;
+outgoingLight = mix(outgoingLight, mix(vec3(0.90, 0.97, 1.0), body + (vec3(1.0) - body) * 0.30, tinted),
+  waveBright * 0.85);
+outgoingLight *= 1.0 - waveDark * mix(0.55, 0.25, tinted);
+// Permanganate absorbs green strongly even under the bright bench lights.
+// Override the neutral water lighting only where a dense tongue is present.
+outgoingLight = mix(outgoingLight, vec3(0.38, 0.001, 0.075) + boundedSpecular * 0.025,
+  raspberry * 0.98);
 #include <opaque_fragment>
 if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.92), cloud * 0.82);
@@ -214,5 +237,5 @@ if (uReactionKind > 1.5 && uReactionKind < 2.5) {
 }`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v11-transport"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v15-tinted-ripple"; }
 }

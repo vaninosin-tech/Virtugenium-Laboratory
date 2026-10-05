@@ -86,7 +86,9 @@ async function capture(name, reagent) {
     return;
   }
   const start = Date.now();
-  const times = process.env.VISUAL_COPPER_TIMES === "1" && name === "hno3-copper"
+  const times = process.env.VISUAL_DIAG === '1' ? [0.25]
+    : process.env.VISUAL_SHORT === '1' ? [0, 0.25, 0.5, 1, 1.5, 2, 3, 5, 8]
+    : process.env.VISUAL_COPPER_TIMES === "1" && name === "hno3-copper"
     ? [2, 5, 10, 20]
     : [...Array.from({ length: 13 }, (_, i) => i * 0.25), 5, 8, 12];
   for (const t of times) {
@@ -94,6 +96,31 @@ async function capture(name, reagent) {
     const frame = `${name}-${String(t).replace(".", "p")}s`;
     const png = await page.screenshot({ path: `${out}/${frame}.png` });
     crops.push({ frame, png });
+    if (process.env.VISUAL_DIAG === '1' && name === 'kmno4-redox' && t === 0.25) {
+      for (const [label, names] of [
+        ['film', ['TubePourWallFilm']], ['bubbles', ['TubePourAirBubbles', 'TubeNOBubbles']],
+        ['caustics', ['TubeBottomCaustic', 'TubeStandCaustic']],
+        ['surface', ['TubeLiquidSurface', 'TubeRefractedSurface']],
+        ['backdrop', ['TubeRefractedBackdrop', 'TubeRefractedSurface']],
+        ['glass', ['Tube_Glass']],
+      ]) {
+        await page.evaluate(targets => {
+          window.__diagRestore = [];
+          window.__labScene.traverse(object => {
+            if (!targets.some(name => object.name.startsWith(name))) return;
+            const descriptor = Object.getOwnPropertyDescriptor(object, 'visible');
+            Object.defineProperty(object, 'visible', { configurable: true, get: () => false, set: () => {} });
+            window.__diagRestore.push(() => {
+              if (descriptor) Object.defineProperty(object, 'visible', descriptor);
+              else delete object.visible;
+            });
+          });
+        }, names);
+        await page.screenshot({ path: `${out}/${name}-0p25s-no-${label}.png` });
+        await page.evaluate(() => window.__diagRestore.forEach(restore => restore()));
+      }
+      break;
+    }
   }
   if (quality === "LOW") {
     const fps = await page.evaluate(() => {

@@ -261,6 +261,7 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   });
   if (!cavity || !shell) return null;
   const volume = cavity;
+  const glassShell = shell;
   volume.geometry.computeBoundingBox();
   const box = volume.geometry.boundingBox!;
   const size = box.getSize(new THREE.Vector3());
@@ -286,6 +287,26 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   if (liquid) {
     liquid.uniforms.uMixingStrength.value = 0;
     liquid.uniforms.uTopHighlight.value = 0.04;
+  }
+  const originalShellMaterial = shell.material;
+  const dyedShellMaterial = kind === "permanganate-redox" && options.incomingDyed
+    && shell.material instanceof THREE.MeshPhysicalMaterial ? shell.material.clone() : null;
+  if (dyedShellMaterial) {
+    // three.js does not copy onBeforeCompile when cloning a material.
+    const compileShell = (originalShellMaterial as THREE.MeshPhysicalMaterial).onBeforeCompile;
+    dyedShellMaterial.onBeforeCompile = (shader, renderer) => {
+      compileShell(shader, renderer);
+      // Broad white glass reflections washed out the dyed liquid and formed
+      // oval holes. Preserve the contour while clearing the lower window.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "diffuseColor.a = max(diffuseColor.a, crack * 0.95);",
+        `diffuseColor.a = max(diffuseColor.a, crack * 0.95);
+float dyeWindow = 1.0 - smoothstep(0.31, 0.35, vTubeHeight);
+diffuseColor.a *= mix(1.0, 0.22, dyeWindow);
+outgoingLight *= mix(1.0, 0.32, dyeWindow);`);
+    };
+    dyedShellMaterial.customProgramCacheKey = () => "test-tube-clear-dyed-window-v1";
+    shell.material = dyedShellMaterial;
   }
 
   // Extend only the cylindrical wall, then clip against the world-horizontal
@@ -735,7 +756,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         backdrop.up.value.copy(up.value);
         backdrop.level.value = level.value;
         backdrop.tracerStrength.value = transport && !options.incomingDyed && transport.running ? 1 : 0;
-        backdropWall.visible = refraction && quality !== "LOW";
+        backdropWall.visible = refraction && quality !== "LOW" && !options.incomingDyed;
         // Its flat transmission pass draws an opaque line in the player's
         // near-horizontal view. The physical liquid cap still carries waves.
         backdropCap.visible = false;
@@ -794,11 +815,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         const wallX = towardCameraX / cameraDistance;
         const wallZ = towardCameraZ / cameraDistance;
         for (let vertex = 0; vertex < positions.count; vertex++) {
-          const width = (uv.getX(vertex) - 0.5) * radius * 0.75;
+          const width = (uv.getX(vertex) - 0.5) * Math.min(0.0035, radius * 0.36);
           const y = THREE.MathUtils.lerp(leading, trailing, uv.getY(vertex));
-          const theta = 0.55 + width / radius + Math.sin(y * 100 + pourAge * 4) * 0.005;
-          const x = center.x + radius * 0.983 * (wallX * Math.cos(theta) - wallZ * Math.sin(theta));
-          const z = center.z + radius * 0.983 * (wallZ * Math.cos(theta) + wallX * Math.sin(theta));
+          // The dyed trickle clings to the near-side inner wall, close to its
+          // silhouette. In projection it must never resemble an axial rod.
+          const theta = 1.24 + width / radius + Math.sin(y * 100 + pourAge * 4) * 0.005;
+          const x = center.x + radius * 0.965 * (wallX * Math.cos(theta) - wallZ * Math.sin(theta));
+          const z = center.z + radius * 0.965 * (wallZ * Math.cos(theta) + wallX * Math.sin(theta));
           positions.setXYZ(vertex, x, y, z);
         }
         positions.needsUpdate = true;
@@ -1154,6 +1177,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       disposed = true;
       volume.material = baseline;
       volume.geometry = originalGeometry;
+      if (dyedShellMaterial) glassShell.material = originalShellMaterial;
       detachImmersion.forEach(detach => detach());
       immersion.dispose();
       group.removeFromParent();
@@ -1165,6 +1189,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         bottomCausticMaterial.dispose(); standCausticMaterial.dispose();
         curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
+        dyedShellMaterial?.dispose();
         for (const mesh of [flakes, bubbles, pourAir, attachedBubbles, gas, splash, condensate, foam]) mesh.dispose();
       });
     },

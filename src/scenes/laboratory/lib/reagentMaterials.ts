@@ -57,12 +57,15 @@ function addCoordinates(shader: Shader) {
   shader.vertexShader = `uniform vec3 uBoundsMin;
 uniform vec3 uBoundsSize;
 varying vec3 vReagentPosition;
+varying vec3 vReagentWorldPosition;
 varying float vReagentTop;
 ${shader.vertexShader}`.replace("#include <begin_vertex>", `#include <begin_vertex>
 vReagentPosition = (position - uBoundsMin) / uBoundsSize;
+vReagentWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
 vReagentTop = max(normal.y, 0.0);
 `);
   shader.fragmentShader = `varying vec3 vReagentPosition;
+varying vec3 vReagentWorldPosition;
 varying float vReagentTop;
 ${shader.fragmentShader}`;
 }
@@ -88,6 +91,7 @@ export class GlassMaterial extends THREE.MeshPhysicalMaterial {
       uAbsorptionColor: { value: new THREE.Color("#d9e9ef") },
       uAmber: { value: variant === "amber" ? 1 : 0 },
       uDenseLiquid: { value: 0 }, uClearLiquid: { value: 0 }, uLiquidLevel: { value: 0 },
+      uLiquidWorldY: { value: 0 },
     };
     this.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
@@ -99,7 +103,7 @@ uniform vec3 uEdgeTint;
 uniform float uAbsorption;
 uniform vec3 uAbsorptionColor;
 uniform float uAmber;
-uniform float uDenseLiquid; uniform float uClearLiquid; uniform float uLiquidLevel;
+uniform float uDenseLiquid; uniform float uClearLiquid; uniform float uLiquidLevel; uniform float uLiquidWorldY;
 ${shader.fragmentShader}`.replace("#include <opaque_fragment>", `
 float edge = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), uFresnelPower);
 float height = clamp(vReagentPosition.y, 0.0, 1.0);
@@ -120,21 +124,26 @@ outgoingLight = absorption * totalDiffuse * mix(0.08, 0.6, uAmber) +
   totalSpecular * mix(vec3(1.0), uEdgeTint, edge) *
   (0.7 + edge * uFresnelStrength) / max(diffuseColor.a, 0.08);
 outgoingLight += uEdgeTint * totalDiffuse * edge * 0.12 * (1.0 - uAmber);
-float denseRegion = uDenseLiquid * (1.0 - smoothstep(uLiquidLevel - 0.012,
-  uLiquidLevel + 0.012, vReagentPosition.y));
-float wetRegion = uClearLiquid * (1.0 - smoothstep(uLiquidLevel - 0.009,
-  uLiquidLevel + 0.009, vReagentPosition.y));
+float denseRegion = uDenseLiquid * (1.0 - smoothstep(uLiquidWorldY - 0.0015,
+  uLiquidWorldY + 0.0015, vReagentWorldPosition.y));
+float wetRegion = uClearLiquid * (1.0 - smoothstep(uLiquidWorldY - 0.0012,
+  uLiquidWorldY + 0.0012, vReagentWorldPosition.y));
 outgoingLight = mix(outgoingLight, outgoingLight * vec3(0.76, 0.91, 0.94)
   + vec3(0.012, 0.027, 0.032), wetRegion * 0.65);
 diffuseColor.a = clamp(diffuseColor.a + wetRegion * (0.12 + edge * 0.12), 0.0, 0.96);
-outgoingLight = mix(outgoingLight, vec3(0.055, 0.007, 0.080) + totalSpecular * 0.13,
-  denseRegion * 0.82);
-diffuseColor.a = max(diffuseColor.a, denseRegion * 0.82);
+// Amber is still visible above the meniscus, but cannot glow orange over a
+// near-black permanganate column or overpower the label shoulder.
+outgoingLight = mix(outgoingLight,
+  vec3(0.11, 0.048, 0.018) + min(totalSpecular, vec3(0.16)) * 0.12,
+  uDenseLiquid * (1.0 - denseRegion) * 0.94);
+outgoingLight = mix(outgoingLight, vec3(0.025, 0.003, 0.043) +
+  min(totalSpecular, vec3(0.22)) * vec3(0.22, 0.11, 0.30), denseRegion * 0.96);
+diffuseColor.a = max(diffuseColor.a, denseRegion * 0.94);
 #include <opaque_fragment>`);
     };
   }
 
-  customProgramCacheKey() { return "reagent-glass-v15-wet-solution"; }
+  customProgramCacheKey() { return "reagent-glass-v17-deep-amber"; }
 }
 
 export interface LiquidOptions {
@@ -285,11 +294,16 @@ ${shader.fragmentShader}`.replace("totalEmissiveRadiance += c * uEmissionStrengt
   float meniscus = cap * smoothstep(0.17, 0.44, length(vLocal.xz - vec2(0.5)));
   outgoingLight = mix(outgoingLight, outgoingLight * 0.40 + vec3(0.12, 0.20, 0.22), meniscus * 0.56);
   outgoingLight += cap * (1.0 - meniscus) * vec3(0.065, 0.11, 0.13);
+  if (uBottleDye > 0.5) {
+    outgoingLight = mix(vec3(0.016, 0.001, 0.028), vec3(0.13, 0.016, 0.18), cap * 0.78)
+      + min(totalSpecular, vec3(0.16)) * 0.09;
+    diffuseColor.a = 0.995;
+  }
   #include <opaque_fragment>`);
     };
   }
 
-  customProgramCacheKey() { return "bottle-liquid-v4-no-screen-capture"; }
+  customProgramCacheKey() { return "bottle-liquid-v5-dense-permanganate"; }
 }
 
 /** Solve the mean height of a tilted cylindrical column, including floor/lip clipping. */
@@ -444,6 +458,10 @@ export function installReagentMaterials(root: THREE.Object3D, config: ReagentCon
     liquid.uniforms.uBottleLevel.value = conservedBottleLevel(
       liquid.uniforms.uFillLevel.value, e[1] / sy, e[9] / sy,
       size.x * 0.5, size.z * 0.5, size.y);
+    const topY = (liquid.uniforms.uBoundsMin.value as THREE.Vector3).y
+      + size.y * liquid.uniforms.uBottleLevel.value;
+    const worldY = fillMesh.localToWorld(new THREE.Vector3(0, topY, 0)).y;
+    for (const material of glass) material.uniforms.uLiquidWorldY.value = worldY;
   };
   const binding = { reagentId: config.id, glass, liquid, copper: copper ? { shake: copper.shake } : undefined,
     setFillLevel, getFillLevel: () => currentFill, updateSurface, dispose: () => {
