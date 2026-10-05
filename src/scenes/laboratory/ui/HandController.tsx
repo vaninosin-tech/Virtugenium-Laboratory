@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { handActionFor, standActionFor } from "../lib/standTableActions";
 import { HAND, useHandStore, type HeldItem } from "../lib/useHandStore";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { WORKBENCH_CARRY } from "../lib/tableTray";
 import { sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 
 /** How high above the worktop the held item glides — just off it, its shadow right under it. */
@@ -141,7 +142,11 @@ export function HandController() {
       const clampTaken = useBunsenStandStorageStore.getState().attachedTubeSlotIndex !== null;
       useHandStore
         .getState()
-        .setAim(action ? { part: held.kind === "bottle" || clampTaken ? "tube" : "clamp", refused: action.blocked } : null);
+        .setAim(
+          action && action.part !== "tray"
+            ? { part: held.kind === "bottle" || clampTaken ? "tube" : "clamp", refused: action.blocked }
+            : null,
+        );
       s.projected.copy(HAND.itemPosValid ? HAND.itemPos : HAND.point).project(camera);
     }
     const rect = gl.domElement.getBoundingClientRect();
@@ -153,6 +158,7 @@ export function HandController() {
 
 /** The workbench carry clamps by itself near the ring; the hand only says so. */
 function workbenchTubeHint(held: Extract<HeldItem, { kind: "workbench-tube" }>): { label: string; blocked: boolean } | null {
+  if (WORKBENCH_CARRY.overTray) return { label: "Поставить на поднос", blocked: false };
   const near = useTestTubeDragStore.getState().isNearHolder;
   if (near) return { label: "Поставить обратно в штатив для пробирок", blocked: false };
   const clamp = standActionFor({ kind: "rack-tube", location: "workbench", index: held.index }, { fromHand: true });

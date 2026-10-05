@@ -7,6 +7,9 @@ import type { Position3 } from "../lib/layout";
 import { createHoverHitboxGeometry } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
+import { unloadLabel, type CarryPlace } from "../lib/trayCarry";
+import { trayUnloadPlace } from "../lib/trayUnloadPlace";
+import { useStandHintStore } from "../lib/useStandHintStore";
 
 /** Held-tray true/real-world size — matches `useShelfTrayFlight`'s own flight target scale. */
 const TRAY_WORLD_SCALE = 1;
@@ -27,9 +30,15 @@ export function TrayEquipmentDisplay({
   instance,
   restPosition,
   onReturn,
+  onUnload,
+  owner,
 }: {
   readonly instance: THREE.Object3D;
   readonly restPosition: Position3;
+  /** Put down where the player stands (at the table, in the hood) — VL-017. */
+  readonly onUnload: (place: CarryPlace) => void;
+  /** For the hover caption. */
+  readonly owner: string;
   readonly onReturn: (worldPos: Position3, worldQuat: readonly [number, number, number, number], worldScale: number) => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -54,6 +63,13 @@ export function TrayEquipmentDisplay({
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     if (useReagentInspectionStore.getState().inspectedId !== null) return;
+    const place = trayUnloadPlace();
+    if (place) {
+      document.body.style.cursor = "auto";
+      useStandHintStore.getState().hide(owner);
+      onUnload(place);
+      return;
+    }
     const group = groupRef.current;
     if (!group) return;
     const wp = new THREE.Vector3();
@@ -76,11 +92,14 @@ export function TrayEquipmentDisplay({
         if (useReagentInspectionStore.getState().inspectedId !== null) return;
         document.body.style.cursor = "pointer";
         setHovered(true);
+        const place = trayUnloadPlace();
+        if (place) useStandHintStore.getState().showLabel(owner, unloadLabel(place));
       }}
       onPointerOut={(event) => {
         event.stopPropagation();
         document.body.style.cursor = "auto";
         setHovered(false);
+        useStandHintStore.getState().hide(owner);
       }}
     >
       <primitive object={instance} />

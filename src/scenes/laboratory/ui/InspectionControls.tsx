@@ -1,6 +1,3 @@
-import { useEffect } from "react";
-
-import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
@@ -8,6 +5,8 @@ import { getChainNeighbors } from "../lib/layout";
 import { useNavButtonCalibrationStore, type NavButtonConfig } from "../lib/useNavButtonCalibrationStore";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
+import { useBurnerStore } from "../lib/useBurnerStore";
+import { unloadTray } from "../lib/trayCarry";
 
 /**
  * HTML overlay controls shown while focused on a piece of interactive
@@ -96,20 +95,15 @@ export function InspectionControls({ onBack }: { readonly onBack: () => void }) 
   const showChainArrows = cabinetPhase === "inspecting" && focusedCabinetId !== null;
   const { prevId, nextId } = showChainArrows ? getChainNeighbors(focusedCabinetId!) : { prevId: null, nextId: null };
   const isInspectingReagent = useReagentInspectionStore((state) => state.inspectedId !== null);
-  const openTablet = useLaboratoryStore((state) => state.openTablet);
 
-  // Arriving at the fume hood opens «Перенести» by itself — choosing what to
-  // bring over is the whole point of walking up to it. Once per arrival, and
-  // only with something on the bench to bring; the button below reopens it.
-  const arrivedAtHood = activeTargetId === "fume-hood" && controlsSettled;
-  useEffect(() => {
-    if (!arrivedAtHood) return;
-    const benchHasItems =
-      useReagentStorageStore.getState().workbenchItems.length > 0 ||
-      useTestTubeStorageStore.getState().workbenchTestTubes.length > 0 ||
-      useBunsenStandStorageStore.getState().onWorkbench;
-    if (benchHasItems) useLaboratoryStore.getState().openTablet("transfer");
-  }, [arrivedAtHood]);
+  // Things are carried on the tray (VL-017): at the table or the hood
+  // everything on it can be put down at once (one by one: a click on it).
+  const bottlesOnTray = useReagentStorageStore((state) => state.trayItems.length > 0);
+  const tubesOnTray = useTestTubeStorageStore((state) => state.trayTestTubes.length > 0);
+  const standOnTray = useBunsenStandStorageStore((state) => state.onTray);
+  const lampOnTray = useBurnerStore((state) => state.place === "tray");
+  const trayLoaded = bottlesOnTray || tubesOnTray || standOnTray || lampOnTray;
+  const unloadPlace = activeTargetId === "table" ? "workbench" : activeTargetId === "fume-hood" ? "fumeHood" : null;
 
   // Nav conflicts with reagent inspection (its own ОСТАВИТЬ/ВЗЯТЬ + drag
   // rotation own the screen while a bottle is being examined) — hidden
@@ -144,17 +138,17 @@ export function InspectionControls({ onBack }: { readonly onBack: () => void }) 
           <Chevron width={sideIconWidth} height={sideIconHeight} mirrored />
         </button>
       )}
-      {activeTargetId === "fume-hood" && (
+      {unloadPlace && trayLoaded && (
         <button
           type="button"
-          onClick={() => openTablet("transfer")}
+          onClick={() => unloadTray(unloadPlace)}
           className="vg-hud-btn vg-hud-transfer"
-          aria-label="Перенести предметы в вытяжной шкаф"
+          aria-label={unloadPlace === "workbench" ? "Выгрузить поднос на стол" : "Выгрузить поднос в вытяжной шкаф"}
           // Sits directly on top of the back button, so it follows whatever
           // height the F9 panel gives that one instead of a fixed offset.
           style={{ bottom: BACK_BUTTON_BOTTOM + navButtonValues.bottom.buttonHeight + STACK_GAP }}
         >
-          Перенести
+          Выгрузить поднос
         </button>
       )}
       <button
@@ -277,6 +271,12 @@ const HUD_BUTTON_CSS = `
 .vg-hud-svg-icon {
   display: block;
   overflow: visible;
+}
+/* A button's icon can reach past the button itself: clicks go to the button,
+   never to its insides — the «Назад» icon used to swallow clicks on the
+   «Выгрузить поднос» button stacked above it. */
+.vg-hud-btn * {
+  pointer-events: none;
 }
 .vg-hud-chevron-path {
   fill: none;

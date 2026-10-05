@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type { ContainerType } from "../../../entities/laboratory/reagents";
 import type { HotspotTargetId } from "./layout";
 import { REAGENT_TRAY_SLOTS } from "./useTrayReagentAreaStore";
+import { useLabNoticeStore } from "./useLabNoticeStore";
 
 /** One reagent the player has taken — enough to re-look-up its full `ReagentContainerConfig` (`REAGENTS[reagentId]`) and render a static display copy. Display size is NOT stored per-instance: the tray uses the live, dev-tunable `heldTray.reagentScale` and the workbench uses its own live `WorkbenchReagentAreaConfig.scale` — both independent, both reactive to dev-panel changes even for items already placed. */
 export interface StoredReagent {
@@ -100,7 +101,7 @@ interface ReagentStorageState {
   takeReagent: (cabinetId: HotspotTargetId, item: StoredReagent) => boolean;
   /** Moves every current tray item onto the workbench (capped at `MAX_REAGENTS_ON_TRAY` total) and empties the tray — call once when the cabinet interaction ends (camera starts its return flight). */
   transferTrayToWorkbench: () => void;
-  /** Removes one no-longer-needed workbench reagent after it is dropped into the tray return zone. */
+  /** A workbench reagent dropped onto the tray on the table goes onto it (VL-017), into a free slot of the bottles' half; refused (it stays) when there is none. */
   returnWorkbenchReagent: (instanceId: string) => void;
   /** Exchanges two workbench items' grid slots. Tray and cabinet items are never touched. */
   swapWorkbenchReagents: (firstInstanceId: string, secondInstanceId: string) => void;
@@ -146,7 +147,8 @@ export const useReagentStorageStore = create<ReagentStorageState>((set, get) => 
 
   resetCabinetSession: (cabinetId) =>
     set((state) => {
-      const stillOutsideCabinet = [...state.trayItems, ...state.workbenchItems]
+      // Out in the hood counts too, or the shelf showed a second copy of it.
+      const stillOutsideCabinet = [...state.trayItems, ...state.workbenchItems, ...state.fumeHoodItems]
         .filter((item) => item.cabinetId === cabinetId)
         .map((item) => item.instanceId);
       return {
@@ -184,9 +186,19 @@ export const useReagentStorageStore = create<ReagentStorageState>((set, get) => 
     }),
 
   returnWorkbenchReagent: (instanceId) =>
-    set((state) => ({
-      workbenchItems: state.workbenchItems.filter((item) => item.instanceId !== instanceId),
-    })),
+    set((state) => {
+      const item = state.workbenchItems.find((candidate) => candidate.instanceId === instanceId);
+      if (!item) return state;
+      const slotIndex = nextFreeTraySlot(state.trayItems);
+      if (slotIndex < 0) {
+        useLabNoticeStore.getState().show("На подносе нет места для склянок", "refusal");
+        return state;
+      }
+      return {
+        workbenchItems: state.workbenchItems.filter((candidate) => candidate.instanceId !== instanceId),
+        trayItems: [...state.trayItems, { ...item, slotIndex }],
+      };
+    }),
 
   swapWorkbenchReagents: (firstInstanceId, secondInstanceId) =>
     set((state) => {

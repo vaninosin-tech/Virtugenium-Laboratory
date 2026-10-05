@@ -21,6 +21,8 @@ import { clickWorkbenchRackTube } from "../lib/standTableActions";
 import { useStandHintStore } from "../lib/useStandHintStore";
 import { useStandMotionStore } from "../lib/useStandMotionStore";
 import { useHandStore } from "../lib/useHandStore";
+import { overTableTray, WORKBENCH_CARRY } from "../lib/tableTray";
+import { tubeToTray } from "../lib/trayCarry";
 import { ArrivalFlight } from "./StandMotion";
 import { consumePickablePressed, sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { useTestTubeHoverStore } from "../lib/useTestTubeHoverStore";
@@ -260,6 +262,13 @@ export function InspectableTestTubeSlot({
       // in from wherever the player actually released it instead of popping
       // straight into the ring вЂ” same "hand off exactly where it visually
       // was" trick `useReagentStorageStore.requestReturn` already uses.
+      if (overTrayRef.current) {
+        overTrayRef.current = false;
+        WORKBENCH_CARRY.overTray = false;
+        useTestTubeDragStore.getState().releaseIfHeld(instanceId);
+        tubeToTray("workbench", index);
+        return;
+      }
       if (nearRingRef.current) {
         const group = groupRef.current;
         if (!group) return;
@@ -287,6 +296,8 @@ export function InspectableTestTubeSlot({
   const fillCheckJarWorldPosRef = useRef(new THREE.Vector3());
   /** Live "close enough to the ring to clip in" result from the `useFrame` proximity check above вЂ” read by the click handler below, same "proximity arms it, a click commits it" split the jar-fill/jar-click-exception pair already uses. A plain ref (not state): it's read once per click, not something that should trigger a re-render every frame it changes. */
   const nearRingRef = useRef(false);
+  /** Live: the carried tube is over the tray on the table (`overTableTray`). */
+  const overTrayRef = useRef(false);
 
   // Two-leg return once released: "approach" travels to directly above the
   // slot at a safe lifted height (clears the rack's own rim/neighbors),
@@ -460,6 +471,10 @@ export function InspectableTestTubeSlot({
       // the click handler below (see `nearRingRef`'s doc there), the same
       // "proximity arms it, a click on empty air still commits" split the
       // jar-click exception already uses.
+      // Over the tray on the table: a click puts it on the tray (VL-017).
+      overTrayRef.current = overTableTray(tubeWorldPos);
+      WORKBENCH_CARRY.overTray = overTrayRef.current;
+
       const bunsenState = useBunsenStandStorageStore.getState();
       if (bunsenState.onWorkbench) {
         const ringWorldX = tablePosition[0] + bunsenState.tablePosition.x + TUBE_RING_LOCAL_OFFSET[0];

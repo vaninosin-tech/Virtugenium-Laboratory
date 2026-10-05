@@ -15,6 +15,8 @@ import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerIns
 import { ReagentHoverRim } from "./ReagentHoverRim";
 import { SpiritBurner } from "./SpiritBurner";
 import { StandStation, lampLayout } from "./StandStation";
+import { overTableTray } from "../lib/tableTray";
+import { standToTray } from "../lib/trayCarry";
 
 /**
  * "Away from the player" at the table: the table viewpoint's own look
@@ -163,6 +165,12 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
         // A click, not a drag: walk up to the stand.
         group.position.copy(pressedAt);
         if (!useHeatingStore.getState().active) useStandStationStore.getState().open();
+        return;
+      }
+      // Dropped on the tray on the table: onto it, with the lamp beside it (VL-017).
+      if (overTableTray(group.position)) {
+        group.position.copy(pressedAt);
+        standToTray("workbench");
         return;
       }
       useBunsenStandStorageStore

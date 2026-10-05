@@ -66,6 +66,7 @@ export function ReagentStaticDisplay({
   highlighted = false,
   onPointerDown,
   onHoverChange,
+  onActivate,
   interactionRef,
 }: {
   readonly reagent: ReagentContainerConfig;
@@ -91,6 +92,8 @@ export function ReagentStaticDisplay({
   readonly onPointerDown?: (event: ThreeEvent<PointerEvent>) => void;
   /** Told when the cursor enters/leaves the hitbox — hover stops here, so a wrapping group can't hear it itself. */
   readonly onHoverChange?: (hovered: boolean) => void;
+  /** A click on a tray copy: true if it was handled here (put down where the player stands) — else it goes back to its shelf. */
+  readonly onActivate?: () => boolean;
   /**
    * Exposes only the lightweight hitbox to callers that perform their own
    * raycasts. The full rendered hierarchy is deliberately not used as a
@@ -225,6 +228,10 @@ export function ReagentStaticDisplay({
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     if (!canReturnToShelf || !instanceId) return;
     event.stopPropagation();
+    if (onActivate?.()) {
+      document.body.style.cursor = "auto";
+      return;
+    }
     const group = groupRef.current;
     if (!group) return;
     const wp = new THREE.Vector3();

@@ -26,18 +26,15 @@ import {
 import { useDevMenuStore, type DevMenuCategory } from "../lib/useDevMenuStore";
 import { useFumeHoodControlsStore } from "../lib/useFumeHoodControlsStore";
 import { useFurniturePositionStore, type FurnitureId } from "../lib/useFurniturePositionStore";
-import { useBurnerStore } from "../lib/useBurnerStore";
 import { escapeTakenByHand } from "../lib/useHandStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 import { useHotspotObjectsStore } from "../lib/useHotspotObjectsStore";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { useReagentPickablesStore, type ReagentPickableId } from "../lib/useReagentPickablesStore";
-import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { useStopperHolderStore } from "../lib/useStopperHolderStore";
-import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useWorkbenchReagentAreaStore } from "../lib/useWorkbenchReagentAreaStore";
 import { useWorkbenchReagentDragStore } from "../lib/useWorkbenchReagentDragStore";
 import { isInsideTrayReturnZone } from "../lib/trayReturnZone";
@@ -753,13 +750,8 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
     }
     if (focusedId) useCabinetOpenStore.getState().setOpen(focusedId, false);
 
-    // The workbench hand-off is immediate: by the first frame of the return
-    // flight, every taken item is already in its final table container. This
-    // also avoids mounting a batch only after the door-close timer expires.
-    useReagentStorageStore.getState().transferTrayToWorkbench();
-    useTestTubeStorageStore.getState().transferTrayToWorkbench();
-    useBunsenStandStorageStore.getState().transferToWorkbench();
-    useBurnerStore.getState().transferToWorkbench();
+    // The tray is carried (VL-017): what was taken stays on it until the
+    // player puts it down at the table or in the fume hood.
 
     tweenFromPosition.current.copy(camera.position);
     const forward = new THREE.Vector3();

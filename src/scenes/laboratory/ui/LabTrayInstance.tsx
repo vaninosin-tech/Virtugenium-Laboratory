@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGLTF } from "@react-three/drei";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 
 import { getCabinetParallelTrayYaw, isTrayHeldEligible, type HotspotTargetId, type Position3 } from "../lib/layout";
@@ -21,6 +21,19 @@ import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
 import { TrayReturnZone } from "./TrayReturnZone";
 import { prepareTrayMaterials } from "../lib/trayMaterials";
+import { bottleFromTray, tubeFromTray, unloadLabel } from "../lib/trayCarry";
+import { trayUnloadPlace } from "../lib/trayUnloadPlace";
+import { TABLE_TRAY } from "../lib/tableTray";
+import { trayHasItems } from "../lib/trayCarry";
+
+/**
+ * Whether the tray is in the player's hands at this zone: in every cabinet;
+ * at the fume hood only while something is still on it — emptied there, it
+ * goes back to the table instead of hiding the worktop (VL-017).
+ */
+const trayHeldAt = (id: HotspotTargetId | null): boolean =>
+  isTrayHeldEligible(id) && (id !== "fume-hood" || trayHasItems());
+import { useStandHintStore } from "../lib/useStandHintStore";
 
 const MODEL_PATH = "/assets/models/LabTray_Metal.glb";
 /**
@@ -148,6 +161,14 @@ export function LabTrayInstance({
   const { scene } = useGLTF(MODEL_PATH);
   const { camera, gl, scene: rootScene, invalidate } = useThree();
   const groupRef = useRef<THREE.Group>(null);
+  // The tray on the workbench is where things are put on it (VL-017, `overTableTray`).
+  useEffect(() => {
+    if (mode !== "table") return;
+    TABLE_TRAY.object = groupRef.current;
+    return () => {
+      TABLE_TRAY.object = null;
+    };
+  }, [mode]);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const devWindow = window as unknown as {
@@ -246,7 +267,7 @@ export function LabTrayInstance({
   const showHeldContents =
     ((cabinetPhase === "inspecting" || cabinetPhase === "focusing") &&
       !returnRequested &&
-      isTrayHeldEligible(focusedCabinetId)) ||
+      trayHeldAt(focusedCabinetId)) ||
     isHeldTrayReturning;
   // The workbench tray is a separate, untouched scene object.  Its contents
   // stay mounted there while the held copy is animated independently.
@@ -321,7 +342,7 @@ export function LabTrayInstance({
       returnRequested: activeReturnRequested,
       trayReturnReady: activeTrayReturnReady,
     } = useSceneInteractionStore.getState();
-    const eligible = isTrayHeldEligible(activeCabinetId);
+    const eligible = trayHeldAt(activeCabinetId);
     // The table tray is permanently fixed and is never touched by held-tray
     // calibration or fade state.
     if (mode === "table") {
@@ -541,6 +562,19 @@ export function LabTrayInstance({
             position={position}
             worldScale={item.prewarm ? 0.0001 : trayReagentScale}
             instanceId={item.prewarm ? undefined : item.id}
+            // At the table or the hood a click puts it down there (VL-017); in a cabinet — back to its shelf.
+            onActivate={() => {
+              const place = trayUnloadPlace();
+              if (!place) return false;
+              useStandHintStore.getState().hide(item.id);
+              bottleFromTray(item.id, place);
+              return true;
+            }}
+            onHoverChange={(hovered) => {
+              const place = trayUnloadPlace();
+              if (hovered && place) useStandHintStore.getState().showLabel(item.id, unloadLabel(place));
+              else useStandHintStore.getState().hide(item.id);
+            }}
           />
         );
       })}
@@ -557,10 +591,31 @@ export function LabTrayInstance({
           a constant ~40% (`heldTray.reagentScale`, a bottle-calibrated
           value) regardless, which is exactly why it looked too small. */}
       {showContents && trayTestTubeItems.map((item, index) => (
-        <LabTestTubeInstance
+        <group
           key={item.instanceId}
-          position={computeTubeSlotPosition(TRAY_RACK_ANCHOR, index)}
-        />
+          // At the table or the hood a click puts it down in that rack (VL-017).
+          onClick={(event: ThreeEvent<MouseEvent>) => {
+            const place = trayUnloadPlace();
+            if (!place || useReagentInspectionStore.getState().inspectedId) return;
+            event.stopPropagation();
+            useStandHintStore.getState().hide(item.instanceId);
+            document.body.style.cursor = "auto";
+            tubeFromTray(item.instanceId, place);
+          }}
+          onPointerOver={(event: ThreeEvent<PointerEvent>) => {
+            const place = trayUnloadPlace();
+            if (!place) return;
+            event.stopPropagation();
+            document.body.style.cursor = "pointer";
+            useStandHintStore.getState().showLabel(item.instanceId, unloadLabel(place));
+          }}
+          onPointerOut={() => {
+            useStandHintStore.getState().hide(item.instanceId);
+            document.body.style.cursor = "auto";
+          }}
+        >
+          <LabTestTubeInstance position={computeTubeSlotPosition(TRAY_RACK_ANCHOR, index)} contents={item.contents} />
+        </group>
       ))}
       {/* The Bunsen stand — only one exists, so this is a plain boolean flag
           (`useBunsenStandStorageStore`), not a per-instance list like the

@@ -16,7 +16,6 @@ export type TabletSection =
   | "errors"
   | "answer"
   | "observations"
-  | "transfer"
   | "settings";
 
 /** Sections that require an accepted assignment (`selectedExperimentId`). */
@@ -25,7 +24,6 @@ export const TASK_LOCKED_SECTIONS: readonly TabletSection[] = [
   "answer",
   "observations",
   "errors",
-  "transfer",
 ];
 
 export const isSectionLockedWithoutTask = (

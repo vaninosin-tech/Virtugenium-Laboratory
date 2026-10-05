@@ -12,6 +12,8 @@ import { useHeatingStore } from "./useHeatingStore";
 import { useStandStationStore } from "./useStandStationStore";
 import { CAP_MS, CLAMP_TUBE_MOUTH, standBusy, useStandMotionStore } from "./useStandMotionStore";
 import { takeIntoHand, useHandStore, type HeldItem } from "./useHandStore";
+import { overTableTray } from "./tableTray";
+import { bottleToTray, lampToTray } from "./trayCarry";
 import { toggleTubePick, useTestTubeDragStore } from "./useTestTubeDragStore";
 import { useTestTubeStorageStore, type StoredTestTube, type TubeLocation } from "./useTestTubeStorageStore";
 
@@ -43,6 +45,8 @@ export interface StandAction {
   readonly blocked: boolean;
   /** @param origin where the clicked object is in the world, when known — a tube flies from there */
   readonly run: (origin?: Position3) => void;
+  /** What a held item is brought to for this — the tray has no snap pose and no outline of its own. */
+  readonly part?: "tray";
 }
 
 const NOTHING = () => {};
@@ -92,6 +96,12 @@ export function standActionFor(target: StandTarget, { fromHand = false }: { read
   const location = standLocation();
 
   if (target.kind === "burner") {
+    // Alone on the table (no stand to heat at): it is only to be carried (VL-017).
+    if (useBurnerStore.getState().place === "workbench" && !useBunsenStandStorageStore.getState().onWorkbench) {
+      return action("Поставить на поднос", () => {
+        lampToTray("workbench");
+      });
+    }
     const phase = useBurnerStore.getState().phase;
     return action(BURNER_LABEL[phase], () => {
       useStandMotionStore.getState().hold(CAP_MS);
@@ -210,6 +220,10 @@ function heldAsTarget(held: HeldItem): StandTarget {
  * there), a bottle near the clamped tube's mouth pours. Null: nothing here.
  */
 export function handActionFor(held: HeldItem, point: THREE.Vector3): StandAction | null {
+  // A bottle from the bench brought over the tray on the table goes onto it (VL-017).
+  if (held.kind === "bottle" && held.location === "workbench" && overTableTray(point)) {
+    return { label: "Поставить на поднос", blocked: false, part: "tray", run: () => void bottleToTray("workbench", held.instanceId) };
+  }
   if (!CLAMP_TUBE_MOUTH.valid) return null;
   const dx = point.x - CLAMP_TUBE_MOUTH.point.x;
   const dz = point.z - CLAMP_TUBE_MOUTH.point.z;

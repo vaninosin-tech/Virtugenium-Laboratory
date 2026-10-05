@@ -20,7 +20,6 @@ import { StagesTab } from "./tabs/StagesTab";
 import { SettingsTab } from "./tabs/SettingsTab";
 import { TasksTab } from "./tabs/TasksTab";
 import { TheoryTab } from "./tabs/TheoryTab";
-import { TransferTab } from "./tabs/TransferTab";
 import { colors, dangerButtonStyle, ghostButtonStyle, panelStyle, touch, typography } from "./tabletStyles";
 import "./scoreProgress.css";
 
@@ -31,7 +30,6 @@ const SECTION_TITLES: Record<TabletSection, string> = {
   errors: "Ошибки",
   answer: "Уравнение",
   observations: "Признаки реакции",
-  transfer: "Перенос в вытяжной шкаф",
   settings: "Настройки",
 };
 
@@ -120,8 +118,6 @@ export function TabletOverlay({ chrome = true, shellClassName, onClose }: Tablet
         return <EquationTab />;
       case "observations":
         return <ObservationsTab />;
-      case "transfer":
-        return <TransferTab />;
       case "settings":
         return <SettingsTab />;
       default:

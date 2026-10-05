@@ -25,9 +25,10 @@ describe("fixed 4 by 2 tray layout", () => {
     expect(x[1] - x[0]).toBeGreaterThan(0.11);
   });
 
-  it("reuses the first empty cell without moving other jars", () => {
+  it("reuses the first empty cell of the bottles' half (0, 1, 4, 5) without moving other jars (VL-016)", () => {
     const item = (slotIndex: number) => ({ slotIndex } as StoredReagent);
-    expect(nextFreeTraySlot([item(0), item(1), item(3), item(4)])).toBe(2);
-    expect(nextFreeTraySlot(Array.from({ length: 8 }, (_, index) => item(index)))).toBe(-1);
+    expect(nextFreeTraySlot([item(0), item(4), item(5)])).toBe(1);
+    expect(nextFreeTraySlot([item(0), item(1)])).toBe(4);
+    expect(nextFreeTraySlot([0, 1, 4, 5].map(item))).toBe(-1);
   });
 });

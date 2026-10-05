@@ -45,20 +45,25 @@ export function StandActionHint() {
     let shownFor: unknown = null;
     const refresh = () => {
       frame = requestAnimationFrame(refresh);
-      const target = useStandHintStore.getState().target;
+      const { target, label, owner } = useStandHintStore.getState();
       // A new object under the cursor has just set its own cursor in its
       // `pointerover`; forget the tone so ours is applied over it.
-      if (target !== shownFor) {
-        shownFor = target;
+      const showing = target ?? owner;
+      if (showing !== shownFor) {
+        shownFor = showing;
         delete box.dataset.tone;
       }
       // Bottles and rack tubes are taken into the hand; the stand's own parts act.
       const takeable = target?.kind === "bottle" || target?.kind === "rack-tube";
       const take = takeable ? takeLabel(target) : null;
       const next =
-        !target || !overScene || useHandStore.getState().held
+        !overScene || useHandStore.getState().held
           ? null
-          : takeable
+          : label
+            ? { label, blocked: false }
+            : !target
+              ? null
+              : takeable
             ? take
               ? { label: take, blocked: false }
               : null

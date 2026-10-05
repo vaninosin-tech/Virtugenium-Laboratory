@@ -13,13 +13,18 @@ interface StandHintState {
   readonly target: StandTarget | null;
   /** Identity of whoever set `target`, so a late `pointerout` from one object can't clear another's hint. */
   readonly owner: string | null;
+  /** A plain caption instead of a stand action — e.g. «Поставить на стол» over something on the tray. */
+  readonly label: string | null;
   show: (owner: string, target: StandTarget) => void;
+  showLabel: (owner: string, label: string) => void;
   hide: (owner: string) => void;
 }
 
 export const useStandHintStore = create<StandHintState>((set) => ({
   target: null,
   owner: null,
-  show: (owner, target) => set({ owner, target }),
-  hide: (owner) => set((state) => (state.owner === owner ? { owner: null, target: null } : state)),
+  label: null,
+  show: (owner, target) => set({ owner, target, label: null }),
+  showLabel: (owner, label) => set({ owner, label, target: null }),
+  hide: (owner) => set((state) => (state.owner === owner ? { owner: null, target: null, label: null } : state)),
 }));

@@ -87,7 +87,7 @@ function solutionExperimentSteps(
       isMet: (snapshot) => snapshot.clampedTubeContents?.includes(base) ?? false,
     },
     [`step-${experiment}-transfer`]: {
-      label: `Штатив с пробиркой и ${addedNames} должны стоять вместе на рабочем столе (или в вытяжном шкафу).`,
+      label: `Штатив с пробиркой и ${addedNames} должны стоять вместе на рабочем столе (или в вытяжном шкафу — перенесите их туда на подносе).`,
       isMet: (snapshot) =>
         (snapshot.clampedTubeContents?.includes(base) ?? false) && added.every((id) => available(snapshot, id)),
     },
@@ -106,7 +106,7 @@ export const STAGE_SCENE_REQUIREMENTS: Partial<Record<EntityId, StageSceneRequir
   },
   "step-1-transfer": {
     label:
-      "В вытяжном шкафу нажмите «Перенести» и перенесите туда штатив с пробиркой меди и азотную кислоту, затем включите вытяжку.",
+      "Перенесите на подносе в вытяжной шкаф штатив, пробирку с медью и азотную кислоту, поставьте их туда и включите вытяжку.",
     isMet: (snapshot) =>
       snapshot.fumeHoodFanOn &&
       snapshot.standInFumeHood &&
