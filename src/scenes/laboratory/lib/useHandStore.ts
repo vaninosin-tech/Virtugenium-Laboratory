@@ -62,6 +62,13 @@ export const HAND = {
   screen: new THREE.Vector2(),
   /** What a click would do right now — `handActionFor`, refreshed every frame. */
   action: null as { readonly label: string; readonly blocked: boolean } | null,
+  /**
+   * Just taken: the hand starts where the item is (VL-018), not in the middle
+   * of the screen — the stand stands there now, and an item flown to it was
+   * snapped to the tube the moment it was picked up. `HandController` puts
+   * the hand over the item once the item has said where it is.
+   */
+  startAtItem: false,
   /** When the hand last let go — an Esc that put the item back must not also leave the zone (`escapeTakenByHand`). */
   releasedAt: 0,
   /** The canvas, for Pointer Lock — set by `HandController`. */
@@ -99,6 +106,7 @@ export const useHandStore = create<HandState>((set) => ({
   home: null,
   take: (held, home) => {
     HAND.ndc.set(0, 0);
+    HAND.startAtItem = true;
     HAND.valid = false;
     HAND.homeValid = false;
     HAND.itemPosValid = false;

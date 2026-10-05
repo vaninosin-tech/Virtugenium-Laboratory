@@ -528,10 +528,14 @@ export const CAMERA_TARGETS: Record<SceneTargetId, CameraTarget> = {
     yaw: Math.PI,
     pitch: degToRad(-8),
   },
+  // Looking down onto the work area (VL-018): the frame's middle on the
+  // stand (Z ≈ −0.8), the whole depth of the countertop in view — at −22°
+  // from 1.5 m the middle of the frame was past the table's far edge and
+  // the near half of the table was out of it.
   table: {
-    position: [LAYOUT.table.position[0], 1.5, LAYOUT.table.position[2] - 1.0],
+    position: [LAYOUT.table.position[0], 1.55, LAYOUT.table.position[2] - 1.25],
     yaw: Math.PI,
-    pitch: degToRad(-22),
+    pitch: degToRad(-38),
   },
   // ~2.3 m standoff to the cabinet centerline: at the 55° vertical FOV used
   // by the Canvas and the cabinet's scaled ~2.2 m height (CABINET_SCALE),

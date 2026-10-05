@@ -125,6 +125,12 @@ export function HandController() {
       s.projected.set(sharedMouseNdc.x, sharedMouseNdc.y, 0.5);
     } else {
       if (!HAND.homeValid) return;
+      if (HAND.startAtItem) {
+        // Over the item itself: it lifts where it stands and goes where the mouse takes it.
+        HAND.startAtItem = false;
+        s.projected.copy(HAND.home).project(camera);
+        HAND.ndc.set(THREE.MathUtils.clamp(s.projected.x, -0.97, 0.97), THREE.MathUtils.clamp(s.projected.y, -0.97, 0.97));
+      }
       // The hand: where the virtual cursor's ray meets a plane just above
       // the worktop — the item glides over it, its shadow under it, so it is
       // plain how near or far it is. Near the stand it snaps (`PourMotion`).
