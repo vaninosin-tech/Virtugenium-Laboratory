@@ -69,12 +69,12 @@ describe("stand actions on the table (VL-014)", () => {
     expect(hoodTubes()[0].contents).toEqual(["cu"]);
   });
 
-  it("leaves a wrong mixing order clickable — it is the player's mistake to make, and it is not poured", () => {
+  it("leaves a wrong mixing order clickable — it is the player's mistake to make: charged, and poured (VL-018)", () => {
     useTestTubeStorageStore.setState({ fumeHoodTestTubes: [tube("t0", "hno3"), tube("t1")] });
     useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
     expect(standActionFor(bottle("cu"))?.blocked).toBe(false);
     runStandAction(bottle("cu"));
-    expect(hoodTubes()[0].contents).toEqual(["hno3"]);
+    expect(hoodTubes()[0].contents).toEqual(["hno3", "cu"]);
   });
 
   it("pours a filled rack tube into the clamped one; an empty one has nothing to pour", () => {
