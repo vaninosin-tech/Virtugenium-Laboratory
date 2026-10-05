@@ -19,6 +19,7 @@ import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
 import { SpiritBurner } from "./SpiritBurner";
 import { StandStation, lampLayout } from "./StandStation";
+import { HOOD_RACK_LOCAL, HOOD_STAND_LOCAL, HOOD_WORKTOP_Y, hoodBottleLocal } from "../lib/hoodLayout";
 import { takeTargetEvents } from "./standTargetEvents";
 import { useHandStore } from "../lib/useHandStore";
 import { ArrivalFlight, GlassRim, PourMotion } from "./StandMotion";
@@ -37,11 +38,10 @@ const DEF = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
  * measured against the interior walls. Nudge these three entries if anything
  * clips the sash or the side panels.
  */
-const WORKTOP_Y = 0.9;
-const RACK_LOCAL: Position3 = [-0.26, WORKTOP_Y, 0.02];
-const STAND_LOCAL: Position3 = [0.1, WORKTOP_Y, 0.02];
-const BOTTLES_LOCAL: Position3 = [0.34, WORKTOP_Y, 0.02];
-const BOTTLE_SPACING_X = 0.13;
+// The left part of the worktop is the carried tray's (VL-017) — see `hoodLayout.ts`.
+const WORKTOP_Y = HOOD_WORKTOP_Y;
+const RACK_LOCAL: Position3 = HOOD_RACK_LOCAL;
+const STAND_LOCAL: Position3 = HOOD_STAND_LOCAL;
 
 /**
  * A dead-on quarter turn put the rod exactly behind the tube: the metal
@@ -109,13 +109,13 @@ function StandInFumeHood({ onActivate }: { readonly onActivate: () => void }) {
 
 /**
  * TEMP sandbox: all nine bottles along the back wall — see
- * `sandbox/setupSandbox.ts`. Split around the stand (hood-local X 0.04..0.25)
+ * `sandbox/setupSandbox.ts`. Split around the stand (hood-local X 0.18..0.42)
  * rather than one even row: a bottle standing behind the stand puts its
  * click hitbox in front of the stand's own and swallows the click that
  * should start heating.
  */
 const SANDBOX_BOTTLE_Z = -0.17;
-const SANDBOX_BOTTLE_X = [-0.58, -0.47, -0.36, -0.25, -0.14, -0.03, 0.33, 0.44, 0.55];
+const SANDBOX_BOTTLE_X = [-0.58, -0.47, -0.36, -0.25, -0.14, -0.03, 0.47, 0.575, 0.68];
 const sandboxBottlePosition = (index: number): Position3 => [
   SANDBOX_BOTTLE_X[index] ?? 0.55,
   WORKTOP_Y,
@@ -228,7 +228,7 @@ export function FumeHoodWorkArea() {
               position={
                 sandbox
                   ? sandboxBottlePosition(index)
-                  : [BOTTLES_LOCAL[0] + index * BOTTLE_SPACING_X, BOTTLES_LOCAL[1], BOTTLES_LOCAL[2]]
+                  : hoodBottleLocal(index)
               }
             >
               <ReagentStaticDisplay

@@ -416,19 +416,11 @@ export const CABINETS: readonly CabinetDef[] = [
  * cabinet's yaw keeps that axis parallel to the cabinet's front edge on both
  * the back wall and the right wall.
  */
-/** See `getCabinetParallelTrayYaw`. */
-const HOOD_TRAY_YAW_OFFSET = Math.PI;
-
 export function getCabinetParallelTrayYaw(
   cabinetId: HotspotTargetId | null | undefined,
   fallbackYaw = 0,
 ): number {
-  const cabinet = CABINETS.find((candidate) => candidate.id === cabinetId);
-  if (cabinet) return cabinet.rotationY;
-  // The hood model faces the other way round from the cabinets: a half turn.
-  const equipment = EQUIPMENT.find((candidate) => candidate.id === cabinetId);
-  if (equipment) return equipment.rotationY + HOOD_TRAY_YAW_OFFSET;
-  return fallbackYaw;
+  return CABINETS.find((cabinet) => cabinet.id === cabinetId)?.rotationY ?? fallbackYaw;
 }
 
 /**

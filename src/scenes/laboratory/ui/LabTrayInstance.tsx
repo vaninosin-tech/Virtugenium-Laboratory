@@ -24,12 +24,16 @@ import { prepareTrayMaterials } from "../lib/trayMaterials";
 import { bottleFromTray, tubeFromTray, unloadLabel } from "../lib/trayCarry";
 import { trayUnloadPlace } from "../lib/trayUnloadPlace";
 import { TABLE_TRAY } from "../lib/tableTray";
+import { hoodTrayWorldPose } from "../lib/hoodLayout";
+import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 
 /**
- * Whether the tray is in the player's hands at this zone: in every cabinet
- * and at the fume hood — it goes along with the camera, loaded or not (VL-017).
+ * Whether the tray goes along to this zone: to every cabinet (held up), and
+ * to the fume hood (set down on its worktop, `hoodTrayWorldPose`) loaded or
+ * not (VL-017) — but not in the sandbox, whose hood is laid out without it.
  */
-const trayHeldAt = (id: HotspotTargetId | null): boolean => isTrayHeldEligible(id);
+const trayHeldAt = (id: HotspotTargetId | null): boolean =>
+  isTrayHeldEligible(id) && !(id === "fume-hood" && useLaboratoryStore.getState().mode === "sandbox");
 import { useStandHintStore } from "../lib/useStandHintStore";
 
 const MODEL_PATH = "/assets/models/LabTray_Metal.glb";
@@ -394,6 +398,10 @@ export function LabTrayInstance({
     heldTargetQuaternionRef.current
       .setFromAxisAngle(trayYawAxisRef.current, cabinetYaw)
       .multiply(rotationOffset);
+    // At the fume hood it is not held up to the camera: it is set down on the
+    // left of the worktop, its long side running into the hood (`hoodLayout`).
+    if (activeCabinetId === "fume-hood") hoodTrayWorldPose(targetPositionRef.current, heldTargetQuaternionRef.current);
+    const heldScale = heldTray.scale;
     // Stowed = sitting at rest on the table, not "behind the camera" — the
     // held tray should read as coming from/going back to the table itself,
     // not materializing out of the player's body. Both `mode` instances
@@ -461,7 +469,7 @@ export function LabTrayInstance({
         );
         group.position.copy(heldTransferPositionRef.current);
         group.quaternion.copy(heldTransferQuaternionRef.current);
-        group.scale.setScalar(THREE.MathUtils.lerp(heldTransferStartScaleRef.current, heldTray.scale, fadeT));
+        group.scale.setScalar(THREE.MathUtils.lerp(heldTransferStartScaleRef.current, heldScale, fadeT));
       } else {
         // Steady hold / cabinet-to-cabinet transition: position tracks the
         // live camera pose exactly every frame (already "follows the
@@ -472,7 +480,7 @@ export function LabTrayInstance({
         // same pose the old instant snap did — no visible difference there.
         group.position.copy(targetPositionRef.current);
         group.quaternion.slerp(heldTargetQuaternionRef.current, 1 - Math.exp(-SWITCH_FOLLOW_DAMPING * delta));
-        group.scale.setScalar(heldTray.scale);
+        group.scale.setScalar(heldScale);
       }
       return;
     }
