@@ -60,8 +60,12 @@ export function ArrivalFlight({ arrival, children }: { readonly arrival: TubeArr
 
 /** Tip of a pouring bottle (radians): its neck well down over the tube's mouth. */
 const POUR_TILT = 1.6;
-/** The bottle's mouth, above the tube's mouth while pouring… */
-const POUR_ABOVE_MOUTH = 0.012;
+/**
+ * The gap between the tipped bottle's lip — its lowest edge, a neck's radius
+ * below the middle of its mouth (`BottleRest.neckRadius`) — and the tube's
+ * rim while pouring (VL-018): the neck stays over the tube, never in it.
+ */
+const POUR_LIP_GAP = 0.008;
 /** …and higher while it comes over and goes back, clear of the clamp. */
 const APPROACH_ABOVE_MOUTH = 0.05;
 /** How high a bottle arcs on its way over from its place: above the tube's mouth and the clamp. */
@@ -104,6 +108,8 @@ interface BottleRest {
   readonly mouthOffset: THREE.Vector3;
   /** Half its width — how far beside the tube a snapped bottle must stand. */
   readonly radius: number;
+  /** Half its mouth's width — how far its lip reaches below the middle of its mouth when it lies tipped. */
+  readonly neckRadius: number;
 }
 
 /**
@@ -227,6 +233,7 @@ export function PourMotion({
         capWorldQuat: new THREE.Quaternion(),
         mouthOffset: new THREE.Vector3(0, pourPointHeight, 0),
         radius,
+        neckRadius: radius,
       };
       return;
     }
@@ -245,6 +252,7 @@ export function PourMotion({
       capWorldQuat: cap.getWorldQuaternion(new THREE.Quaternion()),
       mouthOffset: mouth.sub(s.rest),
       radius,
+      neckRadius: Math.max(box.max.x - box.min.x, box.max.z - box.min.z) / 2,
     };
   };
 
@@ -309,7 +317,9 @@ export function PourMotion({
       }
 
       const tip = k < COME ? 0 : k < TIP ? smooth((k - COME) / (TIP - COME)) : k < HOLD ? 1 : k < UNTIP ? 1 - smooth((k - HOLD) / (UNTIP - HOLD)) : 0;
-      const above = THREE.MathUtils.lerp(APPROACH_ABOVE_MOUTH, POUR_ABOVE_MOUTH, tip);
+      // Tipped, its lip hangs a neck's radius below the middle of its mouth.
+      const pourAbove = r.neckRadius * Math.sin(Math.min(POUR_TILT, Math.PI / 2) * tip) + POUR_LIP_GAP;
+      const above = THREE.MathUtils.lerp(Math.max(APPROACH_ABOVE_MOUTH, pourAbove + 0.02), pourAbove, tip);
       // Tipping towards the tube turns the bottle's up about `axis` by −angle.
       s.tilt.setFromAxisAngle(s.axis, -POUR_TILT * tip);
       // The bottle sits so that its (tipped) mouth is just over the tube's, on the bottle's side.
