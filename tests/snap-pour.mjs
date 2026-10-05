@@ -123,7 +123,7 @@ const cases = [
   ["hno3-empty-pos20", "pour-empty-pos20", [], "hno3", 20],
 ];
 for (const [name, id, ingredients, reagent, tilt] of cases) {
-  if (process.env.VISUAL_ONLY && process.env.VISUAL_ONLY !== name) continue;
+  if (process.env.VISUAL_ONLY && !process.env.VISUAL_ONLY.split(',').includes(name)) continue;
   await fresh(id, ingredients, tilt);
   await page.screenshot({ path: `${out}/${name}-before.png` });
   await capture(name, reagent);

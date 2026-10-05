@@ -157,7 +157,8 @@ float raspberry = uReactionKind > 3.5 ? dyeCloud : 0.0;
 // the filtered film amount changes, so the wall cannot develop crawling marks.
 float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
   * 0.45;
-diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity)
+diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
+  + (uReactionKind > 0.5 && uReactionKind < 1.5 ? 0.40 : 0.0))
   + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 0.72, milk))
   + raspberry * 0.28 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)

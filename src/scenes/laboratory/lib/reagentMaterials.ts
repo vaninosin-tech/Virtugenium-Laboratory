@@ -87,6 +87,7 @@ export class GlassMaterial extends THREE.MeshPhysicalMaterial {
       uAbsorption: { value: variant === "amber" ? p.amberAbsorption : 0.025 },
       uAbsorptionColor: { value: new THREE.Color("#d9e9ef") },
       uAmber: { value: variant === "amber" ? 1 : 0 },
+      uDenseLiquid: { value: 0 }, uClearLiquid: { value: 0 }, uLiquidLevel: { value: 0 },
     };
     this.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
@@ -98,6 +99,7 @@ uniform vec3 uEdgeTint;
 uniform float uAbsorption;
 uniform vec3 uAbsorptionColor;
 uniform float uAmber;
+uniform float uDenseLiquid; uniform float uClearLiquid; uniform float uLiquidLevel;
 ${shader.fragmentShader}`.replace("#include <opaque_fragment>", `
 float edge = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), uFresnelPower);
 float height = clamp(vReagentPosition.y, 0.0, 1.0);
@@ -118,11 +120,21 @@ outgoingLight = absorption * totalDiffuse * mix(0.08, 0.6, uAmber) +
   totalSpecular * mix(vec3(1.0), uEdgeTint, edge) *
   (0.7 + edge * uFresnelStrength) / max(diffuseColor.a, 0.08);
 outgoingLight += uEdgeTint * totalDiffuse * edge * 0.12 * (1.0 - uAmber);
+float denseRegion = uDenseLiquid * (1.0 - smoothstep(uLiquidLevel - 0.012,
+  uLiquidLevel + 0.012, vReagentPosition.y));
+float wetRegion = uClearLiquid * (1.0 - smoothstep(uLiquidLevel - 0.009,
+  uLiquidLevel + 0.009, vReagentPosition.y));
+outgoingLight = mix(outgoingLight, outgoingLight * vec3(0.76, 0.91, 0.94)
+  + vec3(0.012, 0.027, 0.032), wetRegion * 0.65);
+diffuseColor.a = clamp(diffuseColor.a + wetRegion * (0.12 + edge * 0.12), 0.0, 0.96);
+outgoingLight = mix(outgoingLight, vec3(0.055, 0.007, 0.080) + totalSpecular * 0.13,
+  denseRegion * 0.82);
+diffuseColor.a = max(diffuseColor.a, denseRegion * 0.82);
 #include <opaque_fragment>`);
     };
   }
 
-  customProgramCacheKey() { return "reagent-glass-v13-defined-edges"; }
+  customProgramCacheKey() { return "reagent-glass-v15-wet-solution"; }
 }
 
 export interface LiquidOptions {
@@ -194,8 +206,8 @@ uniform float uReactionRadius; uniform float uMixingStrength;
  varying vec3 vLocal; varying float vHeight;
 ${shader.fragmentShader}`.replace("#include <emissivemap_fragment>", `
  #include <emissivemap_fragment>
-  float n = sin(vLocal.x * 17.0 + uTime * 0.25) * sin(vLocal.z * 13.0 - uTime * 0.19) * uQualityNoise;
-  float progress = clamp(uReactionProgress + n * uMixingStrength * 0.05, 0.0, 1.0);
+  float liquidNoise = sin(vLocal.x * 17.0 + uTime * 0.25) * sin(vLocal.z * 13.0 - uTime * 0.19) * uQualityNoise;
+  float progress = clamp(uReactionProgress + liquidNoise * uMixingStrength * 0.05, 0.0, 1.0);
   vec3 c = mix(uBaseColor, uReactionColor, progress);
   float brightest = max(max(c.r, c.g), c.b);
   float chroma = brightest - min(min(c.r, c.g), c.b);
@@ -230,11 +242,84 @@ outgoingLight = totalDiffuse * mix(1.0, 0.32, clearLiquid) +
   customProgramCacheKey() { return "reagent-liquid-v8-visible-clear-water"; }
 }
 
+/** Bottle-only surface and absorption. TubeLiquidMaterial continues to use the base shader. */
+export class BottleLiquidMaterial extends LiquidMaterial {
+  constructor(geometry: THREE.BufferGeometry, options: LiquidOptions, denseDye: boolean) {
+    super(geometry, options);
+    this.name = "BottleLiquidContents";
+    this.uniforms.uBottleDye = { value: denseDye ? 1 : 0 };
+    this.uniforms.uBottleLevel = { value: 1 };
+    const compileBase = this.onBeforeCompile;
+    this.onBeforeCompile = shader => {
+      compileBase(shader, {} as THREE.WebGLRenderer);
+      Object.assign(shader.uniforms, this.uniforms);
+      shader.vertexShader = `uniform float uBottleLevel;\n${shader.vertexShader}`.replace("transformed = p;", `
+  // Move the authored top cap and its side rim onto one world-horizontal plane.
+  // Full-height geometry lets the high side of a tilted bottle remain filled.
+  vec3 worldY = vec3(modelMatrix[0].y, modelMatrix[1].y, modelMatrix[2].y);
+  vec2 fromAxis = position.xz - uBoundsMin.xz - uBoundsSize.xz * 0.5;
+  float levelY = uBoundsMin.y + uBoundsSize.y * uBottleLevel;
+  float tiltedY = clamp(levelY - dot(worldY.xz, fromAxis) / max(worldY.y, 0.0001),
+    uBoundsMin.y + 0.0001, uBoundsMin.y + uBoundsSize.y);
+  transformed = vec3(position.x, mix(uBoundsMin.y, tiltedY, clamp(vHeight, 0.0, 1.0)), position.z);`);
+      shader.fragmentShader = `uniform float uBottleDye;
+${shader.fragmentShader}`.replace("totalEmissiveRadiance += c * uEmissionStrength;", `
+  // A top cap gives the level an ellipse; the wall rim gives it a meniscus.
+  float top = smoothstep(0.985, 0.999, vHeight);
+  float wall = smoothstep(0.17, 0.44, length(vLocal.xz - vec2(0.5)));
+  float rim = top * wall;
+  float column = 1.0 - clamp(vHeight, 0.0, 1.0);
+  if (uBottleDye > 0.5) {
+    // Strong permanganate absorption: violet at thin edges, near-black core.
+    c = mix(vec3(0.055, 0.008, 0.075), vec3(0.16, 0.025, 0.23), top * 0.65 + (1.0 - wall) * 0.18);
+    alpha = clamp(0.86 + column * 0.11 + rim * 0.08, 0.0, 0.995);
+  } else {
+    alpha = clamp(0.20 + column * 0.10 + rim * 0.24 + top * 0.09 + fresnel * 0.48,
+      0.0, 0.72);
+    c = mix(c, vec3(0.39, 0.67, 0.75), column * 0.12);
+  }
+  diffuseColor = vec4(c, alpha);
+  totalEmissiveRadiance += c * uEmissionStrength;`)
+        .replace("#include <opaque_fragment>", `
+  float cap = smoothstep(0.985, 0.999, vHeight);
+  float meniscus = cap * smoothstep(0.17, 0.44, length(vLocal.xz - vec2(0.5)));
+  outgoingLight = mix(outgoingLight, outgoingLight * 0.40 + vec3(0.12, 0.20, 0.22), meniscus * 0.56);
+  outgoingLight += cap * (1.0 - meniscus) * vec3(0.065, 0.11, 0.13);
+  #include <opaque_fragment>`);
+    };
+  }
+
+  customProgramCacheKey() { return "bottle-liquid-v2-axis-fix"; }
+}
+
+/** Solve the mean height of a tilted cylindrical column, including floor/lip clipping. */
+export function conservedBottleLevel(fill: number, slopeX: number, slopeZ: number,
+  radiusX: number, radiusZ: number, height: number) {
+  if (Math.abs(slopeX * radiusX) + Math.abs(slopeZ * radiusZ) < height * 0.005) return fill;
+  let low = -height, high = height * 2;
+  for (let iteration = 0; iteration < 12; iteration++) {
+    const center = (low + high) * 0.5;
+    let mean = 0;
+    for (let ring = 0; ring < 8; ring++) {
+      const r = Math.sqrt((ring + 0.5) / 8);
+      for (let sector = 0; sector < 16; sector++) {
+        const angle = (sector + 0.5) * Math.PI / 8;
+        const level = center - slopeX * radiusX * r * Math.cos(angle)
+          - slopeZ * radiusZ * r * Math.sin(angle);
+        mean += THREE.MathUtils.clamp(level, 0, height);
+      }
+    }
+    if (mean / (128 * height) < fill) low = center; else high = center;
+  }
+  return (low + high) * 0.5 / height;
+}
+
 export interface ReagentMaterialBinding {
   glass: GlassMaterial[];
   liquid: LiquidMaterial | null;
   copper?: { shake: (tilt: number, strength: number, time: number) => void };
   setFillLevel: (level: number) => void;
+  updateSurface: () => void;
   dispose: () => void;
 }
 
@@ -311,8 +396,8 @@ export function installReagentMaterials(root: THREE.Object3D, config: ReagentCon
         const cleanGeometry = object.geometry.clone();
         object.geometry = cleanGeometry;
         ownedGeometries.push(cleanGeometry);
-        liquid = new LiquidMaterial(cleanGeometry, { color: config.contentsColor,
-          opacity: config.contentsOpacity, ...config.liquid });
+        liquid = new BottleLiquidMaterial(cleanGeometry, { color: config.contentsColor,
+          opacity: config.contentsOpacity, ...config.liquid }, config.id === "kmno4");
         object.material = liquid;
         // The shipped closed cavity has outward-facing triangles (including
         // both caps). Cull the far surface so its triangulated cap cannot
@@ -330,16 +415,33 @@ export function installReagentMaterials(root: THREE.Object3D, config: ReagentCon
   const setFillLevel = (level: number) => {
     if (!fillMesh || !Number.isFinite(level)) return;
     const fill = THREE.MathUtils.clamp(level, 0, 1);
-    if (liquid) liquid.uniforms.uFillLevel.value = fill;
+    if (liquid) {
+      liquid.uniforms.uFillLevel.value = fill;
+      liquid.uniforms.uBottleLevel.value = fill;
+    }
+    if (liquid) for (const material of glass) {
+      material.uniforms.uDenseLiquid.value = config.id === "kmno4" ? 1 : 0;
+      material.uniforms.uClearLiquid.value = config.id === "kmno4" ? 0 : 1;
+      material.uniforms.uLiquidLevel.value = 0.12 + fill * 0.66;
+    }
     fillMesh.visible = fill > 0;
-    const scaleFill = Math.max(fill, 0.0001);
     fillMesh.scale.x = initialScaleX * 1.015;
     fillMesh.scale.z = initialScaleZ * 1.015;
-    fillMesh.scale.y = initialScale * scaleFill;
-    fillMesh.position.y = initialY + bottom * initialScale * (1 - scaleFill);
+    fillMesh.scale.y = initialScale;
+    fillMesh.position.y = initialY;
   };
   setFillLevel(config.fillLevel);
-  const binding = { glass, liquid, copper: copper ? { shake: copper.shake } : undefined, setFillLevel, dispose: () => {
+  const updateSurface = () => {
+    if (!(liquid instanceof BottleLiquidMaterial) || !fillMesh) return;
+    fillMesh.updateWorldMatrix(true, false);
+    const e = fillMesh.matrixWorld.elements;
+    const sy = Math.abs(e[5]) < 1e-5 ? 1e-5 : e[5];
+    const size = liquid.uniforms.uBoundsSize.value as THREE.Vector3;
+    liquid.uniforms.uBottleLevel.value = conservedBottleLevel(
+      liquid.uniforms.uFillLevel.value, e[1] / sy, e[9] / sy,
+      size.x * 0.5, size.z * 0.5, size.y);
+  };
+  const binding = { glass, liquid, copper: copper ? { shake: copper.shake } : undefined, setFillLevel, updateSurface, dispose: () => {
     owned.forEach((material) => material.dispose());
     ownedGeometries.forEach((geometry) => geometry.dispose());
     copper?.dispose();

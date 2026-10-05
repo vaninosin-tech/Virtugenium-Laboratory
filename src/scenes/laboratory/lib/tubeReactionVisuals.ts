@@ -9,7 +9,7 @@ import type { ReactionKind, TubeChemistry } from "./tubeReactions";
 import type { RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
-  copperColor: "#78cbd7",
+  copperColor: "#268fc5",
   gasColor: "#86634e",
   gasOpacity: 0.68,
   gasBuildSeconds: 4,

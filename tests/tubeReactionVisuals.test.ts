@@ -363,10 +363,10 @@ describe("tube reaction rendering contract", () => {
     expect(plume.visible).toBe(false);
   }, 30_000); // simulates several seconds of gas build-up per quality level
 
-  it("keeps the final copper solution pale and transparent", () => {
+  it("keeps the final copper solution saturated yet transparent", () => {
     const f = fixture("copper-nitric");
     f.update(chemistry(1));
-    expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("78cbd7");
+    expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("268fc5");
     expect(liquid(f).uniforms.uOpacity.value).toBeLessThan(0.5);
   });
 

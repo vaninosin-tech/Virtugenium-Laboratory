@@ -11,6 +11,7 @@ export function useReagentMaterials(instance: Object3D) {
   const binding = instance.userData.reagentMaterials as ReagentMaterialBinding;
   useFrame(({ clock }) => {
     if (binding.liquid) {
+      binding.updateSurface();
       binding.liquid.uniforms.uTime.value = clock.elapsedTime;
       binding.liquid.uniforms.uQualityNoise.value = QUALITY_LEVELS[useRuntimeQualityStore.getState().quality].noise;
     }
