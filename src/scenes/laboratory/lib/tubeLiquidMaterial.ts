@@ -19,6 +19,7 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uResidualHaze: { value: 0 }, uWallFilm: { value: 0 },
       uTransport: { value: emptyTransport }, uTransportActive: { value: 0 },
       uTransportDye: { value: 0 }, uTransportQuality: { value: 1 },
+      uTransportAge: { value: 0 },
       uCameraLocal: { value: new THREE.Vector3(0, 0, 1) },
     });
     this.onBeforeCompile = (shader) => {
@@ -49,7 +50,7 @@ uniform float uClearAlpha; uniform float uEdgeAlpha; uniform float uMeniscusAlph
 uniform vec3 uUp; uniform float uLevel; uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
 uniform float uReactionKind; uniform float uRate; uniform float uTemperature; uniform float uTime;
 uniform float uResidualHaze; uniform float uWallFilm;
-uniform sampler2D uTransport; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality;
+uniform sampler2D uTransport; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality; uniform float uTransportAge;
 uniform vec3 uCameraLocal;
 varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
 vec2 transported(vec3 point) {
@@ -62,7 +63,8 @@ vec2 transported(vec3 point) {
   for (int i = 0; i < 16; i++) {
     if (float(i) >= uTransportQuality) break;
     vec3 samplePoint = point + direction * ((float(i) + 0.5) * stepLength);
-    vec2 uv = vec2(clamp((samplePoint.x - uBoundsMin.x) / uBoundsSize.x, 0.0, 1.0),
+    vec2 across = (samplePoint.xz - center.xz) / uBoundsSize.xz;
+    vec2 uv = vec2(clamp(0.5 + dot(across, vec2(0.42, 0.91)), 0.0, 1.0),
       clamp((samplePoint.y - uBoundsMin.y) / uBoundsSize.y, 0.0, 1.0));
     vec2 concentration = texture2D(uTransport, uv).rg;
     transmittance *= exp(-concentration * stepLength / max(uBoundsSize.x, 0.0001) * 3.2);
@@ -92,6 +94,7 @@ float stream = sin(radial.x * 16.0 + sin(h * 10.0 - uTime * (0.7 + uTemperature)
 float localMix = p;
 float cloud = uCloudiness;
 float dyeCloud = 0.0;
+float dyeHalo = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   // Rising gas mixes Cu2+ through the entire column from the outset.
   // Keep only a soft enrichment near the granule and in the rising wake.
@@ -119,10 +122,26 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   vec2 dyeUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x
     + 0.045 * sin(h * 32.0 - uTime * 3.1), 0.0, 1.0), h);
   float nearDye = texture2D(uTransport, dyeUv).r;
+  vec2 crossingUv = vec2(clamp(0.5 + dot(radial, vec2(-0.76, 0.65)), 0.0, 1.0), h);
+  nearDye = max(nearDye, texture2D(uTransport, crossingUv).r * 0.65);
+  float acrossPlume = min(texture2D(uTransport, dyeUv + vec2(0.10, 0.0)).r,
+    texture2D(uTransport, dyeUv - vec2(0.10, 0.0)).r);
+  float alongPlume = min(texture2D(uTransport, dyeUv + vec2(0.0, 0.028)).r,
+    texture2D(uTransport, dyeUv - vec2(0.0, 0.028)).r);
+  // Close small clear pockets enclosed by dye without spanning the genuinely
+  // clear space between separate descending plumes.
+  nearDye = max(nearDye, max(acrossPlume, alongPlume) * 0.75);
+  dyeHalo = max(max(texture2D(uTransport, dyeUv + vec2(0.13, 0.0)).r,
+    texture2D(uTransport, dyeUv - vec2(0.13, 0.0)).r),
+    max(texture2D(uTransport, dyeUv + vec2(0.0, 0.04)).r,
+      texture2D(uTransport, dyeUv - vec2(0.0, 0.04)).r));
   // Beer-Lambert absorption: a thicker path through a plume looks denser,
   // while dilute edges remain translucent instead of becoming a hard mask.
-  dyeCloud = 1.0 - exp(-nearDye * 1.3 - transportedMatter.r * 4.2);
-  dyeCloud *= 1.0 - smoothstep(0.70, 1.0, p);
+  dyeCloud = 1.0 - exp(-nearDye * 2.6 - transportedMatter.r * 7.0);
+  dyeCloud = max(dyeCloud, (1.0 - exp(-dyeHalo * 2.0)) * 0.52);
+  float dyeFade = 1.0 - smoothstep(4.5, 8.0, uTransportAge);
+  dyeCloud *= dyeFade;
+  dyeHalo *= dyeFade;
   localMix = 1.0 - dyeCloud;
 }
 if (p <= 0.0 && uReactionKind < 3.5) { localMix = 0.0; cloud = 0.0; }
@@ -134,11 +153,12 @@ if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTransportActive > 0.01)
   cloud *= smoothstep(0.015, 0.65, transportedMatter.g);
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 tubeColor = mix(uBaseColor, uReactionColor, localMix);
-if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), uBaseColor, dyeCloud);
+if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), vec3(0.17, 0.006, 0.09),
+  max(dyeCloud, dyeHalo * 0.30));
 float baseChroma = max(max(uBaseColor.r, uBaseColor.g), uBaseColor.b) - min(min(uBaseColor.r, uBaseColor.g), uBaseColor.b);
 float endChroma = max(max(uReactionColor.r, uReactionColor.g), uReactionColor.b) - min(min(uReactionColor.r, uReactionColor.g), uReactionColor.b);
 float pigment = mix(smoothstep(0.15, 0.3, baseChroma), smoothstep(0.15, 0.3, endChroma), localMix);
-if (uReactionKind > 3.5) pigment = dyeCloud;
+if (uReactionKind > 3.5) pigment = max(dyeCloud, dyeHalo * 0.22);
 diffuseColor.rgb = tubeColor;
 float waterEdge = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.4);
 vec2 tracerUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x, 0.0, 1.0), h);
@@ -160,7 +180,7 @@ float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
   + (uReactionKind > 0.5 && uReactionKind < 1.5 ? 0.40 : 0.0))
   + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 0.72, milk))
-  + raspberry * 0.28 + film * 0.60
+  + raspberry * 0.62 + dyeHalo * 0.10 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
 float edgeSoft = vCap > 0.5 ? max(0.42, clamp(abs(vTubeWaveSlope) * 8.0, 0.0, 1.0))
@@ -173,7 +193,7 @@ float relief = 0.7 + 0.2 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
 vec3 coloredLight = tubeColor * (0.68 + relief * 0.42) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.26;
 coloredLight += vec3(0.08, 0.13, 0.15) * (n - 0.5) * smoothstep(0.6, 0.95, uTemperature);
 coloredLight = mix(coloredLight,
-  tubeColor * vec3(1.45, 1.15, 1.25) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.10,
+  tubeColor * vec3(1.15, 0.90, 1.05) * mix(1.0, 0.72, waterEdge) + boundedSpecular * 0.08,
   raspberry);
 outgoingLight = mix(mix(clearLight, coloredLight, pigment),
   mix(vec3(0.91 + 0.07 * relief), vec3(0.80 + 0.06 * relief), milk),

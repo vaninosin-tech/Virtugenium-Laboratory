@@ -110,7 +110,25 @@ export class TubeMixingField {
   private writeTexture() {
     for (let i = 0; i < this.dye.length; i++) {
       const p = i * 4;
-      this.pixels[p] = Math.min(255, this.dye[i] * 30000);
+      // The physical field can fold a tiny clear island inside a dense eddy.
+      // Blur only its optical upload: the conservative simulation and its
+      // mass stay unchanged, while the projected plume has a filled core.
+      let opticalDye = this.dye[i];
+      if (this.dyed) {
+        const x = i % this.width, y = Math.floor(i / this.width);
+        let sum = 0, weight = 0;
+        for (let dy = -4; dy <= 4; dy++) {
+          const sy = Math.max(0, Math.min(this.height - 1, y + dy));
+          for (let dx = -4; dx <= 4; dx++) {
+            const sx = Math.max(0, Math.min(this.width - 1, x + dx));
+            const w = 1 / (1 + dx * dx * 0.45 + dy * dy * 0.45);
+            sum += this.dye[sy * this.width + sx] * w;
+            weight += w;
+          }
+        }
+        opticalDye = Math.max(opticalDye, sum / weight * 0.9);
+      }
+      this.pixels[p] = Math.min(255, opticalDye * 30000);
       this.pixels[p + 1] = Math.min(255, this.tracer[i] * 30000);
       this.pixels[p + 2] = 0;
       this.pixels[p + 3] = 255;

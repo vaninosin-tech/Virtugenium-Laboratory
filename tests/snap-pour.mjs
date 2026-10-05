@@ -20,6 +20,10 @@ await page.goto(url);
 await page.getByText("Играть", { exact: true }).click();
 await page.getByText("Песочница (временно)").click();
 await page.waitForFunction(() => window.__sceneStore?.getState().cabinetPhase === "inspecting", null, { timeout: 90000 });
+await page.evaluate(async mode => {
+  const { useRuntimeQualityStore } = await import("/src/scenes/laboratory/lib/useRuntimeQualityStore.ts");
+  useRuntimeQualityStore.getState().setMode(mode);
+}, quality);
 
 const pause = ms => page.waitForTimeout(ms);
 async function fresh(id, ingredients, tilt = null) {

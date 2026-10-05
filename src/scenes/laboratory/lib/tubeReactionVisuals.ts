@@ -808,7 +808,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         if (waveSurface && pourAge > 0.65 && pourAge < 1.45 && Math.floor((pourAge - dt) * 8) !== Math.floor(pourAge * 8))
           waveSurface.impulse(0.22, 0.70, radius * 0.055, 0.22);
       }
-      pourAir.visible = !!options.pour && pourAge > 0.66 && pourAge < 2.15 && hasLiquid;
+      pourAir.visible = !!options.pour && !options.incomingDyed && pourAge > 0.66 && pourAge < 2.15 && hasLiquid;
       pourAir.count = quality === "LOW" ? 6 : 12;
       if (pourAir.visible) {
         const surfaceY = box.min.y + size.y * fill;
@@ -867,6 +867,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         material.uniforms.uTransportActive.value = transport.running
           ? 1 - THREE.MathUtils.smoothstep(transport.age, 8, 12) : 0;
         material.uniforms.uTransportDye.value = options.incomingDyed ? 1 : 0;
+        material.uniforms.uTransportAge.value = transport.age;
         material.uniforms.uTransportQuality.value = quality === "LOW" ? 6 : 16;
         material.uniforms.uCameraLocal.value.copy(cameraLocal);
       }
