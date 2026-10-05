@@ -21,7 +21,9 @@ import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
 import { TrayReturnZone } from "./TrayReturnZone";
 import { prepareTrayMaterials } from "../lib/trayMaterials";
-import { bottleFromTray, tubeFromTray, unloadLabel } from "../lib/trayCarry";
+import { useHandStore } from "../lib/useHandStore";
+import { TAKE_FROM_TRAY, takeFromTray } from "../lib/trayUnloadPlace";
+import { GlassRim, PourMotion } from "./StandMotion";
 import { trayUnloadPlace } from "../lib/trayUnloadPlace";
 import { TABLE_TRAY } from "../lib/tableTray";
 import { hoodTrayWorldPose } from "../lib/hoodLayout";
@@ -281,6 +283,10 @@ export function LabTrayInstance({
     isHeldTrayReturning && liveTrayTestTubeItems.length === 0
       ? trayTestTubeSnapshot
       : liveTrayTestTubeItems;
+  const heldId = useHandStore((state) => state.held?.instanceId ?? null);
+  // On the tray set down in the hood (turned to face into it), the things on
+  // it are turned back round to face the player (VL-017).
+  const itemYaw = mode === "held" && focusedCabinetId === "fume-hood" ? Math.PI : 0;
   const inspectedReagentPrewarm = useMemo(() => {
     if (!inspectedId || trayReagentItems.some((item) => item.instanceId === inspectedId)) return null;
     const entry = Object.entries(REAGENTS).find(([reagentId]) => inspectedId.endsWith(`-${reagentId}`));
@@ -561,26 +567,22 @@ export function LabTrayInstance({
       {showContents && reagentDisplays.map((item) => {
         const position = computeTrayReagentPosition(trayReagentAreaConfig, item.slotIndex);
         return (
-          <ReagentStaticDisplay
-            key={item.id}
-            reagent={item.reagent}
-            position={position}
-            worldScale={item.prewarm ? 0.0001 : trayReagentScale}
-            instanceId={item.prewarm ? undefined : item.id}
-            // At the table or the hood a click puts it down there (VL-017); in a cabinet — back to its shelf.
-            onActivate={() => {
-              const place = trayUnloadPlace();
-              if (!place) return false;
-              useStandHintStore.getState().hide(item.id);
-              bottleFromTray(item.id, place);
-              return true;
-            }}
-            onHoverChange={(hovered) => {
-              const place = trayUnloadPlace();
-              if (hovered && place) useStandHintStore.getState().showLabel(item.id, unloadLabel(place));
-              else useStandHintStore.getState().hide(item.id);
-            }}
-          />
+          // At the table or the hood a click takes it into the hand, to be set
+          // down in its place there (VL-017); in a cabinet — back to its shelf.
+          <PourMotion key={item.id} instanceId={item.id} pourPointHeight={0} position={position} keepCap>
+            <ReagentStaticDisplay
+              reagent={item.reagent}
+              rotationY={itemYaw}
+              worldScale={item.prewarm ? 0.0001 : trayReagentScale}
+              instanceId={item.prewarm ? undefined : item.id}
+              highlighted={heldId === item.id}
+              onActivate={() => takeFromTray("bottle", item.id)}
+              onHoverChange={(hovered) => {
+                if (hovered && trayUnloadPlace()) useStandHintStore.getState().showLabel(item.id, TAKE_FROM_TRAY);
+                else useStandHintStore.getState().hide(item.id);
+              }}
+            />
+          </PourMotion>
         );
       })}
       {/* Taken test tubes — no separate container: they stand in the SAME
@@ -598,36 +600,37 @@ export function LabTrayInstance({
       {showContents && trayTestTubeItems.map((item, index) => (
         <group
           key={item.instanceId}
-          // At the table or the hood a click puts it down in that rack (VL-017).
+          // At the table or the hood a click takes it into the hand (VL-017).
           onClick={(event: ThreeEvent<MouseEvent>) => {
-            const place = trayUnloadPlace();
-            if (!place || useReagentInspectionStore.getState().inspectedId) return;
+            if (!trayUnloadPlace() || useReagentInspectionStore.getState().inspectedId) return;
             event.stopPropagation();
-            useStandHintStore.getState().hide(item.instanceId);
             document.body.style.cursor = "auto";
-            tubeFromTray(item.instanceId, place);
+            takeFromTray("tube", item.instanceId);
           }}
           onPointerOver={(event: ThreeEvent<PointerEvent>) => {
-            const place = trayUnloadPlace();
-            if (!place) return;
+            if (!trayUnloadPlace()) return;
             event.stopPropagation();
             document.body.style.cursor = "pointer";
-            useStandHintStore.getState().showLabel(item.instanceId, unloadLabel(place));
+            useStandHintStore.getState().showLabel(item.instanceId, TAKE_FROM_TRAY);
           }}
           onPointerOut={() => {
             useStandHintStore.getState().hide(item.instanceId);
             document.body.style.cursor = "auto";
           }}
         >
-          <LabTestTubeInstance position={computeTubeSlotPosition(TRAY_RACK_ANCHOR, index)} contents={item.contents} />
+          <PourMotion instanceId={item.instanceId} pourPointHeight={0} position={computeTubeSlotPosition(TRAY_RACK_ANCHOR, index)}>
+            <GlassRim active={heldId === item.instanceId}>
+              <LabTestTubeInstance contents={item.contents} />
+            </GlassRim>
+          </PourMotion>
         </group>
       ))}
       {/* The Bunsen stand — only one exists, so this is a plain boolean flag
           (`useBunsenStandStorageStore`), not a per-instance list like the
           reagent/test-tube stores above. Same `showContents` gate (hidden
           off-screen/mid-transition the same way those are). */}
-      {showContents && bunsenStandOnTray && <BunsenStandTrayDisplay />}
-      {showContents && lampOnTray && <SpiritLampTrayDisplay />}
+      {showContents && bunsenStandOnTray && <BunsenStandTrayDisplay rotationY={itemYaw} />}
+      {showContents && lampOnTray && <SpiritLampTrayDisplay rotationY={itemYaw} />}
       {mode === "table" && <TrayReturnZone />}
     </group>
   );

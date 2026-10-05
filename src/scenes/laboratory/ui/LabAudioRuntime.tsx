@@ -65,7 +65,7 @@ export function LabAudioRuntime() {
       // Let go after an action, or put back: heard as it reaches its place.
       // A pour comes home only after pouring; a tube put in the clamp is the clamp's sound.
       if (useStandMotionStore.getState().pour?.instanceId === was.instanceId) later(POUR_MS + HOME_MS, "clink");
-      else if (was.kind !== "bottle" && useBunsenStandStorageStore.getState().attachedTubeSlotIndex === was.index) return;
+      else if ((was.kind === "tube" || was.kind === "workbench-tube") && useBunsenStandStorageStore.getState().attachedTubeSlotIndex === was.index) return;
       else later(HOME_MS, "clink");
     });
     return () => {

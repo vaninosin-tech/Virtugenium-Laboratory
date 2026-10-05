@@ -7,8 +7,9 @@ import type { Position3 } from "../lib/layout";
 import { createHoverHitboxGeometry } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
-import { unloadLabel, type CarryPlace } from "../lib/trayCarry";
-import { trayUnloadPlace } from "../lib/trayUnloadPlace";
+import { TAKE_FROM_TRAY, takeFromTray, trayUnloadPlace } from "../lib/trayUnloadPlace";
+import { useHandStore } from "../lib/useHandStore";
+import { PourMotion } from "./StandMotion";
 import { useStandHintStore } from "../lib/useStandHintStore";
 
 /** Held-tray true/real-world size — matches `useShelfTrayFlight`'s own flight target scale. */
@@ -30,18 +31,22 @@ export function TrayEquipmentDisplay({
   instance,
   restPosition,
   onReturn,
-  onUnload,
+  what,
   owner,
+  rotationY = 0,
 }: {
   readonly instance: THREE.Object3D;
   readonly restPosition: Position3;
-  /** Put down where the player stands (at the table, in the hood) — VL-017. */
-  readonly onUnload: (place: CarryPlace) => void;
-  /** For the hover caption. */
+  /** What it is, when taken into the hand at the table or the hood (VL-017). */
+  readonly what: "stand" | "lamp";
+  /** Its id in the hand and for the hover caption. */
   readonly owner: string;
+  /** Turned on the tray — round to face the player on the tray in the hood. */
+  readonly rotationY?: number;
   readonly onReturn: (worldPos: Position3, worldQuat: readonly [number, number, number, number], worldScale: number) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const held = useHandStore((state) => state.held?.instanceId === owner);
   const groupRef = useRef<THREE.Group>(null);
 
   const hoverHitboxGeometry = useMemo(() => createHoverHitboxGeometry(instance), [instance]);
@@ -63,11 +68,10 @@ export function TrayEquipmentDisplay({
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     if (useReagentInspectionStore.getState().inspectedId !== null) return;
-    const place = trayUnloadPlace();
-    if (place) {
+    // At the table or the hood: into the hand, to be set down in its place.
+    if (takeFromTray(what, owner)) {
       document.body.style.cursor = "auto";
-      useStandHintStore.getState().hide(owner);
-      onUnload(place);
+      setHovered(false);
       return;
     }
     const group = groupRef.current;
@@ -86,14 +90,14 @@ export function TrayEquipmentDisplay({
     <group
       ref={groupRef}
       position={restPosition}
+      rotation={[0, rotationY, 0]}
       onClick={handleClick}
       onPointerOver={(event) => {
         event.stopPropagation();
         if (useReagentInspectionStore.getState().inspectedId !== null) return;
         document.body.style.cursor = "pointer";
         setHovered(true);
-        const place = trayUnloadPlace();
-        if (place) useStandHintStore.getState().showLabel(owner, unloadLabel(place));
+        if (trayUnloadPlace()) useStandHintStore.getState().showLabel(owner, TAKE_FROM_TRAY);
       }}
       onPointerOut={(event) => {
         event.stopPropagation();
@@ -102,8 +106,10 @@ export function TrayEquipmentDisplay({
         useStandHintStore.getState().hide(owner);
       }}
     >
-      <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered && !inspecting} />
+      <PourMotion instanceId={owner} pourPointHeight={0} keepCap>
+        <primitive object={instance} />
+        <ReagentHoverRim object={instance} active={(hovered && !inspecting) || held} />
+      </PourMotion>
       <mesh geometry={hoverHitboxGeometry}>
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>

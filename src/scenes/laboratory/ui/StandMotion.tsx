@@ -125,10 +125,13 @@ export function PourMotion({
   instanceId,
   pourPointHeight,
   position,
+  keepCap = false,
   children,
 }: {
   readonly instanceId: string;
   readonly pourPointHeight: number;
+  /** Carried capped — taken off the tray only to be set down, not to pour (VL-017). */
+  readonly keepCap?: boolean;
   readonly position?: Position3;
   readonly children: ReactNode;
 }) {
@@ -339,7 +342,7 @@ export function PourMotion({
 
     // The cap: off while the bottle is away from its place, back on once it is home.
     const home = !held && !pouring && m.cur.equals(s.rest);
-    m.capOff = THREE.MathUtils.clamp(m.capOff + (home ? -1 : 1) * (delta / CAP_SECONDS), 0, 1);
+    m.capOff = THREE.MathUtils.clamp(m.capOff + (home || keepCap ? -1 : 1) * (delta / CAP_SECONDS), 0, 1);
     if (r.cap?.parent) {
       group.updateWorldMatrix(false, true);
       r.cap.getWorldPosition(s.onBottle);

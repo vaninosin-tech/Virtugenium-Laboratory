@@ -7,10 +7,9 @@ import { STAND_BASE_BOTTOM_OFFSET, useBunsenStandStorageStore } from "../lib/use
 import { standTrayRestPosition, useTrayReagentAreaStore } from "../lib/useTrayReagentAreaStore";
 import { disableRaycast } from "./ReagentContainerInstance";
 import { TrayEquipmentDisplay } from "./TrayEquipmentDisplay";
-import { standFromTray } from "../lib/trayCarry";
 
 /** The stand riding the held tray; a click sends it back to its shelf — see `TrayEquipmentDisplay`. */
-export function BunsenStandTrayDisplay() {
+export function BunsenStandTrayDisplay({ rotationY = 0 }: { readonly rotationY?: number }) {
   const scene = useBunsenStandScene();
   const instance = useMemo(() => {
     const clone = scene.clone(true);
@@ -37,8 +36,9 @@ export function BunsenStandTrayDisplay() {
       instance={instance}
       restPosition={restPosition}
       onReturn={useBunsenStandStorageStore.getState().requestReturn}
-      onUnload={standFromTray}
+      what="stand"
       owner="tray-stand"
+      rotationY={rotationY}
     />
   );
 }

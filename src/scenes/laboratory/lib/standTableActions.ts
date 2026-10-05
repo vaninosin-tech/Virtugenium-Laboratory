@@ -207,7 +207,7 @@ export function clickWorkbenchRackTube(index: number, instanceId: string, origin
 const MAGNET_REACH = 0.13;
 
 /** The stand target a held item becomes when brought to the stand. */
-function heldAsTarget(held: HeldItem): StandTarget {
+function heldAsTarget(held: Exclude<HeldItem, { kind: "tray" }>): StandTarget {
   if (held.kind === "bottle") {
     return { kind: "bottle", location: held.location, reagentId: held.reagentId, instanceId: held.instanceId };
   }
@@ -220,6 +220,8 @@ function heldAsTarget(held: HeldItem): StandTarget {
  * there), a bottle near the clamped tube's mouth pours. Null: nothing here.
  */
 export function handActionFor(held: HeldItem, point: THREE.Vector3): StandAction | null {
+  // Off the tray: set down where the player stands (`trayHandAction`, VL-017).
+  if (held.kind === "tray") return null;
   // A bottle from the bench brought over the tray on the table goes onto it (VL-017).
   if (held.kind === "bottle" && held.location === "workbench" && overTableTray(point)) {
     return { label: "Поставить на поднос", blocked: false, part: "tray", run: () => void bottleToTray("workbench", held.instanceId) };

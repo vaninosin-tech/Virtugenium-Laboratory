@@ -27,7 +27,12 @@ export type HeldItem =
     }
   | { readonly kind: "tube"; readonly location: "fumeHood"; readonly index: number; readonly instanceId: string }
   /** A workbench rack tube — carried by `InspectableTestTubeSlot` itself, the hand only steers it. */
-  | { readonly kind: "workbench-tube"; readonly index: number; readonly instanceId: string };
+  | { readonly kind: "workbench-tube"; readonly index: number; readonly instanceId: string }
+  /**
+   * Something taken off the tray at the table or the hood, to be put down
+   * there in its usual place (VL-017) — or back on the tray with RMB.
+   */
+  | { readonly kind: "tray"; readonly what: "bottle" | "tube" | "stand" | "lamp"; readonly instanceId: string };
 
 /**
  * The hand, as plain mutable state read and written every frame (never a

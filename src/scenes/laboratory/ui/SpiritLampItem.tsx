@@ -12,7 +12,6 @@ import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerIns
 import { ReagentHoverRim } from "./ReagentHoverRim";
 import { SPIRIT_LAMP_MODEL_PATH, prepareLampMaterials } from "./SpiritBurner";
 import { TrayEquipmentDisplay } from "./TrayEquipmentDisplay";
-import { lampFromTray } from "../lib/trayCarry";
 
 /** A capped, non-interactive copy of the lamp model; its materials go with it. */
 function useLampCopy() {
@@ -99,7 +98,7 @@ export function SpiritLampShelfInstance({
 }
 
 /** The lamp riding the held tray; a click sends it back to its shelf. */
-export function SpiritLampTrayDisplay() {
+export function SpiritLampTrayDisplay({ rotationY = 0 }: { readonly rotationY?: number }) {
   const instance = useLampCopy();
   const trayConfig = useTrayReagentAreaStore((state) => state.config);
   const restPosition = useMemo(() => lampTrayRestPosition(trayConfig), [trayConfig]);
@@ -108,8 +107,9 @@ export function SpiritLampTrayDisplay() {
       instance={instance}
       restPosition={restPosition}
       onReturn={useBurnerStore.getState().requestReturn}
-      onUnload={lampFromTray}
+      what="lamp"
       owner="tray-lamp"
+      rotationY={rotationY}
     />
   );
 }

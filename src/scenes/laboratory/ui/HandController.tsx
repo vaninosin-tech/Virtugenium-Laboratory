@@ -6,6 +6,7 @@ import { handActionFor, standActionFor } from "../lib/standTableActions";
 import { HAND, useHandStore, type HeldItem } from "../lib/useHandStore";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { WORKBENCH_CARRY } from "../lib/tableTray";
+import { trayHandAction } from "../lib/trayUnloadPlace";
 import { sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 
 /** How high above the worktop the held item glides — just off it, its shadow right under it. */
@@ -74,7 +75,7 @@ export function HandController() {
         putBack();
         return;
       }
-      const action = held.kind === "workbench-tube" ? null : handActionFor(held, HAND.point);
+      const action = held.kind === "workbench-tube" ? null : (held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.point));
       if (!action || action.blocked) return;
       // From where the item is drawn (snapped beside its target), not the bare hand.
       const from = HAND.itemPosValid ? HAND.itemPos : HAND.point;
@@ -135,7 +136,7 @@ export function HandController() {
       if (far > REACH) s.hit.set(HAND.home.x + (dx / far) * REACH, s.hit.y, HAND.home.z + (dz / far) * REACH);
       HAND.point.copy(s.hit);
       HAND.valid = true;
-      const action = handActionFor(held, HAND.point);
+      const action = (held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.point));
       HAND.action = action ? { label: action.label, blocked: action.blocked } : null;
       // A bottle always aims at the tube in the clamp; a tube at the clamp
       // while it is empty, else at the tube in it (to pour into).
