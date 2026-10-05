@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
 import { handActionFor, standActionFor } from "../lib/standTableActions";
@@ -10,8 +10,8 @@ import { trayHandAction } from "../lib/trayUnloadPlace";
 import { constrainOnWorktop } from "../lib/worktopBounds";
 import { sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 
-/** How high above the worktop the held item glides — just off it, its shadow right under it. */
-const CARRY_LIFT = 0.02;
+/** How high above the worktop the held item is carried — lifted clear of it, its shadow right under it (VL-018). */
+const CARRY_LIFT = 0.045;
 /**
  * The hand stays this close (horizontally) to the item's place: across the
  * whole worktop (a bottle at the hood's far end is ~0.7 m from the stand),
@@ -118,6 +118,26 @@ export function HandController() {
     };
   }, [held, gl, setEvents]);
 
+  // A soft shadow on the worktop right under the carried item (VL-018): where
+  // it is over the table — the lift alone hardly shows on a grey countertop.
+  const shadowRef = useRef<THREE.Group>(null);
+  useFrame(() => {
+    const shadow = shadowRef.current;
+    if (shadow) {
+      const show = !!held && held.kind !== "workbench-tube" && HAND.itemPosValid && HAND.homeValid;
+      shadow.visible = show;
+      if (show) {
+        shadow.position.set(HAND.itemPos.x, HAND.home.y + 0.0015, HAND.itemPos.z);
+        // Fainter the higher it is — beside the clamped tube it is well up.
+        const height = Math.max(0, HAND.itemPos.y - HAND.home.y);
+        shadow.scale.setScalar(HAND.radius * (1 + height * 2));
+        shadowMaterials.forEach((material, i) => {
+          material.opacity = SHADOW_OPACITY[i] * THREE.MathUtils.clamp(1 - height * 4, 0.25, 1);
+        });
+      }
+    }
+  });
+
   useFrame(() => {
     if (!held) return;
     if (held.kind === "workbench-tube") {
@@ -128,7 +148,8 @@ export function HandController() {
       if (HAND.startAtItem) {
         // Over the item itself: it lifts where it stands and goes where the mouse takes it.
         HAND.startAtItem = false;
-        s.projected.copy(HAND.home).project(camera);
+        // At the height it is carried at, or the hand lands short of it and the item slides towards the player.
+        s.projected.copy(HAND.home).setY(HAND.home.y + CARRY_LIFT).project(camera);
         HAND.ndc.set(THREE.MathUtils.clamp(s.projected.x, -0.97, 0.97), THREE.MathUtils.clamp(s.projected.y, -0.97, 0.97));
       }
       // The hand: where the virtual cursor's ray meets a plane just above
@@ -165,8 +186,22 @@ export function HandController() {
     HAND.screen.set(rect.left + ((s.projected.x + 1) / 2) * rect.width, rect.top + ((1 - s.projected.y) / 2) * rect.height);
   });
 
-  return null;
+  return (
+    <group ref={shadowRef} visible={false} rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
+      <mesh material={shadowMaterials[0]} raycast={() => {}}>
+        <circleGeometry args={[1.25, 32]} />
+      </mesh>
+      <mesh material={shadowMaterials[1]} position={[0, 0, 0.0005]} raycast={() => {}}>
+        <circleGeometry args={[0.85, 32]} />
+      </mesh>
+    </group>
+  );
 }
+
+const SHADOW_OPACITY = [0.14, 0.22] as const;
+const shadowMaterials = SHADOW_OPACITY.map(
+  (opacity) => new THREE.MeshBasicMaterial({ color: "#000000", transparent: true, opacity, depthWrite: false }),
+);
 
 /** The workbench carry clamps by itself near the ring; the hand only says so. */
 function workbenchTubeHint(held: Extract<HeldItem, { kind: "workbench-tube" }>): { label: string; blocked: boolean } | null {

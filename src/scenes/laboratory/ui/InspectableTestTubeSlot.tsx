@@ -18,7 +18,7 @@ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { clickWorkbenchRackTube } from "../lib/standTableActions";
 import { useStandHintStore } from "../lib/useStandHintStore";
 import { useStandMotionStore } from "../lib/useStandMotionStore";
-import { useHandStore } from "../lib/useHandStore";
+import { HAND, useHandStore } from "../lib/useHandStore";
 import { overTableTray, WORKBENCH_CARRY } from "../lib/tableTray";
 import { tubeToTray } from "../lib/trayCarry";
 import { ArrivalFlight } from "./StandMotion";
@@ -52,22 +52,22 @@ const HITBOX_HALF_DEPTH = 0.018;
 /** Damping rate for tracking the cursor вЂ” snappy, but not an instant snap (avoids a jarring pop on the very first frame after pick-up). */
 const DRAG_DAMPING = 18;
 /** How far above its own resting height the tube climbs before heading back over its slot вЂ” clears the rack's side rail/neighboring tubes instead of dragging straight through them on the way back in. */
-const RETURN_APPROACH_HEIGHT = 0.05;
+/** Above its hole, clear of the 12 cm rack's bars (VL-018): a tube comes and goes from here, straight up and down. */
+const RETURN_APPROACH_HEIGHT = 0.125;
+/** Carried loose over the table: just off it (rack-local Y). */
+const CARRY_LOW_Y = 0.03;
+/** How far round the rack (its own units) a carried tube keeps to the high path, over the bars. */
+const OVER_RACK_MARGIN = 0.08;
+const RACK_HALF_X = 0.185;
+const RACK_HALF_Z = 0.0935;
 /** Damping rate for both return legs вЂ” slower than `DRAG_DAMPING` since this is a settle, not a live cursor-follow. */
 const RETURN_DAMPING = 9;
+/** How fast a taken tube rises out of its hole (1/s, exponential). */
+const LIFT_DAMPING = 16;
 /** "Close enough" to a return waypoint to advance to the next leg / call the return fully finished. */
 const RETURN_EPSILON = 0.004;
 /** How close (horizontal distance, in the rack's own local units) a held tube needs to be to the rack's origin to count as "near it" for the drop-target highlight вЂ” see `useTestTubeDragStore`'s `isNearHolder` doc for why this is a live distance check instead of a hover event. Comfortably past the hole grid's own half-width (0.119) so the highlight comes on a bit before the tube is literally back at a slot. */
 const NEAR_HOLDER_RADIUS = 0.2;
-/**
- * Local Y (in the rack's own frame, which is calibrated so Y=0 there IS the
- * true tabletop height) the tube slides at while being dragged loose on the
- * table вЂ” NOT `localPosition[1]` (`TUBE_BASE_Y`, +0.014), which is where it
- * stands INSIDE the rack's raised insert collar. Using the collar height for
- * open-table dragging left the tube visibly floating ~14mm above the bare
- * countertop instead of sitting flush on it.
- */
-const TABLE_SURFACE_LOCAL_Y = 0;
 /**
  * How far (world X/Z) a held tube can be dragged from the rack's OWN
  * position вЂ” NOT the whole countertop (`clampToTableWorldXZ`'s full
@@ -309,6 +309,10 @@ export function InspectableTestTubeSlot({
   type ReturnPhase = "idle" | "approach" | "insert";
   const returnPhaseRef = useRef<ReturnPhase>("idle");
   const wasHeldRef = useRef(false);
+  /** Just taken, still rising out of its hole — it is carried only once clear of the rack. */
+  const liftingRef = useRef(false);
+  /** Just taken: put the hand over the tube itself, not the middle of the screen. */
+  const aimAtTubeRef = useRef(false);
   // Set only while the CURRENT "approach"/"insert" run is a fresh arrival
   // (a hole going from empty to filled for the first time вЂ” taken from the
   // cabinet, or detached back from the Bunsen stand ring) rather than a
@@ -320,6 +324,9 @@ export function InspectableTestTubeSlot({
     if (isHeld) {
       wasHeldRef.current = true;
       returnPhaseRef.current = "idle";
+      // Taken: first straight up out of its hole, over the rack's bars (VL-018).
+      liftingRef.current = true;
+      aimAtTubeRef.current = true;
     } else if (wasHeldRef.current) {
       wasHeldRef.current = false;
       arrivingRef.current = false;
@@ -387,15 +394,34 @@ export function InspectableTestTubeSlot({
     const parent = group?.parent;
     if (!group || !parent) return;
 
+    if (isHeld && liftingRef.current) {
+      // Out of the hole first, straight up — not sideways through the rack's
+      // bars. The hand starts over the tube, not in the middle of the screen.
+      const carryY = localPosition[1] + RETURN_APPROACH_HEIGHT - 0.01;
+      if (aimAtTubeRef.current) {
+        aimAtTubeRef.current = false;
+        const ndc = group.getWorldPosition(dragWorldTargetRef.current).project(camera);
+        HAND.ndc.set(ndc.x, ndc.y);
+        sharedMouseNdc.set(ndc.x, ndc.y);
+      }
+      group.position.x = localPosition[0];
+      group.position.z = localPosition[2];
+      group.position.y = THREE.MathUtils.damp(group.position.y, carryY, LIFT_DAMPING, delta);
+      group.scale.setScalar(1);
+      if (carryY - group.position.y < 0.004) liftingRef.current = false;
+      return;
+    }
+
     if (isHeld) {
-      // The bare tabletop plane вЂ” plain world-up normal (see `WORLD_UP`'s
-      // doc), passing through the SAME height the tube rests at in its slot
-      // (local Y = `TABLE_SURFACE_LOCAL_Y`, i.e. the rack's own origin
-      // height вЂ” NOT `localPosition[1]`, which is where the tube stands
-      // INSIDE the rack's raised collar and would leave it visibly floating
-      // above the actual table surface). NOT a plane facing the camera: the
-      // tube slides across the table, it doesn't float in front of the lens.
-      const planePoint = parent.localToWorld(dragPlanePointRef.current.set(0, TABLE_SURFACE_LOCAL_Y, 0));
+      // A horizontal plane (plain world-up normal, see `WORLD_UP`'s doc), not
+      // one facing the camera: the tube moves across the table.
+      // Over the rack it goes over its bars; away from it, just off the
+      // table (VL-018). The plane follows, so it stays under the cursor.
+      const overRack =
+        Math.abs(group.position.x) < RACK_HALF_X + OVER_RACK_MARGIN &&
+        Math.abs(group.position.z) < RACK_HALF_Z + OVER_RACK_MARGIN;
+      const carryY = overRack ? localPosition[1] + RETURN_APPROACH_HEIGHT : CARRY_LOW_Y;
+      const planePoint = parent.localToWorld(dragPlanePointRef.current.set(0, carryY, 0));
       dragPlaneRef.current.setFromNormalAndCoplanarPoint(WORLD_UP, planePoint);
       dragRaycasterRef.current.setFromCamera(sharedMouseNdc, camera);
       if (dragRaycasterRef.current.ray.intersectPlane(dragPlaneRef.current, dragWorldTargetRef.current)) {
@@ -494,9 +520,13 @@ export function InspectableTestTubeSlot({
       // the whole time it's being dragged (see the `isHeld` branch above),
       // so this leg never touches scale.
       const approachY = localPosition[1] + RETURN_APPROACH_HEIGHT;
-      group.position.x = THREE.MathUtils.damp(group.position.x, localPosition[0], RETURN_DAMPING, delta);
-      group.position.y = THREE.MathUtils.damp(group.position.y, approachY, RETURN_DAMPING, delta);
-      group.position.z = THREE.MathUtils.damp(group.position.z, localPosition[2], RETURN_DAMPING, delta);
+      // Up over the bars first, then across to its hole — never through the rack.
+      const rising = group.position.y < approachY - 0.02;
+      if (!rising) {
+        group.position.x = THREE.MathUtils.damp(group.position.x, localPosition[0], RETURN_DAMPING, delta);
+        group.position.z = THREE.MathUtils.damp(group.position.z, localPosition[2], RETURN_DAMPING, delta);
+      }
+      group.position.y = THREE.MathUtils.damp(group.position.y, approachY, rising ? LIFT_DAMPING : RETURN_DAMPING, delta);
       if (
         Math.abs(group.position.x - localPosition[0]) < RETURN_EPSILON &&
         Math.abs(group.position.y - approachY) < RETURN_EPSILON &&

@@ -73,8 +73,8 @@ const HOLD = 0.74;
 const UNTIP = 0.84;
 /** Where the cap is put down: this far to the side of the bottle's place, as the player sees it. */
 const CAP_ASIDE = 0.085;
-/** How fast a let-go item goes home (1/s, exponential). */
-const FOLLOW_RATE = 12;
+/** How closely a carried item follows the hand (1/s, exponential) — smooths the mouse's jerks. */
+const CARRY_FOLLOW_RATE = 20;
 /** Seconds for a taken item to fly from its place to the hand; after that it follows the mouse 1:1. */
 const FLY_IN_SECONDS = 0.22;
 /** How fast an item snaps to its target near the stand, and off again (1/s, exponential). */
@@ -149,6 +149,13 @@ export function PourMotion({
     curQuat: new THREE.Quaternion(),
     capOff: 0,
     wasHeld: false,
+    wasPouring: false,
+    /** Going home: where from, how far along (0..1; −1 — not going home), in how long. */
+    homeFrom: new THREE.Vector3(),
+    homeFromQuat: new THREE.Quaternion(),
+    homeT: -1,
+    homeSeconds: 0.4,
+    homeArc: 0.05,
     flyIn: 1,
     flyStart: new THREE.Vector3(),
     snap: 0,
@@ -329,6 +336,7 @@ export function PourMotion({
         m.flyIn = 0;
         m.flyStart.copy(m.cur);
         m.snap = 0;
+        m.homeT = -1;
       }
       m.flyIn = Math.min(1, m.flyIn + delta / FLY_IN_SECONDS);
       const free = HAND.valid ? HAND.point : s.rest;
@@ -351,26 +359,39 @@ export function PourMotion({
       }
       m.snap = THREE.MathUtils.lerp(m.snap, aim ? 1 : 0, 1 - Math.exp(-SNAP_RATE * delta));
       s.target.copy(free).lerp(m.snapGoal, smooth(m.snap));
-      m.cur.copy(m.flyStart).lerp(s.target, smooth(m.flyIn));
+      if (m.flyIn < 1) m.cur.copy(m.flyStart).lerp(s.target, smooth(m.flyIn));
+      // Then after the hand, a touch behind it: a jerk of the mouse is not a jerk of the bottle (VL-018).
+      else m.cur.lerp(s.target, 1 - Math.exp(-CARRY_FOLLOW_RATE * delta));
       m.curQuat.copy(s.restQuat);
       HAND.itemPos.copy(m.cur);
       HAND.itemPosValid = true;
     } else {
-      // On its way home.
-      const t = 1 - Math.exp(-FOLLOW_RATE * delta);
-      m.cur.lerp(s.rest, t);
-      // Round whatever stands in the way — the tube it poured into, the
-      // stand, the lamp — not through it (VL-018); straight in at the end.
-      if (m.cur.distanceTo(s.rest) > r.radius * 1.5) {
-        constrainOnWorktop(m.cur, r.radius, s.rest, new Set([instanceId]));
+      // On its way home (VL-018): up in a low arc, across, and set down
+      // softly — it lands with no speed left, not with a thud.
+      if (m.wasHeld || m.wasPouring || (m.homeT < 0 && !m.cur.equals(s.rest))) {
+        m.homeFrom.copy(m.cur);
+        m.homeFromQuat.copy(m.curQuat);
+        m.homeT = 0;
+        const across = Math.hypot(m.cur.x - s.rest.x, m.cur.z - s.rest.z);
+        m.homeSeconds = THREE.MathUtils.clamp(0.28 + across * 0.55, 0.3, 0.7);
+        m.homeArc = THREE.MathUtils.clamp(0.025 + across * 0.07, 0.025, 0.08);
       }
-      m.curQuat.slerp(s.restQuat, t);
-      if (m.cur.distanceTo(s.rest) < 0.0008) {
+      m.homeT = Math.min(1, m.homeT + delta / m.homeSeconds);
+      const k = smooth(m.homeT);
+      m.cur.lerpVectors(m.homeFrom, s.rest, k);
+      // sin² — no speed up or down at either end.
+      m.cur.y += m.homeArc * Math.sin(Math.PI * m.homeT) ** 2;
+      // Round whatever stands in the way — the tube it poured into, the
+      // stand, the lamp — not through it; straight in at the end.
+      if (m.homeT < 0.85) constrainOnWorktop(m.cur, r.radius, s.rest, new Set([instanceId]));
+      m.curQuat.slerpQuaternions(m.homeFromQuat, s.restQuat, k);
+      if (m.homeT >= 1) {
         m.cur.copy(s.rest);
         m.curQuat.copy(s.restQuat);
       }
     }
     m.wasHeld = held;
+    m.wasPouring = pouring;
 
     group.position.copy(parent.worldToLocal(s.target.copy(m.cur)));
     // World = parent · local, so local = parent⁻¹ · world.
