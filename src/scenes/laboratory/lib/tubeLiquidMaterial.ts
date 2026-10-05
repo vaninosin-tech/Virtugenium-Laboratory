@@ -98,7 +98,7 @@ float dyeHalo = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   // Rising gas mixes Cu2+ through the entire column from the outset.
   // Keep only a soft enrichment near the granule and in the rising wake.
-  float mixed = smoothstep(0.18, 0.78, p);
+  float mixed = smoothstep(0.04, 0.62, p);
   float wake = exp(-pow(radial.x * 3.0 + 0.15 * stream, 2.0))
     * (1.0 - smoothstep(0.35, 0.95, h));
   localMix = mixed * (0.79 + 0.21 * (1.0 - h) + 0.035 * wake);
@@ -173,7 +173,7 @@ if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTransportActive > 0.01)
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 reactionTint = uReactionColor;
 if (uReactionKind > 0.5 && uReactionKind < 1.5)
-  reactionTint = mix(vec3(0.191, 0.402, 0.376), uReactionColor, smoothstep(0.55, 1.0, p));
+  reactionTint = mix(vec3(0.26, 0.60, 0.58), uReactionColor, smoothstep(0.55, 1.0, p));
 vec3 tubeColor = mix(uBaseColor, reactionTint, localMix);
 if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), vec3(0.25, 0.002, 0.075),
   max(dyeCloud, dyeHalo * 0.30));
@@ -202,7 +202,7 @@ float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
   * 0.45;
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
   + (uReactionKind > 0.5 && uReactionKind < 1.5
-    ? 0.40 + 0.25 * smoothstep(0.70, 1.0, p) : 0.0))
+    ? 0.48 + 0.38 * smoothstep(0.70, 1.0, p) : 0.0))
   + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 1.70, milk))
   + raspberry * 0.88 + dyeHalo * 0.06 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
@@ -254,8 +254,14 @@ outgoingLight = mix(outgoingLight, vec3(0.38, 0.001, 0.075) + boundedSpecular * 
 if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.92), cloud * 0.82);
   gl_FragColor.a = max(gl_FragColor.a, cloud * 0.83);
+}
+// BaSO4 suspension is an opaque milk on reference footage (exp3-*): the
+// background must not show through while the column is still cloudy.
+if (uReactionKind > 2.5 && uReactionKind < 3.5) {
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.90), cloud * 0.70);
+  gl_FragColor.a = max(gl_FragColor.a, cloud * 0.94);
 }`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v18-barium-clearing"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v20-opaque-baso4"; }
 }

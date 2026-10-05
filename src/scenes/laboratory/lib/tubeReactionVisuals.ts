@@ -9,7 +9,7 @@ import type { ReactionKind, TubeChemistry } from "./tubeReactions";
 import type { RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
-  copperColor: "#165071",
+  copperColor: "#1f7cc2",
   gasColor: "#86634e",
   gasOpacity: 0.055,
   gasBuildSeconds: 4,
@@ -231,7 +231,7 @@ vec3 transmitThroughTube(vec3 background) {
       float mixed = smoothstep(0.18, 0.78, uOpticalProgress);
       float concentration = mixed * (0.79 + 0.21 * (1.0 - h));
       concentration = mix(concentration, 1.0, smoothstep(0.72, 1.0, uOpticalProgress));
-      transmission *= exp(-mix(vec3(0.75, 0.30, 0.32), vec3(4.5, 1.8, 0.8), smoothstep(0.55, 1.0, uOpticalProgress)) * concentration * distance / (6.0 * radius));
+      transmission *= exp(-mix(vec3(0.75, 0.30, 0.32), vec3(3.6, 1.15, 0.28), smoothstep(0.55, 1.0, uOpticalProgress)) * concentration * distance / (6.0 * radius));
     } else if (uOpticalKind > 2.5) {
       float fill = max(0.001, uBackdropLevel - bottom);
       float liquidH = clamp((dot(uBackdropUp, q) - bottom) / fill, 0.0, 1.0);
@@ -267,7 +267,7 @@ backdrop = mix(straight, backdrop, edgeSoft);
 backdrop = transmitThroughTube(backdrop);
 gl_FragColor = vec4(backdrop, 1.0);`);
   };
-  material.customProgramCacheKey = () => "tube-water-backdrop-v2-solution-transmission";
+  material.customProgramCacheKey = () => "tube-water-backdrop-v3-vivid-copper";
   return { material, up, level, tracerStrength };
 }
 

@@ -65,7 +65,7 @@ vec3 tubeTransmission() {
     float mixed = 1.0 - exp(-uImmersionProgress * 11.0);
     float concentration = mixed * (0.79 + 0.21 * (1.0 - h));
     concentration = mix(concentration, 1.0, smoothstep(0.72, 1.0, uImmersionProgress));
-    absorption = vec3(1.00, 0.40, 0.18) * concentration;
+    absorption = vec3(1.30, 0.42, 0.10) * concentration;
   } else if (uImmersionDyeActive > 0.01) {
     // Sample along the view ray: plumes in front of the object tint it.
     for (int i = 0; i < 4; i++) {

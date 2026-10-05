@@ -321,7 +321,7 @@ describe("tube reaction rendering contract", () => {
   it("keeps the final copper solution saturated yet transparent", () => {
     const f = fixture("copper-nitric");
     f.update(chemistry(1));
-    expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("165071");
+    expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("1f7cc2");
     expect(liquid(f).uniforms.uOpacity.value).toBeLessThan(0.5);
   });
 
