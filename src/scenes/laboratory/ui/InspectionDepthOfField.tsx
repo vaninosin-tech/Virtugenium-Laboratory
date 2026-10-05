@@ -6,6 +6,7 @@ import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+import "./tabletFocus.css";
 
 /** Sharp band around the focus point: tight — everything is meant to blur. */
 const FOCUS_RANGE = 0.3;
@@ -53,6 +54,16 @@ export function InspectionDepthOfField() {
   useEffect(() => {
     raycaster.layers.enable(INSPECT_LAYER);
   }, [raycaster]);
+
+  // The HTML over the lab blurs too while the tablet is open (`tabletFocus.css`).
+  // The lab's root element: the canvas sits two wrappers deep in it.
+  const tabletOpen = useLaboratoryStore((state) => state.tabletOpen);
+  useEffect(() => {
+    const root = gl.domElement.parentElement?.parentElement?.parentElement;
+    if (!root) return;
+    root.classList.add("lab-focus-root");
+    root.classList.toggle("lab-tablet-focus", tabletOpen);
+  }, [gl, tabletOpen]);
   const effect = useMemo(() => {
     const blur = new InspectionBlurEffect(camera, { focusRange: FOCUS_RANGE, bokehScale: BOKEH_SCALE });
     blur.target = new THREE.Vector3();
