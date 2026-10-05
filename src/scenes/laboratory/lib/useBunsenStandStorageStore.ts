@@ -29,7 +29,25 @@ export interface BunsenStandTablePosition {
 }
 
 /** Where the stand first appears on the table, the moment a cabinet session ends with it riding the tray (see `transferToWorkbench`) — clear of the reagent grid/stopper holder, which sit closer to the table's own center/back edge. Only ever applied once; dragging afterward persists via `setTablePosition`. */
-const DEFAULT_TABLE_POSITION: BunsenStandTablePosition = { x: -0.06, z: -0.12 };
+/**
+ * The stand's place on the table (VL-018): the middle of the work area, in
+ * front of the reagents' row at the far edge and clear of it — the tube in
+ * its clamp straight ahead of the table view (the camera is at the table's
+ * middle, X 0), the lamp beside it towards the tray.
+ */
+const DEFAULT_TABLE_POSITION: BunsenStandTablePosition = { x: 0.06, z: -0.36 };
+/**
+ * The stand on the table is turned round: its clamp, and the lamp beside it,
+ * towards the tray (VL-018) — not towards the rack.
+ */
+export const STAND_TABLE_YAW = Math.PI;
+/** The clamp's ring from the stand's rod on the table, in table space (X, Z) — `TUBE_RING_LOCAL_OFFSET` turned by `STAND_TABLE_YAW`. */
+export function tableRingOffsetXZ(): readonly [number, number] {
+  const cos = Math.cos(STAND_TABLE_YAW);
+  const sin = Math.sin(STAND_TABLE_YAW);
+  const [x, , z] = TUBE_RING_LOCAL_OFFSET;
+  return [x * cos + z * sin, -x * sin + z * cos];
+}
 
 /**
  * The clamped tube's axis at the clamp jaws (`TubeClamp_TubeAxis`), in the
@@ -46,7 +64,8 @@ export const TUBE_RING_ATTACH_RADIUS = 0.1;
 /** How far below the ring's own centre the attached tube's (bottom-pivoted) origin sits — mostly hanging through/below the ring with its neck poking a little above it, matching how it read in the Blender verification render. */
 export const TUBE_RING_INSERT_DEPTH = 0.1;
 
-const STORAGE_KEY = "vg-bunsen-stand-table-position-v2";
+// v3: the stand moved to the middle of the work area (VL-018) — an old saved spot is in the bottles' row.
+const STORAGE_KEY = "vg-bunsen-stand-table-position-v3";
 
 function loadSavedTablePosition(): BunsenStandTablePosition {
   try {

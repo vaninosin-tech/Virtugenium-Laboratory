@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { TUBE_CLAMP_PIVOT, useBunsenStandScene } from "../lib/bunsenStandAssembly";
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import { CAMERA_TARGETS, type Position3 } from "../lib/layout";
-import { STAND_BASE_BOTTOM_OFFSET, useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { STAND_BASE_BOTTOM_OFFSET, STAND_TABLE_YAW, useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { useStandStationStore } from "../lib/useStandStationStore";
 import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
@@ -23,7 +23,10 @@ import { standToTray } from "../lib/trayCarry";
  * direction, flattened. The stand is never turned on the table, so its local
  * space is the world's.
  */
-const AWAY_AT_TABLE = new THREE.Vector3(Math.sin(CAMERA_TARGETS.table.yaw), 0, -Math.cos(CAMERA_TARGETS.table.yaw)).normalize();
+const AWAY_AT_TABLE = new THREE.Vector3(Math.sin(CAMERA_TARGETS.table.yaw), 0, -Math.cos(CAMERA_TARGETS.table.yaw))
+  .normalize()
+  // In the stand's own space: it stands turned round on the table (`STAND_TABLE_YAW`).
+  .applyAxisAngle(new THREE.Vector3(0, 1, 0), -STAND_TABLE_YAW);
 /** A press that moves the stand less than this is a click (walk up to it), not a drag. */
 const CLICK_SLOP = 0.004;
 
@@ -182,7 +185,7 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
   };
 
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} rotation={[0, STAND_TABLE_YAW, 0]}>
       <primitive object={instance} />
       <ReagentHoverRim object={instance} active={(hovered || dragging) && !atStand} />
       <mesh
@@ -226,6 +229,7 @@ export function LoneSpiritLampOnWorkbench({ tableWorldPosition }: { readonly tab
         tableWorldPosition[1] + counterSurfaceY,
         tableWorldPosition[2] + tablePosition.z,
       ]}
+      rotation={[0, STAND_TABLE_YAW, 0]}
     >
       <SpiritBurner position={LONE_LAMP_OFFSET} />
     </group>

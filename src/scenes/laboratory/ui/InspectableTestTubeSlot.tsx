@@ -10,7 +10,7 @@ import { prepareTestTube } from "../lib/testTubeMaterials";
 import { pushOutsideTrayReturnZone } from "../lib/trayReturnZone";
 import {
   TUBE_RING_ATTACH_RADIUS,
-  TUBE_RING_LOCAL_OFFSET,
+  tableRingOffsetXZ,
   useBunsenStandStorageStore,
 } from "../lib/useBunsenStandStorageStore";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
@@ -460,8 +460,9 @@ export function InspectableTestTubeSlot({
 
       const bunsenState = useBunsenStandStorageStore.getState();
       if (bunsenState.onWorkbench) {
-        const ringWorldX = tablePosition[0] + bunsenState.tablePosition.x + TUBE_RING_LOCAL_OFFSET[0];
-        const ringWorldZ = tablePosition[2] + bunsenState.tablePosition.z + TUBE_RING_LOCAL_OFFSET[2];
+        const [ringX, ringZ] = tableRingOffsetXZ();
+        const ringWorldX = tablePosition[0] + bunsenState.tablePosition.x + ringX;
+        const ringWorldZ = tablePosition[2] + bunsenState.tablePosition.z + ringZ;
         // Horizontal (X/Z) distance only вЂ” NOT `Vector3.distanceTo` against
         // the ring's true 3D position. `TubeRing` sits ~0.22m above the
         // table (`TUBE_RING_LOCAL_OFFSET[1]`), but a held tube slides along
