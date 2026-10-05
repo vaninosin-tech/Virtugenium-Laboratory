@@ -24,15 +24,12 @@ import { prepareTrayMaterials } from "../lib/trayMaterials";
 import { bottleFromTray, tubeFromTray, unloadLabel } from "../lib/trayCarry";
 import { trayUnloadPlace } from "../lib/trayUnloadPlace";
 import { TABLE_TRAY } from "../lib/tableTray";
-import { trayHasItems } from "../lib/trayCarry";
 
 /**
- * Whether the tray is in the player's hands at this zone: in every cabinet;
- * at the fume hood only while something is still on it — emptied there, it
- * goes back to the table instead of hiding the worktop (VL-017).
+ * Whether the tray is in the player's hands at this zone: in every cabinet
+ * and at the fume hood — it goes along with the camera, loaded or not (VL-017).
  */
-const trayHeldAt = (id: HotspotTargetId | null): boolean =>
-  isTrayHeldEligible(id) && (id !== "fume-hood" || trayHasItems());
+const trayHeldAt = (id: HotspotTargetId | null): boolean => isTrayHeldEligible(id);
 import { useStandHintStore } from "../lib/useStandHintStore";
 
 const MODEL_PATH = "/assets/models/LabTray_Metal.glb";
