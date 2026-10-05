@@ -86,9 +86,6 @@ export function shownInWorld(object: THREE.Object3D): boolean {
 const local = new THREE.Vector3();
 const worldScale = new THREE.Vector3();
 
-/** How far outside a zone (m) its item's home may be and still count as on it. */
-const ZONE_MARGIN = 0.15;
-
 function toLocal(rect: LocalRect, point: THREE.Vector3): number {
   rect.object.updateWorldMatrix(true, false);
   rect.object.worldToLocal(local.copy(point));
@@ -102,18 +99,32 @@ function backToWorld(rect: LocalRect, point: THREE.Vector3): void {
   point.y = y;
 }
 
-/** The zones of the place `home` is at (its worktop and its tray), if any. */
+/** How far (m, horizontally) `point` is from the zone; 0 inside it. */
+function distanceTo(zone: LocalRect, point: THREE.Vector3): number {
+  const s = toLocal(zone, point);
+  const dx = Math.max(zone.minX - local.x, 0, local.x - zone.maxX);
+  const dz = Math.max(zone.minZ - local.z, 0, local.z - zone.maxZ);
+  return Math.hypot(dx, dz) * s;
+}
+
+/**
+ * The zones of the place `home` is at — its worktop and its tray: the place
+ * of the zone nearest to it. However tight the rectangles are tuned (F8),
+ * an item standing outside them still belongs to the nearest one and is
+ * kept in it, rather than let loose.
+ */
 function zonesOf(home: THREE.Vector3): LocalRect[] {
   const zones = activeWorktopZones();
+  let place: string | null = null;
+  let best = Infinity;
   for (const { id, rect } of zones) {
-    const s = toLocal(rect, home);
-    const m = ZONE_MARGIN / s;
-    if (local.x > rect.minX - m && local.x < rect.maxX + m && local.z > rect.minZ - m && local.z < rect.maxZ + m) {
-      const place = WORKTOP_ZONE_PLACE[id];
-      return zones.filter((zone) => WORKTOP_ZONE_PLACE[zone.id] === place).map((zone) => zone.rect);
+    const d = distanceTo(rect, home);
+    if (d < best) {
+      best = d;
+      place = WORKTOP_ZONE_PLACE[id];
     }
   }
-  return [];
+  return zones.filter((zone) => WORKTOP_ZONE_PLACE[zone.id] === place).map((zone) => zone.rect);
 }
 
 const clamped = new THREE.Vector3();

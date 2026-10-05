@@ -38,6 +38,7 @@ import { useStopperHolderStore } from "../lib/useStopperHolderStore";
 import { useWorkbenchReagentAreaStore } from "../lib/useWorkbenchReagentAreaStore";
 import { useWorkbenchReagentDragStore } from "../lib/useWorkbenchReagentDragStore";
 import { isInsideTrayReturnZone } from "../lib/trayReturnZone";
+import { constrainOnWorktop } from "../lib/worktopBounds";
 
 const POSITION_DAMPING = 0.28;
 
@@ -122,10 +123,34 @@ function setWorkbenchReagentWorldXZ(instanceId: string, worldX: number, worldZ: 
   useWorkbenchReagentDragStore.getState().setPosition(instanceId, worldX - tablePosition[0], worldZ - tablePosition[2]);
 }
 
-/** Clamp a gameplay jar to the live, possibly dev-repositioned countertop — see `clampToTableWorldXZ`'s own doc (shared with the test tube drag in `InspectableTestTubeSlot`). */
-function clampWorkbenchDragWorldXZ(worldX: number, worldZ: number): readonly [number, number] {
+const draggedJarAt = new THREE.Vector3();
+const draggedJarBox = new THREE.Box3();
+const draggedJarSize = new THREE.Vector3();
+
+/** How far the jar reaches round its origin (m, horizontally) — as drawn, at whatever scale the table shows it. */
+function draggedJarRadius(object: THREE.Object3D): number {
+  draggedJarBox.setFromObject(object).getSize(draggedJarSize);
+  return Math.max(draggedJarSize.x, draggedJarSize.z) / 2;
+}
+
+/**
+ * Clamp a dragged gameplay jar to the live, possibly dev-repositioned
+ * countertop — see `clampToTableWorldXZ`'s own doc (shared with the test
+ * tube drag in `InspectableTestTubeSlot`) — and then to the table's
+ * borders (F8 → «Границы», VL-019), out of what stands on it.
+ */
+function clampWorkbenchDragWorldXZ(
+  worldX: number,
+  worldZ: number,
+  home: THREE.Vector3,
+  instanceId: string,
+  radius: number,
+): readonly [number, number] {
   const tablePosition = useFurniturePositionStore.getState().getOverride("table").position;
-  return clampToTableWorldXZ(worldX, worldZ, tablePosition);
+  const [x, z] = clampToTableWorldXZ(worldX, worldZ, tablePosition);
+  draggedJarAt.set(x, home.y, z);
+  constrainOnWorktop(draggedJarAt, radius, home, new Set([instanceId]));
+  return [draggedJarAt.x, draggedJarAt.z];
 }
 
 /**
@@ -336,6 +361,8 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
     pointerNdcOffset?: THREE.Vector2;
     /** Present only for normal gameplay drags that may be dropped into the return zone. */
     returnInstanceId?: string;
+    /** The dragged jar's own horizontal radius — it stays inside the table's borders whole (VL-019). */
+    radius?: number;
     /** Exact pre-drag world position used for an imperative, guaranteed snap-back. */
     originWorldPosition?: THREE.Vector3;
   } | null>(null);
@@ -857,6 +884,7 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
         planeOffset: new THREE.Vector3(),
         pointerNdcOffset,
         returnInstanceId: instanceId,
+        radius: draggedJarRadius(object),
         originWorldPosition: currentVec.clone(),
       };
       useWorkbenchReagentDragStore.getState().beginDrag(instanceId);
@@ -1062,7 +1090,13 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
       let worldX = dragPoint.current.x + activeTableDrag.planeOffset.x;
       let worldZ = dragPoint.current.z + activeTableDrag.planeOffset.z;
       if (activeTableDrag.returnInstanceId) {
-        [worldX, worldZ] = clampWorkbenchDragWorldXZ(worldX, worldZ);
+        [worldX, worldZ] = clampWorkbenchDragWorldXZ(
+          worldX,
+          worldZ,
+          activeTableDrag.originWorldPosition ?? dragPoint.current,
+          activeTableDrag.returnInstanceId,
+          activeTableDrag.radius ?? 0.05,
+        );
       }
       activeTableDrag.write(worldX, worldZ);
       if (!activeTableDrag.returnInstanceId) return;
