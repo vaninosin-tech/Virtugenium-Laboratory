@@ -198,7 +198,9 @@ diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
         .replace("#include <opaque_fragment>", `
 float edgeSoft = vCap > 0.5 ? max(0.42, clamp(abs(vTubeWaveSlope) * 8.0, 0.0, 1.0))
   : max(0.42, smoothstep(0.0, 0.006, -surfaceDistance));
-diffuseColor.a *= edgeSoft;
+// The soft fade below the surface only hides a hard line in clear water; a
+// coloured or cloudy body keeps its colour right up to the meniscus.
+diffuseColor.a *= vCap > 0.5 ? edgeSoft : mix(edgeSoft, 1.0, clamp(max(pigment, cloud), 0.0, 1.0));
 vec3 boundedSpecular = totalSpecular / (vec3(1.0) + totalSpecular);
 vec3 clearLight = mix(vec3(0.33, 0.44, 0.47), vec3(0.035, 0.10, 0.13), waterEdge) + boundedSpecular * uClearHighlight;
 // Neutral scattering keeps a white precipitate white next to the warm burner.
@@ -237,5 +239,5 @@ if (uReactionKind > 1.5 && uReactionKind < 2.5) {
 }`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v15-tinted-ripple"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v16-solid-colour-to-surface"; }
 }
