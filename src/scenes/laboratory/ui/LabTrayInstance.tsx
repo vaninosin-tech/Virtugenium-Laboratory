@@ -26,7 +26,7 @@ import { TAKE_FROM_TRAY, takeFromTray } from "../lib/trayUnloadPlace";
 import { GlassRim, PourMotion } from "./StandMotion";
 import { trayUnloadPlace } from "../lib/trayUnloadPlace";
 import { TABLE_TRAY } from "../lib/tableTray";
-import { useBoxObstacle } from "../lib/worktopBounds";
+import { registerWorktopZone, useBoxObstacle } from "../lib/worktopBounds";
 
 /** The rack built into the tray (`TRAY_RACK_ANCHOR`, turned a quarter): 18.7 × 37 cm, in the tray's own space. */
 const TRAY_RACK_FOOTPRINT = {
@@ -175,6 +175,13 @@ export function LabTrayInstance({
   const groupRef = useRef<THREE.Group>(null);
   // The rack built into the tray is in the way of what is carried past it (VL-018).
   useBoxObstacle(`tray-rack-${mode}`, groupRef, TRAY_RACK_FOOTPRINT, "tray-rack");
+  // What is carried at the table or the hood may go over the tray there too (F8 → «Границы», VL-019).
+  useEffect(() => {
+    const object = groupRef.current;
+    if (!object) return;
+    if (mode === "table") return registerWorktopZone("table-tray", object);
+    return registerWorktopZone("hood-tray", object, () => useSceneInteractionStore.getState().focusedCabinetId === "fume-hood");
+  }, [mode]);
   // The tray on the workbench is where things are put on it (VL-017, `overTableTray`).
   useEffect(() => {
     if (mode !== "table") return;

@@ -25,6 +25,7 @@ import { escapeTakenByHand, takeIntoHand, useHandStore } from "../lib/useHandSto
 import { useStandHintStore } from "../lib/useStandHintStore";
 import { StandActionHint } from "./StandActionHint";
 import { HandController } from "./HandController";
+import { WorktopZoneOverlay } from "./WorktopZoneOverlay";
 import { ControlsHint, HeldItemHint } from "./HandHints";
 import { PourMotion } from "./StandMotion";
 import { POUR_POINT_HEIGHT, standBusy } from "../lib/useStandMotionStore";
@@ -681,6 +682,7 @@ export function Laboratory() {
 
         <CameraRig onResumeMouseLook={resumeMouseLook} />
         <HandController />
+        <WorktopZoneOverlay />
       </Canvas>
 
       {showCrosshair && (

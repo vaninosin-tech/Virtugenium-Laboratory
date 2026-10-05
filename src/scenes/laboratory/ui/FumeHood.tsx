@@ -209,12 +209,9 @@ export function FumeHood() {
     return () => useHotspotObjectsStore.getState().unregister(DEF.id);
   }, [instance]);
 
-  // A held bottle or tube stays over the worktop inside the hood (VL-018):
-  // between its side walls (X ±0.665), from the rear baffle (Z −0.255) to the sash (Z 0.325).
-  useEffect(
-    () => registerWorktopZone("fume-hood", { object: instance, minX: -0.664, maxX: 0.666, minZ: -0.255, maxZ: 0.325 }),
-    [instance],
-  );
+  // A held bottle or tube stays over the worktop inside the hood (VL-018) —
+  // its rectangle is tuned in F8 → «Границы».
+  useEffect(() => registerWorktopZone("fume-hood", instance), [instance]);
 
   // Driven by `sashStageOpen`, not `cabinetPhase` directly — `CameraRig`
   // sets it mid-transition, once the camera has paused at its staging pose

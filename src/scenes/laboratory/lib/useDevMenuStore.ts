@@ -17,7 +17,8 @@ export type DevMenuCategory =
   | "tray"
   | "stopper"
   | "reagent-area"
-  | "tray-reagents";
+  | "tray-reagents"
+  | "zones";
 
 export const DEV_MENU_TABS: readonly { id: DevMenuCategory; label: string }[] = [
   { id: "lighting", label: "Освещение" },
@@ -29,6 +30,7 @@ export const DEV_MENU_TABS: readonly { id: DevMenuCategory; label: string }[] = 
   { id: "stopper", label: "🧪 Держатели пробок" },
   { id: "reagent-area", label: "📦 Зона реагентов" },
   { id: "tray-reagents", label: "🧴 Реагенты на подносе" },
+  { id: "zones", label: "▭ Границы" },
 ];
 
 interface DevMenuState {

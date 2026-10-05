@@ -1,6 +1,8 @@
 import { useEffect, type RefObject } from "react";
 import * as THREE from "three";
 
+import { useWorktopZoneStore, WORKTOP_ZONE_PLACE, type WorktopZoneId } from "./useWorktopZoneStore";
+
 /**
  * Where a held bottle or tube may go (VL-018): over the worktop it was taken
  * from — the table's countertop, or the fume hood's worktop inside its walls
@@ -11,6 +13,10 @@ import * as THREE from "three";
  *
  * Everything is horizontal (X/Z): the item glides just over the worktop, so
  * whatever stands on it is in its way.
+ *
+ * The zones' rectangles are tuned in F8 → «Границы» (`useWorktopZoneStore`,
+ * VL-019): a place is its worktop and its tray together — the item goes
+ * anywhere over either, never past both.
  */
 
 /** A rectangle in `object`'s own space (X/Z) — a worktop the item stays over, or a thing it stays out of. */
@@ -33,14 +39,33 @@ interface ObstacleSource {
   readonly get: () => readonly Obstacle[];
 }
 
-const ZONES = new Map<string, LocalRect>();
+/** A registered zone: its object, and whether it is in play right now (the tray at the hood only while it stands there). */
+interface ZoneSource {
+  readonly object: THREE.Object3D;
+  readonly active?: () => boolean;
+}
+
+const ZONES = new Map<WorktopZoneId, ZoneSource>();
 const OBSTACLES = new Map<string, ObstacleSource>();
 
-export function registerWorktopZone(id: string, zone: LocalRect): () => void {
-  ZONES.set(id, zone);
+/** `object` is the zone's space; its rectangle comes from `useWorktopZoneStore`. */
+export function registerWorktopZone(id: WorktopZoneId, object: THREE.Object3D, active?: () => boolean): () => void {
+  const source: ZoneSource = { object, active };
+  ZONES.set(id, source);
   return () => {
-    if (ZONES.get(id) === zone) ZONES.delete(id);
+    if (ZONES.get(id) === source) ZONES.delete(id);
   };
+}
+
+/** Every zone in play, with its current rectangle — for the hand and for the F8 overlay. */
+export function activeWorktopZones(): { readonly id: WorktopZoneId; readonly rect: LocalRect }[] {
+  const rects = useWorktopZoneStore.getState().zones;
+  const result: { id: WorktopZoneId; rect: LocalRect }[] = [];
+  for (const [id, source] of ZONES) {
+    if (!shownInWorld(source.object) || (source.active && !source.active())) continue;
+    result.push({ id, rect: { object: source.object, ...rects[id] } });
+  }
+  return result;
 }
 
 export function registerWorktopObstacle(id: string, source: ObstacleSource): () => void {
@@ -77,27 +102,51 @@ function backToWorld(rect: LocalRect, point: THREE.Vector3): void {
   point.y = y;
 }
 
-/** The worktop `home` is on, if any. */
-function zoneOf(home: THREE.Vector3): LocalRect | null {
-  for (const zone of ZONES.values()) {
-    if (!shownInWorld(zone.object)) continue;
-    const s = toLocal(zone, home);
+/** The zones of the place `home` is at (its worktop and its tray), if any. */
+function zonesOf(home: THREE.Vector3): LocalRect[] {
+  const zones = activeWorktopZones();
+  for (const { id, rect } of zones) {
+    const s = toLocal(rect, home);
     const m = ZONE_MARGIN / s;
-    if (local.x > zone.minX - m && local.x < zone.maxX + m && local.z > zone.minZ - m && local.z < zone.maxZ + m) return zone;
+    if (local.x > rect.minX - m && local.x < rect.maxX + m && local.z > rect.minZ - m && local.z < rect.maxZ + m) {
+      const place = WORKTOP_ZONE_PLACE[id];
+      return zones.filter((zone) => WORKTOP_ZONE_PLACE[zone.id] === place).map((zone) => zone.rect);
+    }
   }
-  return null;
+  return [];
 }
 
-/** Keeps a circle of `radius` at `point` inside the zone. */
-function keepInside(zone: LocalRect, point: THREE.Vector3, radius: number): void {
+const clamped = new THREE.Vector3();
+const candidate = new THREE.Vector3();
+const nearest = new THREE.Vector3();
+
+/** Moves `point` to where a circle of `radius` is inside the zone; returns how far it moved. */
+function clampInto(zone: LocalRect, point: THREE.Vector3, radius: number): number {
   const s = toLocal(zone, point);
   const r = radius / s;
   const x = THREE.MathUtils.clamp(local.x, zone.minX + r, Math.max(zone.minX + r, zone.maxX - r));
   const z = THREE.MathUtils.clamp(local.z, zone.minZ + r, Math.max(zone.minZ + r, zone.maxZ - r));
-  if (x === local.x && z === local.z) return;
+  if (x === local.x && z === local.z) return 0;
   local.x = x;
   local.z = z;
+  const before = clamped.copy(point);
   backToWorld(zone, point);
+  return Math.hypot(point.x - before.x, point.z - before.z);
+}
+
+/** Keeps a circle of `radius` at `point` inside one of the zones — the nearest, if it is outside them all. */
+function keepInside(zones: readonly LocalRect[], point: THREE.Vector3, radius: number): void {
+  let best = Infinity;
+  for (const zone of zones) {
+    candidate.copy(point);
+    const moved = clampInto(zone, candidate, radius);
+    if (moved === 0) return;
+    if (moved < best) {
+      best = moved;
+      nearest.copy(candidate);
+    }
+  }
+  if (best < Infinity) point.set(nearest.x, point.y, nearest.z);
 }
 
 /** Whether `point` is inside the obstacle (as a bare point). */
@@ -157,7 +206,7 @@ export function constrainOnWorktop(
   ignore: ReadonlySet<string> = new Set(),
   ignoreTags: ReadonlySet<string> = new Set(),
 ): void {
-  const zone = zoneOf(home);
+  const zones = zonesOf(home);
   const obstacles: Obstacle[] = [];
   for (const [id, source] of OBSTACLES) {
     if (ignore.has(id) || (source.tag && ignoreTags.has(source.tag))) continue;
@@ -165,10 +214,10 @@ export function constrainOnWorktop(
   }
   // A few passes: out of one thing may be into the next, or past the edge.
   for (let pass = 0; pass < 4; pass += 1) {
-    if (zone) keepInside(zone, point, radius);
+    keepInside(zones, point, radius);
     for (const obstacle of obstacles) pushOut(obstacle, point, radius);
   }
-  if (zone) keepInside(zone, point, radius);
+  keepInside(zones, point, radius);
 }
 
 /** Registers the object in `ref` as a box in its own space while mounted. */

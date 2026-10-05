@@ -6,6 +6,7 @@ import { useNavButtonCalibrationStore } from "../lib/useNavButtonCalibrationStor
 import { useStopperHolderStore } from "../lib/useStopperHolderStore";
 import { useTrayReagentAreaStore } from "../lib/useTrayReagentAreaStore";
 import { useWorkbenchReagentAreaStore } from "../lib/useWorkbenchReagentAreaStore";
+import { useWorktopZoneStore } from "../lib/useWorktopZoneStore";
 import { CameraCalibrationPanel } from "./CameraCalibrationPanel";
 import { NavButtonCalibrationPanel } from "./NavButtonCalibrationPanel";
 import { TrayCalibrationPanel } from "./TrayCalibrationPanel";
@@ -15,6 +16,7 @@ import { WorkbenchReagentAreaCalibrationPanel } from "./WorkbenchReagentAreaCali
 import { FurniturePositionPanel } from "./devmenu/FurniturePositionPanel";
 import { ReagentShaderPanel } from "./devmenu/ReagentShaderPanel";
 import { LightingPanel } from "./devmenu/LightingPanel";
+import { WorktopZonePanel } from "./devmenu/WorktopZonePanel";
 
 /**
  * Single F8 entry point for every dev-only calibration tool. Replaces the
@@ -88,6 +90,9 @@ export function DevMenuPanel() {
   useEffect(() => {
     useTrayReagentAreaStore.getState().setOpen(isOpen && category === "tray-reagents");
   }, [isOpen, category]);
+  useEffect(() => {
+    useWorktopZoneStore.getState().setOpen(isOpen && category === "zones");
+  }, [isOpen, category]);
 
   // Button click-to-select: while open, any element carrying
   // `data-dev-pick-id` gets selected for calibration instead of firing its
@@ -140,7 +145,8 @@ export function DevMenuPanel() {
         {category === "furniture" && <FurniturePositionPanel />}
         {category === "shaders" && <ReagentShaderPanel />}
         {category === "lighting" && <LightingPanel />}
-        {category !== "furniture" && category !== "shaders" && category !== "lighting" && (
+        {category === "zones" && <WorktopZonePanel />}
+        {category !== "furniture" && category !== "shaders" && category !== "lighting" && category !== "zones" && (
           <div style={noteStyle}>Панель «{DEV_MENU_TABS.find((t) => t.id === category)?.label}» открыта в своём окне ниже.</div>
         )}
       </div>

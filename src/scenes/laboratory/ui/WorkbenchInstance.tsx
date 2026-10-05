@@ -46,11 +46,8 @@ export function WorkbenchInstance({ position }: { readonly position: Position3 }
     return () => useHotspotObjectsStore.getState().unregister("table");
   }, [instance]);
 
-  // A held bottle or tube stays over the countertop (VL-018) — `Countertop`, X −1.25..1.25, Z −0.85..0.
-  useEffect(
-    () => registerWorktopZone("table", { object: instance, minX: -1.25, maxX: 1.25, minZ: -0.85, maxZ: 0 }),
-    [instance],
-  );
+  // A held bottle or tube stays over the countertop (VL-018) — its rectangle is tuned in F8 → «Границы».
+  useEffect(() => registerWorktopZone("table", instance), [instance]);
 
   return (
     <group position={[x, y, z]}>
