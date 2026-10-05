@@ -9,20 +9,20 @@ import { useFurniturePositionStore } from "./useFurniturePositionStore";
  * `WorkSurface`; the inner walls at X ±0.714, back wall to sash Z −0.4..0.35).
  *
  * The carried tray takes the left part (VL-017), its long axis running into
- * the hood — the test-tube rack end towards the player, the equipment end at
- * the back, so the tall stand never hides the tubes. Everything carried in
+ * the hood — the test-tube rack end at the back, the equipment end towards
+ * the player. Everything carried in
  * stands to the right of it: the hood's tube rack, the stand, the bottles.
  */
 export const HOOD_WORKTOP_Y = 0.9;
 /**
  * The tray's origin, at the size it is held at (`heldTray.scale`, 0.7: 0.31 ×
  * 0.57 m). Its model's origin is not its middle (its own X runs −0.316..0.5),
- * so with the quarter turn it spans Z −0.24 (the back panel) .. 0.33 (the
- * sash), X −0.61..−0.30.
+ * so with its turn it spans Z −0.24 (the back panel) .. 0.33 (the sash),
+ * X −0.61..−0.30.
  */
-export const HOOD_TRAY_LOCAL: Position3 = [-0.455, HOOD_WORKTOP_Y, 0.11];
-/** A quarter turn: the tray's own +X (its equipment end) to the hood's −Z (the back panel). */
-export const HOOD_TRAY_YAW = Math.PI / 2;
+export const HOOD_TRAY_LOCAL: Position3 = [-0.455, HOOD_WORKTOP_Y, -0.02];
+/** Three quarters of a turn: the tray's own +X (its equipment end) to the hood's +Z — towards the player; its test-tube rack at the back. */
+export const HOOD_TRAY_YAW = -Math.PI / 2;
 /** The hood's own test-tube rack (0.37 m wide), right of the tray. */
 export const HOOD_RACK_LOCAL: Position3 = [-0.08, HOOD_WORKTOP_Y, 0.02];
 /** The stand, with the lamp beside it (`lampLayout`), right of the rack. */
