@@ -1,9 +1,29 @@
-﻿import { useState, useEffect, useRef, useMemo, type ComponentRef } from 'react';
+import { Component, Suspense, useState, useEffect, useRef, useMemo, type ComponentRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber';
 import { PointerLockControls, Environment, useGLTF, PresentationControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+import { DEFAULT_LIQUID_COLOR } from "../../../stores/laboratory/initialState";
+
+// --- ОГРАНИЧИТЕЛЬ ОШИБОК 3D-ОБЪЕКТОВ ---
+// HDR-окружение загружается из сети: без интернета загрузка падает,
+// и без этой обёртки ошибка размонтировала бы всё приложение.
+class SceneErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+    state = { hasError: false };
+
+    static getDerivedStateFromError() {
+        return { hasError: true };
+    }
+
+    componentDidCatch(error: unknown) {
+        console.warn('Не удалось загрузить объект сцены:', error);
+    }
+
+    render() {
+        return this.state.hasError ? null : this.props.children;
+    }
+}
 
 // --- ИГРОК (Управление и физика) ---
 function Player({ onLock, onUnlock }: { onLock: () => void, onUnlock: () => void }) {
@@ -91,19 +111,30 @@ function InteractiveFlask() {
         depthWrite: false
     }), []);
 
-    // Материал воды теперь реагирует на переменную liquidColor
+    // Материал воды создаётся один раз, цвет меняется в эффекте ниже
     const waterMaterial = useMemo(() => new THREE.MeshStandardMaterial({
-        color: liquidColor,
-        emissive: liquidColor,
+        color: DEFAULT_LIQUID_COLOR,
+        emissive: DEFAULT_LIQUID_COLOR,
         emissiveIntensity: 0.2,
         roughness: 0.1,
         transparent: true,
         opacity: 0.85,
         side: THREE.DoubleSide,
         clippingPlanes: [clippingPlane]
-    }), [clippingPlane, liquidColor]);
+    }), [clippingPlane]);
 
-    useMemo(() => {
+    // Освобождаем GPU-ресурсы материалов при размонтировании сцены
+    useEffect(() => () => {
+        glassMaterial.dispose();
+        waterMaterial.dispose();
+    }, [glassMaterial, waterMaterial]);
+
+    useEffect(() => {
+        waterMaterial.color.set(liquidColor);
+        waterMaterial.emissive.set(liquidColor);
+    }, [waterMaterial, liquidColor]);
+
+    useEffect(() => {
         scene.traverse((node) => {
             if ((node as THREE.Mesh).isMesh) {
                 const mesh = node as THREE.Mesh;
@@ -146,7 +177,13 @@ function InteractiveFlask() {
 // --- ОСНОВНАЯ СЦЕНА ---
 export function Laboratory() {
     const navigate = useNavigate();
+    const setScreen = useLaboratoryStore((state) => state.setScreen);
     const [isLocked, setIsLocked] = useState(false);
+
+    const goToMainMenu = () => {
+        setScreen('main-menu');
+        navigate('/');
+    };
 
     return (
         <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
@@ -158,7 +195,11 @@ export function Laboratory() {
                     localClippingEnabled: true
                 }}
             >
-                <Environment preset="warehouse" background blur={0.08} />
+                <SceneErrorBoundary>
+                    <Suspense fallback={null}>
+                        <Environment preset="warehouse" background blur={0.08} />
+                    </Suspense>
+                </SceneErrorBoundary>
                 <ambientLight intensity={1.2} color="#cbd5e1" />
                 <pointLight position={[0, 2.5, 0]} intensity={15.0} color="#38bdf8" distance={5} />
 
@@ -168,13 +209,17 @@ export function Laboratory() {
                     <meshStandardMaterial color="#0f172a" roughness={0.9} />
                 </mesh>
 
-                <InteractiveFlask />
+                <SceneErrorBoundary>
+                    <Suspense fallback={null}>
+                        <InteractiveFlask />
+                    </Suspense>
+                </SceneErrorBoundary>
                 <Player onLock={() => setIsLocked(true)} onUnlock={() => setIsLocked(false)} />
             </Canvas>
 
             {/* --- UI ИНТЕРФЕЙС --- */}
             <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10 }}>
-                <button onClick={() => navigate('/')} style={{ padding: '10px 20px', backgroundColor: 'rgba(15, 23, 42, 0.85)', color: '#38bdf8', borderRadius: '8px', cursor: 'pointer', border: '1px solid rgba(56, 189, 248, 0.4)' }}>
+                <button onClick={goToMainMenu} style={{ padding: '10px 20px', backgroundColor: 'rgba(15, 23, 42, 0.85)', color: '#38bdf8', borderRadius: '8px', cursor: 'pointer', border: '1px solid rgba(56, 189, 248, 0.4)' }}>
                     ← В главное меню
                 </button>
             </div>

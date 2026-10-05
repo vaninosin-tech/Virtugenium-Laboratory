@@ -8,7 +8,7 @@ interface MenuButtonProps {
 
 export function MenuButton({ text, isActive, onClick }: MenuButtonProps) {
     const [isHovered, setIsHovered] = useState(false);
-    const greenColor = '#10b981'; // Изумрудно-зеленый оттенок при наведении
+    const greenColor = '#10b981'; // РР·СѓРјСЂСѓРґРЅРѕ-Р·РµР»РµРЅС‹Р№ РѕС‚С‚РµРЅРѕРє РїСЂРё РЅР°РІРµРґРµРЅРёРё
 
     return (
         <button

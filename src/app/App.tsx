@@ -1,4 +1,4 @@
-﻿import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { MainMenu } from '../features/main-menu/ui/MainMenu';
 import { Laboratory } from '../scenes/laboratory/ui/Laboratory';
 

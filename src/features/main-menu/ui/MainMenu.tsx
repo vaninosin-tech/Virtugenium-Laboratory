@@ -1,11 +1,21 @@
-﻿import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MenuButton } from '../../../shared/ui/MenuButton';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import type { AppMode } from '../../../entities/laboratory';
+import { useLaboratoryStore } from '../../../stores/laboratory/useLaboratoryStore';
 
 export function MainMenu() {
     const [activeTab, setActiveTab] = useState<'play' | 'settings' | 'exit' | null>(null);
     const navigate = useNavigate();
+    const setMode = useLaboratoryStore((state) => state.setMode);
+    const setScreen = useLaboratoryStore((state) => state.setScreen);
+
+    const startLaboratory = (mode: AppMode) => {
+        setMode(mode);
+        setScreen('laboratory');
+        navigate('/lab');
+    };
 
     // Логика закрытия приложения через Tauri API
     const handleExitConfirm = async () => {
@@ -35,7 +45,7 @@ export function MainMenu() {
                 {/* ЛЕВАЯ ЧАСТЬ: КНОПКИ МЕНЮ */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '260px' }}>
                     <h1 style={{ fontSize: '26px', marginBottom: '20px', letterSpacing: '1px' }}>
-                        VIRTUUGENIUM LAB
+                        VIRTUGENIUM LAB
                     </h1>
 
                     <MenuButton
@@ -66,17 +76,17 @@ export function MainMenu() {
                                 <ModeCard
                                     title="Обучение"
                                     description="Базовое знакомство с правилами техники безопасности, средствами защиты (СИЗ) и базовым оборудованием лаборатории."
-                                    onClick={() => navigate('/lab')}
+                                    onClick={() => startLaboratory('training')}
                                 />
                                 <ModeCard
                                     title="Классический"
                                     description="Полный процесс работы с использованием справочной книги. Проходите задания, пишите уравнения реакций и получайте баллы."
-                                    onClick={() => navigate('/lab')}
+                                    onClick={() => startLaboratory('classic')}
                                 />
                                 <ModeCard
                                     title="Чистый эксперимент"
                                     description="Режим быстрой практики. Выберите конкретный химический опыт из списка в планшете и сразу приступайте к его проведению."
-                                    onClick={() => navigate('/lab')}
+                                    onClick={() => startLaboratory('clean')}
                                 />
                             </div>
                         </PanelContainer>
@@ -130,7 +140,7 @@ export function MainMenu() {
 // ВСПОМОГАТЕЛЬНЫЕ КОМПОНЕНТЫ ПАНЕЛИ
 // ==========================================
 
-function PanelContainer({ children }: { children: React.ReactNode }) {
+function PanelContainer({ children }: { children: ReactNode }) {
     return (
         <div style={{
             backgroundColor: 'rgba(15, 23, 42, 0.75)',
