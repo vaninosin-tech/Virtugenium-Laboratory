@@ -26,6 +26,7 @@ import { TAKE_FROM_TRAY, takeFromTray } from "../lib/trayUnloadPlace";
 import { GlassRim, PourMotion } from "./StandMotion";
 import { trayUnloadPlace } from "../lib/trayUnloadPlace";
 import { TABLE_TRAY } from "../lib/tableTray";
+import { pressToTake } from "../lib/pressToTake";
 import { registerWorktopZone, useBoxObstacle } from "../lib/worktopBounds";
 
 /** The rack built into the tray (`TRAY_RACK_ANCHOR`, turned a quarter): 18.7 × 37 cm, in the tray's own space. */
@@ -585,8 +586,8 @@ export function LabTrayInstance({
       {showContents && reagentDisplays.map((item) => {
         const position = computeTrayReagentPosition(trayReagentAreaConfig, item.slotIndex);
         return (
-          // At the table or the hood a click takes it into the hand, to be set
-          // down in its place there (VL-017); in a cabinet — back to its shelf.
+          // At the table or the hood a press takes it into the hand, to be set
+          // down in its place there (VL-017/018); in a cabinet a click sends it back to its shelf.
           <PourMotion key={item.id} instanceId={item.id} pourPointHeight={0} position={position} keepCap>
             <ReagentStaticDisplay
               reagent={item.reagent}
@@ -594,7 +595,13 @@ export function LabTrayInstance({
               worldScale={item.prewarm ? 0.0001 : trayReagentScale}
               instanceId={item.prewarm ? undefined : item.id}
               highlighted={heldId === item.id}
-              onActivate={() => takeFromTray("bottle", item.id)}
+              onPointerDown={(event) => {
+                if (!trayUnloadPlace()) return;
+                event.stopPropagation();
+                pressToTake(event.nativeEvent, () => takeFromTray("bottle", item.id));
+              }}
+              // Taken on the press already; the click that ends it is not a «back to the shelf».
+              onActivate={() => trayUnloadPlace() !== null}
               onHoverChange={(hovered) => {
                 if (hovered && trayUnloadPlace()) useStandHintStore.getState().showLabel(item.id, TAKE_FROM_TRAY);
                 else useStandHintStore.getState().hide(item.id);
@@ -618,12 +625,15 @@ export function LabTrayInstance({
       {showContents && trayTestTubeItems.map((item, index) => (
         <group
           key={item.instanceId}
-          // At the table or the hood a click takes it into the hand (VL-017).
-          onClick={(event: ThreeEvent<MouseEvent>) => {
+          // At the table or the hood a press takes it into the hand (VL-017/018).
+          onPointerDown={(event: ThreeEvent<PointerEvent>) => {
             if (!trayUnloadPlace() || useReagentInspectionStore.getState().inspectedId) return;
             event.stopPropagation();
             document.body.style.cursor = "auto";
-            takeFromTray("tube", item.instanceId);
+            pressToTake(event.nativeEvent, () => takeFromTray("tube", item.instanceId));
+          }}
+          onClick={(event: ThreeEvent<MouseEvent>) => {
+            if (trayUnloadPlace()) event.stopPropagation();
           }}
           onPointerOver={(event: ThreeEvent<PointerEvent>) => {
             if (!trayUnloadPlace()) return;

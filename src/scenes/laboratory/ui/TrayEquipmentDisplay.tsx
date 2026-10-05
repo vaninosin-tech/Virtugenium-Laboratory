@@ -9,11 +9,21 @@ import { ReagentHoverRim } from "./ReagentHoverRim";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { TAKE_FROM_TRAY, takeFromTray, trayUnloadPlace } from "../lib/trayUnloadPlace";
 import { useHandStore } from "../lib/useHandStore";
+import { pressToTake } from "../lib/pressToTake";
 import { PourMotion } from "./StandMotion";
 import { useStandHintStore } from "../lib/useStandHintStore";
 
 /** Held-tray true/real-world size — matches `useShelfTrayFlight`'s own flight target scale. */
 const TRAY_WORLD_SCALE = 1;
+
+/**
+ * On the tray the lamp stands inside the stand's hitbox (its arm reaches
+ * over it): where the pointer is on both, it is the lamp — the stand lets
+ * the event through to it. Since the lamp comes off the tray on its own
+ * (VL-020), it could not be taken at all otherwise.
+ */
+const yieldsToLamp = (what: "stand" | "lamp", event: ThreeEvent<PointerEvent | MouseEvent>) =>
+  what === "stand" && event.intersections.some((hit) => hit.object.userData.trayEquipment === "lamp");
 
 /**
  * Static copy of a piece of equipment (the stand, the spirit lamp) resting
@@ -66,14 +76,11 @@ export function TrayEquipmentDisplay({
   const inspecting = useReagentInspectionStore((state) => state.inspectedId !== null);
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    if (yieldsToLamp(what, event)) return;
     event.stopPropagation();
     if (useReagentInspectionStore.getState().inspectedId !== null) return;
-    // At the table or the hood: into the hand, to be set down in its place.
-    if (takeFromTray(what, owner)) {
-      document.body.style.cursor = "auto";
-      setHovered(false);
-      return;
-    }
+    // At the table or the hood it was taken into the hand on the press.
+    if (trayUnloadPlace()) return;
     const group = groupRef.current;
     if (!group) return;
     const wp = new THREE.Vector3();
@@ -92,12 +99,34 @@ export function TrayEquipmentDisplay({
       position={restPosition}
       rotation={[0, rotationY, 0]}
       onClick={handleClick}
+      // At the table or the hood: into the hand, to be set down in its place (VL-017/018).
+      onPointerDown={(event) => {
+        if (yieldsToLamp(what, event)) return;
+        if (!trayUnloadPlace() || useReagentInspectionStore.getState().inspectedId !== null) return;
+        event.stopPropagation();
+        pressToTake(event.nativeEvent, () => {
+          if (!takeFromTray(what, owner)) return false;
+          document.body.style.cursor = "auto";
+          setHovered(false);
+          return true;
+        });
+      }}
       onPointerOver={(event) => {
+        if (yieldsToLamp(what, event)) return;
         event.stopPropagation();
         if (useReagentInspectionStore.getState().inspectedId !== null) return;
         document.body.style.cursor = "pointer";
         setHovered(true);
         if (trayUnloadPlace()) useStandHintStore.getState().showLabel(owner, TAKE_FROM_TRAY);
+      }}
+      onPointerMove={(event) => {
+        // Onto the lamp inside the stand's hitbox, the lamp is the one lit; off it, the stand again.
+        if (what !== "stand" || useReagentInspectionStore.getState().inspectedId !== null) return;
+        const onLamp = yieldsToLamp(what, event);
+        if (onLamp === !hovered) return;
+        setHovered(!onLamp);
+        if (onLamp) useStandHintStore.getState().hide(owner);
+        else if (trayUnloadPlace()) useStandHintStore.getState().showLabel(owner, TAKE_FROM_TRAY);
       }}
       onPointerOut={(event) => {
         event.stopPropagation();
@@ -110,7 +139,7 @@ export function TrayEquipmentDisplay({
         <primitive object={instance} />
         <ReagentHoverRim object={instance} active={(hovered && !inspecting) || held} />
       </PourMotion>
-      <mesh geometry={hoverHitboxGeometry}>
+      <mesh geometry={hoverHitboxGeometry} userData={{ trayEquipment: what }}>
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
     </group>

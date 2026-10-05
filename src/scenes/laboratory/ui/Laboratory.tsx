@@ -94,13 +94,12 @@ import { loadCabinetFonts } from "../lib/loadCabinetFonts";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { QUALITY_LEVELS, useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
+import { pressToTake } from "../lib/pressToTake";
 
 /** Exponential-smoothing time constant for a workbench jar gliding to a new grid slot after the table's jar count changes — see `DraggableWorkbenchReagent`'s doc. */
 const GRID_REFLOW_TIME_CONSTANT_S = 0.18;
 /** Fixed duration of a swap-into-place tween (semicircular position arc, no rotation) — see `DraggableWorkbenchReagent`'s handling of `useWorkbenchReagentDragStore`'s `swaps`. A deterministic tween (not the exponential `GRID_REFLOW_TIME_CONSTANT_S` glide above), so both jars visibly complete their trade and land exactly on their new slots at the same moment. */
 const SWAP_DURATION_S = 0.45;
-/** A press on a workbench jar that travels less than this many pixels is a click (pour at the stand), not a drag. */
-const JAR_CLICK_SLOP_PX = 5;
 /** Bulge-radius scale for the `reverseSpin` jar in a swap tween — must be anything other than `1` so its arc traces a different circle than the other jar's (see the swap-tween comment in `DraggableWorkbenchReagent` for why that's what keeps the two collision-free). */
 const REVERSE_SPIN_BULGE_SCALE = 0.6;
 
@@ -287,24 +286,18 @@ function DraggableWorkbenchReagent({
       markPickablePressed();
       return;
     }
-    useWorkbenchReagentDragStore
-      .getState()
-      .requestGrab(instanceId, event.clientX, event.clientY);
-    // The same press may turn out to be a click: then the jar pours into
-    // the tube in the stand's clamp (VL-014) and the drag that began just
-    // snaps it back home, as any short drag does.
-    const { clientX, clientY } = event;
-    const handleUp = (up: PointerEvent) => {
-      window.removeEventListener("pointerup", handleUp);
-      if (Math.hypot(up.clientX - clientX, up.clientY - clientY) > JAR_CLICK_SLOP_PX) return;
-      // A click takes it into the hand (VL-015).
-      if (!takeLabel({ kind: "bottle", location: "workbench", reagentId: reagent.id })) return;
+    // Into the hand (VL-018): dragged — carried while the button is down and
+    // set down where it is let go; clicked — carried, set down by a click.
+    // (It used to start the old jar drag here, which slid jars about the
+    // table and swapped them; a jar now goes only back to its own place.)
+    pressToTake(event.nativeEvent, () => {
+      if (!takeLabel({ kind: "bottle", location: "workbench", reagentId: reagent.id })) return false;
       takeIntoHand(
         { kind: "bottle", location: "workbench", instanceId, reagentId: reagent.id, containerType: reagent.containerType },
         [0, 0, 0],
       );
-    };
-    window.addEventListener("pointerup", handleUp);
+      return true;
+    });
   };
 
   return (

@@ -8,6 +8,8 @@ import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { WORKBENCH_CARRY } from "../lib/tableTray";
 import { trayHandAction } from "../lib/trayUnloadPlace";
 import { constrainOnWorktop } from "../lib/worktopBounds";
+import { clearGhostShape } from "../lib/handGhost";
+import { HandGhosts } from "./HandGhosts";
 import { sharedMouseNdc, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 
 /** How high above the worktop the held item is carried — lifted clear of it, its shadow right under it (VL-018). */
@@ -83,6 +85,22 @@ export function HandController() {
       action.run([from.x, from.y, from.z]);
       letGo();
     };
+    // Dragged (`HAND.dragging`): letting go sets it down — does what a click
+    // would there, or, anywhere else, puts it back where it was taken from.
+    const handleUp = (event: MouseEvent) => {
+      if (event.button !== 0 || !HAND.dragging || held.kind === "workbench-tube") return;
+      event.stopPropagation();
+      event.preventDefault();
+      HAND.dragging = false;
+      const action = held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.rawPoint);
+      if (!action || action.blocked) {
+        putBack();
+        return;
+      }
+      const from = HAND.itemPosValid ? HAND.itemPos : HAND.point;
+      action.run([from.x, from.y, from.z]);
+      letGo();
+    };
     const handleContextMenu = (event: MouseEvent) => event.preventDefault();
     const handleKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -101,18 +119,21 @@ export function HandController() {
     if (held.kind === "workbench-tube") sharedMouseNdc.set(0, 0);
     window.addEventListener("mousemove", handleMove);
     window.addEventListener("mousedown", handleDown, true);
+    window.addEventListener("mouseup", handleUp, true);
     window.addEventListener("contextmenu", handleContextMenu, true);
     window.addEventListener("keydown", handleKey, true);
     document.addEventListener("pointerlockchange", handleLockChange);
     return () => {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mousedown", handleDown, true);
+      window.removeEventListener("mouseup", handleUp, true);
       window.removeEventListener("contextmenu", handleContextMenu, true);
       window.removeEventListener("keydown", handleKey, true);
       document.removeEventListener("pointerlockchange", handleLockChange);
       unsubscribeCarry();
       setEvents({ enabled: true });
       canvas.style.cursor = "";
+      clearGhostShape();
       HAND.valid = false;
       HAND.action = null;
     };
@@ -187,6 +208,8 @@ export function HandController() {
   });
 
   return (
+    <>
+    <HandGhosts />
     <group ref={shadowRef} visible={false} rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
       <mesh material={shadowMaterials[0]} raycast={() => {}}>
         <circleGeometry args={[1.25, 32]} />
@@ -195,6 +218,7 @@ export function HandController() {
         <circleGeometry args={[0.85, 32]} />
       </mesh>
     </group>
+    </>
   );
 }
 

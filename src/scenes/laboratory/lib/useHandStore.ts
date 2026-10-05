@@ -69,6 +69,12 @@ export const HAND = {
    * the hand over the item once the item has said where it is.
    */
   startAtItem: false,
+  /**
+   * Carried with the button held down (`pressToTake`): letting go of it sets
+   * the item down — does what a click would there, or puts it back. Taken by
+   * a click instead, it is set down by the next click.
+   */
+  dragging: false,
   /** When the hand last let go — an Esc that put the item back must not also leave the zone (`escapeTakenByHand`). */
   releasedAt: 0,
   /** The canvas, for Pointer Lock — set by `HandController`. */
@@ -107,6 +113,7 @@ export const useHandStore = create<HandState>((set) => ({
   take: (held, home) => {
     HAND.ndc.set(0, 0);
     HAND.startAtItem = true;
+    HAND.dragging = false;
     HAND.valid = false;
     HAND.homeValid = false;
     HAND.itemPosValid = false;

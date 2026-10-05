@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { runStandAction, takeLabel, type StandTarget } from "../lib/standTableActions";
 import { takeIntoHand, type HeldItem } from "../lib/useHandStore";
 import { useStandHintStore } from "../lib/useStandHintStore";
+import { pressToTake } from "../lib/pressToTake";
 
 /**
  * Pointer handlers that make a 3D object a stand action target — spread onto
@@ -34,18 +35,24 @@ export function standTargetEvents(owner: string, target: StandTarget) {
 }
 
 /**
- * Pointer handlers for something taken into the hand by a click (VL-015) —
- * a bottle or a rack tube. Hover shows «Взять …» (`takeLabel`); the click
- * takes it, unless the stand is busy (a pour, heating).
+ * Pointer handlers for something taken into the hand (VL-015) — a bottle or
+ * a rack tube. Hover shows «Взять …» (`takeLabel`); a press takes it — to
+ * be dragged, or carried after a click (`pressToTake`) — unless the stand is
+ * busy (a pour, heating).
  */
 export function takeTargetEvents(owner: string, target: StandTarget, item: HeldItem) {
   return {
     ...standTargetEvents(owner, target),
-    onClick: (event: ThreeEvent<MouseEvent>) => {
+    onPointerDown: (event: ThreeEvent<PointerEvent>) => {
       event.stopPropagation();
-      if (!takeLabel(target)) return;
-      useStandHintStore.getState().hide(owner);
-      takeIntoHand(item, [0, 0, 0]);
+      pressToTake(event.nativeEvent, () => {
+        if (!takeLabel(target)) return false;
+        useStandHintStore.getState().hide(owner);
+        takeIntoHand(item, [0, 0, 0]);
+        return true;
+      });
     },
+    // Taken on the press itself; the click that ends it does nothing more.
+    onClick: (event: ThreeEvent<MouseEvent>) => event.stopPropagation(),
   };
 }

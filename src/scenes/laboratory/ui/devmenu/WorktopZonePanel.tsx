@@ -19,6 +19,17 @@ const FIELDS = [
   { key: "centerZ", label: "Центр Z" },
 ] as const;
 
+/** Each edge on its own: moving one leaves the opposite where it is. */
+const EDGE_FIELDS = [
+  { key: "minX", label: "Край X−" },
+  { key: "maxX", label: "Край X+" },
+  { key: "minZ", label: "Край Z−" },
+  { key: "maxZ", label: "Край Z+" },
+] as const;
+
+/** The narrowest a rectangle may be made (m). */
+const MIN_SIZE = 0.02;
+
 /** Where each zone can be seen: the hood's tray is there only while it stands there. */
 const WHERE: Record<WorktopZoneId, string> = {
   table: "Столешница рабочего стола.",
@@ -44,6 +55,15 @@ export function WorktopZonePanel() {
 
   const values = rectToCenterSize(rect);
   const setField = (key: keyof typeof values, value: number) => setZone(selected, centerSizeToRect({ ...values, [key]: value }));
+  const setEdge = (key: (typeof EDGE_FIELDS)[number]["key"], value: number) => {
+    const next = { ...rect, [key]: value };
+    // An edge never passes the opposite one.
+    if (key === "minX") next.minX = Math.min(value, rect.maxX - MIN_SIZE);
+    if (key === "maxX") next.maxX = Math.max(value, rect.minX + MIN_SIZE);
+    if (key === "minZ") next.minZ = Math.min(value, rect.maxZ - MIN_SIZE);
+    if (key === "maxZ") next.maxZ = Math.max(value, rect.minZ + MIN_SIZE);
+    setZone(selected, next);
+  };
 
   const copy = () => {
     const zones = useWorktopZoneStore.getState().zones;
@@ -58,7 +78,8 @@ export function WorktopZonePanel() {
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={noteStyle}>
         Прямоугольники, за которые предмет в руке не выходит. Предмет ходит над столом и над подносом своего места
-        вместе. Жёлтая рамка — выбранная.
+        вместе. Жёлтая рамка — выбранная. Любой край можно схватить мышью в сцене и потянуть (подсвечивается
+        оранжевым) — двигается только он.
       </div>
 
       <label style={rowStyle}>
@@ -82,6 +103,22 @@ export function WorktopZonePanel() {
             </button>
             <NumberField value={round(values[key])} step={STEP} onCommit={(value) => setField(key, value)} />
             <button style={stepBtnStyle} onClick={() => setField(key, round(values[key] + STEP))}>
+              +
+            </button>
+          </div>
+        </div>
+      ))}
+
+      <div style={noteStyle}>Края по отдельности</div>
+      {EDGE_FIELDS.map(({ key, label }) => (
+        <div key={key} style={rowStyle}>
+          <span style={labelStyle}>{label}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <button style={stepBtnStyle} onClick={() => setEdge(key, round(rect[key] - STEP))}>
+              −
+            </button>
+            <NumberField value={round(rect[key])} step={STEP} onCommit={(value) => setEdge(key, value)} />
+            <button style={stepBtnStyle} onClick={() => setEdge(key, round(rect[key] + STEP))}>
               +
             </button>
           </div>

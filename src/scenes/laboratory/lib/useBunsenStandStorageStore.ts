@@ -31,11 +31,13 @@ export interface BunsenStandTablePosition {
 /** Where the stand first appears on the table, the moment a cabinet session ends with it riding the tray (see `transferToWorkbench`) — clear of the reagent grid/stopper holder, which sit closer to the table's own center/back edge. Only ever applied once; dragging afterward persists via `setTablePosition`. */
 /**
  * The stand's place on the table (VL-018): the middle of the work area, in
- * front of the reagents' row at the far edge, 23 cm clear of it — the tube in
+ * front of the reagents' row at the far edge, far enough (38 cm) that from the
+ * table view the tube in its clamp is seen below the bottles, not over them —
+ * over them it took the clicks meant for the bottle behind it. The tube in
  * its clamp straight ahead of the table view (the camera is at the table's
  * middle, X 0), the lamp beside it towards the tray.
  */
-const DEFAULT_TABLE_POSITION: BunsenStandTablePosition = { x: 0.06, z: -0.55 };
+export const DEFAULT_TABLE_POSITION: BunsenStandTablePosition = { x: 0.06, z: -0.7 };
 /**
  * The stand on the table is turned round: its clamp, and the lamp beside it,
  * towards the tray (VL-018) — not towards the rack.
@@ -65,7 +67,7 @@ export const TUBE_RING_ATTACH_RADIUS = 0.1;
 export const TUBE_RING_INSERT_DEPTH = 0.1;
 
 // v3: the stand moved to the middle of the work area (VL-018) — an old saved spot is in the bottles' row.
-const STORAGE_KEY = "vg-bunsen-stand-table-position-v3";
+const STORAGE_KEY = "vg-bunsen-stand-table-position-v4";
 
 function loadSavedTablePosition(): BunsenStandTablePosition {
   try {

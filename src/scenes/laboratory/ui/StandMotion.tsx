@@ -5,6 +5,7 @@ import * as THREE from "three";
 import type { Position3 } from "../lib/layout";
 import { HAND, useHandStore } from "../lib/useHandStore";
 import { constrainOnWorktop, registerWorktopObstacle, shownInWorld } from "../lib/worktopBounds";
+import { publishGhostShape } from "../lib/handGhost";
 import { ReagentHoverRim } from "./ReagentHoverRim";
 import {
   CLAMP_TUBE_MOUTH,
@@ -342,6 +343,8 @@ export function PourMotion({
       m.curQuat.copy(s.tilt).multiply(s.restQuat);
     } else if (held) {
       if (!m.wasHeld) {
+        // Where it stood, for its outline there while it is carried (VL-018).
+        publishGhostShape(group);
         // Just taken: a short flight to the hand, then it IS the hand.
         m.flyIn = 0;
         m.flyStart.copy(m.cur);
