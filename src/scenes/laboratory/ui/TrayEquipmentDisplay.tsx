@@ -6,6 +6,7 @@ import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import type { Position3 } from "../lib/layout";
 import { createHoverHitboxGeometry } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 
 /** Held-tray true/real-world size — matches `useShelfTrayFlight`'s own flight target scale. */
 const TRAY_WORLD_SCALE = 1;
@@ -47,8 +48,12 @@ export function TrayEquipmentDisplay({
     group.scale.setScalar(TRAY_WORLD_SCALE / parent.scale.x);
   });
 
+  // While a bottle is being inspected (ВЗЯТЬ / ОСТАВИТЬ), the tray is out of play.
+  const inspecting = useReagentInspectionStore((state) => state.inspectedId !== null);
+
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
+    if (useReagentInspectionStore.getState().inspectedId !== null) return;
     const group = groupRef.current;
     if (!group) return;
     const wp = new THREE.Vector3();
@@ -68,6 +73,7 @@ export function TrayEquipmentDisplay({
       onClick={handleClick}
       onPointerOver={(event) => {
         event.stopPropagation();
+        if (useReagentInspectionStore.getState().inspectedId !== null) return;
         document.body.style.cursor = "pointer";
         setHovered(true);
       }}
@@ -78,7 +84,7 @@ export function TrayEquipmentDisplay({
       }}
     >
       <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered} />
+      <ReagentHoverRim object={instance} active={hovered && !inspecting} />
       <mesh geometry={hoverHitboxGeometry}>
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>

@@ -8,11 +8,8 @@ import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import type { HotspotTargetId, Position3 } from "../lib/layout";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { useShelfTrayFlight } from "../lib/useShelfTrayFlight";
-import {
-  BUNSEN_STAND_TRAY_REST_POSITION,
-  STAND_BASE_BOTTOM_OFFSET,
-  useBunsenStandStorageStore,
-} from "../lib/useBunsenStandStorageStore";
+import { STAND_BASE_BOTTOM_OFFSET, useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { standTrayRestPosition, useTrayReagentAreaStore } from "../lib/useTrayReagentAreaStore";
 import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
@@ -23,7 +20,7 @@ import { ReagentHoverRim } from "./ReagentHoverRim";
  * Retort/Bunsen stand — heavy round base, rod, sliding test-tube ring and
  * burner support ring. Shelf copy for `cabinet-lab-equipment`: sits at
  * `position` until clicked, then flies to the held tray's own dedicated spot
- * (`BUNSEN_STAND_TRAY_ANCHOR` — not the 4x2 reagent grid or the glued-in
+ * (the equipment half of the tray's grid, `standTrayRestPosition` — not the reagents' half or the glued-in
  * test-tube rack, see that constant's doc) and hands off to
  * `BunsenStandTrayDisplay`, the static copy `LabTrayInstance` renders as a
  * child of the tray's own group (so it inherits the tray's live held/return
@@ -87,11 +84,13 @@ export function BunsenStandInstance({
     (): Position3 => [position[0], position[1] + STAND_BASE_BOTTOM_OFFSET, position[2]],
     [position],
   );
+  const trayConfig = useTrayReagentAreaStore((state) => state.config);
+  const trayRest = useMemo(() => standTrayRestPosition(STAND_BASE_BOTTOM_OFFSET, trayConfig), [trayConfig]);
   const { groupRef, beginTake, isMoving } = useShelfTrayFlight({
     cabinetId,
     home,
     rotationY,
-    trayRestPosition: BUNSEN_STAND_TRAY_REST_POSITION,
+    trayRestPosition: trayRest,
     returnRequest,
     onArrived: useBunsenStandStorageStore.getState().take,
     onReturnHandled: useBunsenStandStorageStore.getState().clearReturnRequest,

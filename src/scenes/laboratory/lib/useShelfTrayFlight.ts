@@ -7,6 +7,9 @@ import { useNavButtonCalibrationStore } from "./useNavButtonCalibrationStore";
 
 /** Deterministic shelf -> held-tray flight, same tween shape as `ReagentContainerInstance`'s own "takeMove" (see its doc for why a fixed-duration lerp/slerp, not damping-then-snap). */
 const TAKE_DURATION_S = 0.36;
+/** How high over its tray place the flight arcs (tray-local metres) — over the bottles and the other equipment. */
+const TRAY_ARC_HEIGHT = 0.36;
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 type Phase = "atRest" | "flight" | "returnFlight";
 
@@ -56,6 +59,8 @@ export function useShelfTrayFlight({
   const startPosRef = useRef(new THREE.Vector3());
   const startQuatRef = useRef(new THREE.Quaternion());
   const endPosRef = useRef(new THREE.Vector3());
+  /** The arc's control point: high over the tray place — down into it on the way there, up out of it on the way back. */
+  const arcRef = useRef(new THREE.Vector3());
   const endQuatRef = useRef(new THREE.Quaternion());
   const flightWorldPosRef = useRef(new THREE.Vector3());
   const flightWorldQuatRef = useRef(new THREE.Quaternion());
@@ -95,6 +100,7 @@ export function useShelfTrayFlight({
       .multiplyScalar(heldTray.scale)
       .applyQuaternion(trayWorldQuat);
     endPosRef.current.copy(trayAnchorWorld).add(slotOffsetWorld);
+    arcRef.current.copy(endPosRef.current).addScaledVector(WORLD_UP, TRAY_ARC_HEIGHT * heldTray.scale);
     endQuatRef.current.copy(trayWorldQuat);
 
     const parentWorldScale = new THREE.Vector3();
@@ -117,6 +123,9 @@ export function useShelfTrayFlight({
     if (!group || !parent) return;
 
     startPosRef.current.set(...returnRequest.worldPos);
+    arcRef.current
+      .copy(startPosRef.current)
+      .addScaledVector(WORLD_UP, TRAY_ARC_HEIGHT * useNavButtonCalibrationStore.getState().heldTray.scale);
     startQuatRef.current.set(...returnRequest.worldQuat);
     const parentWorldQuat = new THREE.Quaternion();
     parent.getWorldQuaternion(parentWorldQuat);
@@ -146,7 +155,13 @@ export function useShelfTrayFlight({
     elapsedRef.current += delta;
     const t = THREE.MathUtils.clamp(elapsedRef.current / TAKE_DURATION_S, 0, 1);
     const ease = t * t * (3 - 2 * t);
-    const worldPos = flightWorldPosRef.current.lerpVectors(startPosRef.current, endPosRef.current, ease);
+    // A quadratic arc through the point over the tray place.
+    const u = 1 - ease;
+    const worldPos = flightWorldPosRef.current
+      .copy(startPosRef.current)
+      .multiplyScalar(u * u)
+      .addScaledVector(arcRef.current, 2 * u * ease)
+      .addScaledVector(endPosRef.current, ease * ease);
     const worldQuat = flightWorldQuatRef.current.copy(startQuatRef.current).slerp(endQuatRef.current, ease);
     group.position.copy(parent.worldToLocal(worldPos.clone()));
     const parentWorldQuat = parent.getWorldQuaternion(flightParentQuatRef.current);

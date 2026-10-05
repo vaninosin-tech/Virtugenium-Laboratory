@@ -158,3 +158,38 @@ export function computeTrayReagentPosition(
 export function traySlotLocalPosition(slotIndex: number): Position3 {
   return computeTrayReagentPosition(useTrayReagentAreaStore.getState().config, slotIndex);
 }
+
+/**
+ * The tray's grid is split in two zones (as the player sees it from the front):
+ *
+ *     00 11      0 — reagents: the two left columns (slots 0, 1, 4, 5)
+ *     00 11      1 — lab equipment: the two right columns
+ *
+ * so bottles and the stand never stand in each other on the tray. The stand
+ * takes three of the equipment cells, the spirit lamp the fourth.
+ */
+export const REAGENT_TRAY_SLOTS: readonly number[] = [0, 1, 4, 5];
+/** Equipment cells, by slot index of the same grid: the lamp's, and the three the stand stands across. */
+const LAMP_CELL = 3;
+const STAND_CELLS = [2, 6, 7] as const;
+
+/** Where the spirit lamp rests on the tray: its own cell (far row, right), on the inner floor. */
+export function lampTrayRestPosition(config: TrayReagentAreaConfig = useTrayReagentAreaStore.getState().config): Position3 {
+  return computeTrayReagentPosition(config, LAMP_CELL);
+}
+
+/**
+ * Where the stand's base centre rests on the tray: the middle of its three
+ * cells, on the inner floor. Its clamp arm points along +X — further right,
+ * over its own cells, never over the bottles.
+ *
+ * @param baseBottomOffset how far below the stand's origin its base's bottom is
+ */
+export function standTrayRestPosition(
+  baseBottomOffset: number,
+  config: TrayReagentAreaConfig = useTrayReagentAreaStore.getState().config,
+): Position3 {
+  const cells = STAND_CELLS.map((cell) => computeTrayReagentPosition(config, cell));
+  const mean = (axis: 0 | 2) => cells.reduce((sum, cell) => sum + cell[axis], 0) / cells.length;
+  return [mean(0), config.originY + baseBottomOffset, mean(2)];
+}

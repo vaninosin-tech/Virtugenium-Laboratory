@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import type { ContainerType } from "../../../entities/laboratory/reagents";
 import type { HotspotTargetId } from "./layout";
+import { REAGENT_TRAY_SLOTS } from "./useTrayReagentAreaStore";
 
 /** One reagent the player has taken — enough to re-look-up its full `ReagentContainerConfig` (`REAGENTS[reagentId]`) and render a static display copy. Display size is NOT stored per-instance: the tray uses the live, dev-tunable `heldTray.reagentScale` and the workbench uses its own live `WorkbenchReagentAreaConfig.scale` — both independent, both reactive to dev-panel changes even for items already placed. */
 export interface StoredReagent {
@@ -62,13 +63,16 @@ export const MAX_REAGENTS_ON_TRAY = 8;
  */
 export const TRAY_SLOT_COUNT = 8;
 
-/** `min(MAX_REAGENTS_ON_TRAY, TRAY_SLOT_COUNT)` — the number actually offered to the player (button disables past this). */
-export const TRAY_CAPACITY = Math.min(MAX_REAGENTS_ON_TRAY, TRAY_SLOT_COUNT);
+/**
+ * Reagents take only the tray's left half — the right half is the lab
+ * equipment's (`REAGENT_TRAY_SLOTS`) — so four bottles at a time.
+ */
+export const TRAY_CAPACITY = Math.min(MAX_REAGENTS_ON_TRAY, REAGENT_TRAY_SLOTS.length);
 
 /** Smallest tray slot index not currently occupied by any item in `trayItems` — see `StoredReagent.slotIndex`'s doc for why this is gap-tolerant rather than just `trayItems.length`. Returns -1 if every slot is taken; callers already guard capacity separately (`takeReagent`/`TRAY_CAPACITY`). */
 export function nextFreeTraySlot(trayItems: readonly StoredReagent[]): number {
   const occupied = new Set(trayItems.map((item, index) => (Number.isFinite(item.slotIndex) ? item.slotIndex : index)));
-  for (let slot = 0; slot < TRAY_CAPACITY; slot++) {
+  for (const slot of REAGENT_TRAY_SLOTS) {
     if (!occupied.has(slot)) return slot;
   }
   return -1;

@@ -70,6 +70,19 @@ const MOVE_DAMPING = 6;
  * transform at t=1, has no residual to correct and thus nothing to snap.
  */
 const TAKE_DURATION_S = 0.36;
+/** How high over its tray slot a bottle's flight arcs (tray-local metres): above the 0.31 m stand. */
+const TRAY_ARC_HEIGHT = 0.36;
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+
+/** A point on the quadratic arc `from` → (towards `via`) → `to` at `t` — into `out`. */
+function trayArcPoint(out: THREE.Vector3, from: THREE.Vector3, via: THREE.Vector3, to: THREE.Vector3, t: number): THREE.Vector3 {
+  const u = 1 - t;
+  return out
+    .copy(from)
+    .multiplyScalar(u * u)
+    .addScaledVector(via, 2 * u * t)
+    .addScaledVector(to, t * t);
+}
 /**
  * Final vertical-drop leg of a tray→shelf return ("returnFromTrayLower") —
  * shorter than `TAKE_DURATION_S` since it only covers the small
@@ -493,6 +506,12 @@ export function ReagentContainerInstance({
   const takeStartPosRef = useRef(new THREE.Vector3());
   const takeStartQuatRef = useRef(new THREE.Quaternion());
   const takeEndPosRef = useRef(new THREE.Vector3());
+  /**
+   * The arc's control point for the tray leg — high over the tray slot, so a
+   * bottle drops into its slot from above and never cuts through the stand
+   * standing on the tray's other half (VL-016). See `trayArcPoint`.
+   */
+  const takeArcRef = useRef(new THREE.Vector3());
   const takeEndQuatRef = useRef(new THREE.Quaternion());
   const flightWorldPositionRef = useRef(new THREE.Vector3());
   const flightWorldQuaternionRef = useRef(new THREE.Quaternion());
@@ -581,6 +600,8 @@ export function ReagentContainerInstance({
           .multiplyScalar(heldTray.scale)
           .applyQuaternion(trayWorldQuat);
         takeEndPosRef.current.copy(trayAnchorWorld).add(slotOffsetWorld);
+        // Down into the slot from above (tray scale: it is held small, by the camera).
+        takeArcRef.current.copy(takeEndPosRef.current).addScaledVector(WORLD_UP, TRAY_ARC_HEIGHT * heldTray.scale);
         takeEndQuatRef.current.copy(trayWorldQuat);
         takeElapsedRef.current = 0;
       }
@@ -645,6 +666,10 @@ export function ReagentContainerInstance({
       // parent, since the shelf itself doesn't move.
       takeStartPosRef.current.copy(worldPos);
       takeStartQuatRef.current.copy(worldQuat);
+      // Straight up out of the tray slot first, over whatever stands beside it.
+      takeArcRef.current
+        .copy(worldPos)
+        .addScaledVector(WORLD_UP, TRAY_ARC_HEIGHT * useNavButtonCalibrationStore.getState().heldTray.scale);
       const liftedY = homePosition.y + PICKUP_LIFT;
       const localLiftedPos = new THREE.Vector3(homePosition.x, liftedY, homePosition.z);
       takeEndPosRef.current.copy(parent.localToWorld(localLiftedPos));
@@ -741,8 +766,10 @@ export function ReagentContainerInstance({
       const t = THREE.MathUtils.clamp(takeElapsedRef.current / TAKE_DURATION_S, 0, 1);
       const ease = t * t * (3 - 2 * t);
 
-      const worldPos = flightWorldPositionRef.current.lerpVectors(
+      const worldPos = trayArcPoint(
+        flightWorldPositionRef.current,
         takeStartPosRef.current,
+        takeArcRef.current,
         takeEndPosRef.current,
         ease,
       );
@@ -789,8 +816,10 @@ export function ReagentContainerInstance({
       const t = THREE.MathUtils.clamp(takeElapsedRef.current / TAKE_DURATION_S, 0, 1);
       const ease = t * t * (3 - 2 * t);
 
-      const worldPos = flightWorldPositionRef.current.lerpVectors(
+      const worldPos = trayArcPoint(
+        flightWorldPositionRef.current,
         takeStartPosRef.current,
+        takeArcRef.current,
         takeEndPosRef.current,
         ease,
       );
@@ -934,6 +963,8 @@ export function ReagentContainerInstance({
   return (
     <group
       ref={groupRef}
+      // Found by `InspectionDepthOfField` to draw this bottle sharp over the blurred lab while inspected.
+      userData={{ inspectionId: instanceId }}
       position={position}
       rotation={homeRotationArray}
       onClick={handleClick}

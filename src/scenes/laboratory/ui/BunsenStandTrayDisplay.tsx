@@ -3,7 +3,8 @@ import * as THREE from "three";
 
 import { useBunsenStandScene } from "../lib/bunsenStandAssembly";
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
-import { BUNSEN_STAND_TRAY_REST_POSITION, useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { STAND_BASE_BOTTOM_OFFSET, useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { standTrayRestPosition, useTrayReagentAreaStore } from "../lib/useTrayReagentAreaStore";
 import { disableRaycast } from "./ReagentContainerInstance";
 import { TrayEquipmentDisplay } from "./TrayEquipmentDisplay";
 
@@ -22,6 +23,9 @@ export function BunsenStandTrayDisplay() {
     return clone;
   }, [scene]);
 
+  const trayConfig = useTrayReagentAreaStore((state) => state.config);
+  const restPosition = useMemo(() => standTrayRestPosition(STAND_BASE_BOTTOM_OFFSET, trayConfig), [trayConfig]);
+
   useEffect(() => {
     cancelDeferredDispose(instance);
     return () => deferDispose(instance, () => {});
@@ -30,7 +34,7 @@ export function BunsenStandTrayDisplay() {
   return (
     <TrayEquipmentDisplay
       instance={instance}
-      restPosition={BUNSEN_STAND_TRAY_REST_POSITION}
+      restPosition={restPosition}
       onReturn={useBunsenStandStorageStore.getState().requestReturn}
     />
   );

@@ -16,15 +16,6 @@ export type BurnerPhase = "capped" | "open" | "lit";
  */
 export type BurnerPlace = "shelf" | "tray" | "workbench" | "fumeHood";
 
-/**
- * Local spot on the held tray: its free far corner beside the stand
- * (`BUNSEN_STAND_TRAY_ANCHOR`), on the inner floor the reagent grid uses.
- * The near corner (+Z) put the lamp under the bottom edge of the screen.
- * The reagent grid shares the area, but reagents and equipment come from
- * different cabinets, and the tray is emptied onto the table after each one.
- */
-export const BURNER_TRAY_REST_POSITION: Position3 = [0.3, 0.004, -0.11];
-
 /** A careful player does not carry a burning lamp: moving it caps it. */
 const CAPPED = { phase: "capped" as const, lit: false };
 

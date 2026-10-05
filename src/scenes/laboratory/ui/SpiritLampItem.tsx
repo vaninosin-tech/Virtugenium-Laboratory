@@ -3,7 +3,8 @@ import { type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo, useState } from "react";
 
 import type { HotspotTargetId, Position3 } from "../lib/layout";
-import { BURNER_TRAY_REST_POSITION, useBurnerStore } from "../lib/useBurnerStore";
+import { useBurnerStore } from "../lib/useBurnerStore";
+import { lampTrayRestPosition, useTrayReagentAreaStore } from "../lib/useTrayReagentAreaStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { useShelfTrayFlight } from "../lib/useShelfTrayFlight";
 import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
@@ -53,11 +54,13 @@ export function SpiritLampShelfInstance({
   );
   const tubeHeld = useTestTubeDragStore((state) => state.heldInstanceId !== null);
 
+  const trayConfig = useTrayReagentAreaStore((state) => state.config);
+  const trayRest = useMemo(() => lampTrayRestPosition(trayConfig), [trayConfig]);
   const { groupRef, beginTake, isMoving } = useShelfTrayFlight({
     cabinetId,
     home: position,
     rotationY,
-    trayRestPosition: BURNER_TRAY_REST_POSITION,
+    trayRestPosition: trayRest,
     returnRequest,
     onArrived: useBurnerStore.getState().take,
     onReturnHandled: useBurnerStore.getState().clearReturnRequest,
@@ -97,10 +100,12 @@ export function SpiritLampShelfInstance({
 /** The lamp riding the held tray; a click sends it back to its shelf. */
 export function SpiritLampTrayDisplay() {
   const instance = useLampCopy();
+  const trayConfig = useTrayReagentAreaStore((state) => state.config);
+  const restPosition = useMemo(() => lampTrayRestPosition(trayConfig), [trayConfig]);
   return (
     <TrayEquipmentDisplay
       instance={instance}
-      restPosition={BURNER_TRAY_REST_POSITION}
+      restPosition={restPosition}
       onReturn={useBurnerStore.getState().requestReturn}
     />
   );

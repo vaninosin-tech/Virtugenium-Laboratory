@@ -4,18 +4,6 @@ import { CLAMP_CHANNEL_OFFSET_Z, CLAMP_MOUNT_HEIGHT, CLAMP_TUBE_AXIS_X } from ".
 import type { Position3 } from "./layout";
 
 /**
- * Fixed local anchor for the stand while it rides the held tray — its own
- * dedicated spot, deliberately NOT part of the 4x2 reagent grid
- * (`useTrayReagentAreaStore`, centered ~x=0.182) or the glued-in test-tube
- * rack (`TRAY_RACK_ANCHOR`, x=-0.216): `BunsenStand.glb`'s own footprint
- * (0.30m rod, rings reaching ~0.15m off it) is bigger than the tray itself
- * was ever sized for (its widest reagent, a 0.11m jar, drove that grid's
- * spacing) — there's no slot this actually fits cleanly into, so it's placed
- * roughly centered on the tray instead of squeezed into the remaining gap.
- */
-export const BUNSEN_STAND_TRAY_ANCHOR: Position3 = [0.05, 0.03, 0];
-
-/**
  * How far BELOW the model's own root origin `StandBase`'s true bottom sits
  * (Blender build: the base is centred at local Z=-0.006, 0.012m tall, so it
  * spans Z -0.012..0 — the root origin (Z=0) is level with the base's TOP,
@@ -26,20 +14,6 @@ export const BUNSEN_STAND_TRAY_ANCHOR: Position3 = [0.05, 0.03, 0];
  * `BunsenStandWorkbenchDisplay` had before this constant existed.
  */
 export const STAND_BASE_BOTTOM_OFFSET = 0.012;
-
-/**
- * `BUNSEN_STAND_TRAY_ANCHOR` corrected for `STAND_BASE_BOTTOM_OFFSET` — the
- * actual local position to render the stand's root at so its base rests ON
- * the tray rather than sinking into it. Shared by `BunsenStandInstance`'s
- * shelf→tray flight target and `BunsenStandTrayDisplay`'s own static render
- * position; they have to agree exactly, or the flight would visibly pop the
- * instant it hands off to the static copy.
- */
-export const BUNSEN_STAND_TRAY_REST_POSITION: Position3 = [
-  BUNSEN_STAND_TRAY_ANCHOR[0],
-  BUNSEN_STAND_TRAY_ANCHOR[1] + STAND_BASE_BOTTOM_OFFSET,
-  BUNSEN_STAND_TRAY_ANCHOR[2],
-];
 
 /** Captured WORLD pose of the tray copy at the instant a return-to-shelf click fires — same "hand off exactly where it visually was" trick `useReagentStorageStore.returnRequest` uses. */
 export interface BunsenStandReturnRequest {
