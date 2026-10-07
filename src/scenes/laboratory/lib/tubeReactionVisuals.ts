@@ -488,7 +488,7 @@ void main() {
   const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1,
     envMapIntensity: 0.15, transparent: true, depthWrite: true });
   white.onBeforeCompile = (shader) => {
-    shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 0.92 : 0.90 };
+    shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 0.92 : 0.97 };
     shader.uniforms.uPowder = { value: kind === "barium-sulfate" ? 1 : 0 };
     shader.uniforms.uSedimentBottom = { value: box.min.y };
     shader.uniforms.uSedimentRadius = { value: radius * 0.98 };
@@ -967,8 +967,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const count = TUBE_VISUALS.particleCounts[quality];
       const precipitate = kind === "silver-chloride" || kind === "barium-sulfate";
       const curds = kind === "silver-chloride";
+      const curdProgress = curds && options.pour
+        ? Math.min(p, THREE.MathUtils.smoothstep(pourAge, 0, 14)) : p;
       const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.006 : 0.006);
-      const settled = precipitate ? THREE.MathUtils.smoothstep(p,
+      const settled = precipitate ? THREE.MathUtils.smoothstep(curdProgress,
         curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
       if (kind === "barium-sulfate") bariumCompletionAge = p >= 0.999
         ? bariumCompletionAge + dt : 0;
@@ -998,7 +1000,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       if (liquid) {
         liquid.uniforms.uTime.value = time;
-        liquid.uniforms.uReactionProgress.value = p;
+        liquid.uniforms.uReactionProgress.value = curdProgress;
         liquid.uniforms.uReactionKind.value = kind === "copper-nitric" ? 1 : curds ? 2 : kind === "barium-sulfate" ? 3 : 4;
         liquid.uniforms.uCloudiness.value = curds ? onset * (1 - settled)
           : kind === "barium-sulfate" ? onset : 0;
@@ -1139,14 +1141,14 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         const z = curds ? center.z + (2 * random(i + 413) - 1)
           * Math.sqrt(Math.max(0, radius * radius * 0.88 - (x - center.x) ** 2))
           : center.z + Math.sin(angle) * radial;
-        const grain = radius * (curds ? (0.22 + random(i + 31) * 0.22)
+        const grain = radius * (curds ? (0.28 + random(i + 31) * 0.20)
           * (0.55 + 0.45 * THREE.MathUtils.smoothstep(p, 0.02, 0.35)) : 0.06);
         const floor = box.min.y + size.y * (curds ? 0.045 + random(i + 14) * 0.11
           : 0.07 + random(i + 14) * 0.025);
         const drift = Math.sin(time * 0.75 + i * 2.4) * radius * 0.07 * (1 - settled);
         const ingress = curds ? THREE.MathUtils.smoothstep(p * 8, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
         if (flakes.visible) {
-          const individualSettled = curds ? THREE.MathUtils.smoothstep(p,
+          const individualSettled = curds ? THREE.MathUtils.smoothstep(curdProgress,
             0.16 + random(i + 205) * 0.26, 0.57 + random(i + 371) * 0.28) : settled;
           const settledX = x + drift - gravity.x * radius * individualSettled * 0.3;
           const settledZ = z - gravity.z * radius * individualSettled * 0.3;

@@ -109,7 +109,8 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   float clearing = smoothstep(0.32, 0.82, p);
   float clearFront = smoothstep(1.0 - clearing - 0.08, 1.0 - clearing + 0.08, h);
   cloud *= 1.0 - clearFront;
-  cloud *= 0.90 + 0.16 * n;
+  // Broad uneven scattering leaves pale gaps around loose AgCl curds.
+  cloud *= 0.66 + 0.48 * n;
 } else if (uReactionKind > 2.5 && uReactionKind < 3.5) {
   // Fine BaSO4 stays evenly milky longer; its clearing front descends slowly.
   float clearing = smoothstep(0.42, 0.98, p);
@@ -257,8 +258,10 @@ if ((uReactionKind > 0.5 && uReactionKind < 1.5) || uReactionKind > 3.5) {
 }
 #include <opaque_fragment>
 if (uReactionKind > 1.5 && uReactionKind < 2.5) {
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.94), cloud * 0.93);
-  gl_FragColor.a = max(gl_FragColor.a, cloud * 0.97);
+  vec3 milkPatch = mix(vec3(0.70, 0.81, 0.85), vec3(0.97, 0.98, 0.99),
+    smoothstep(0.27, 0.75, n));
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, milkPatch, cloud * 0.92);
+  gl_FragColor.a = max(gl_FragColor.a, cloud * 0.95);
 }
 // BaSO4 suspension is an opaque milk on reference footage (exp3-*): the
 // background must not show through while the column is still cloudy.

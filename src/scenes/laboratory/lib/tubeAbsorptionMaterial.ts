@@ -73,11 +73,21 @@ void main() {
       if (uIncomingDyed > 0.5) {
         vec2 uv = vec2(clamp(0.5 + dot(q.xz / (radius * 2.0), vec2(0.42, 0.91)), 0.0, 1.0), h);
         float dye = texture2D(uTransport, uv).r;
-        float fill = smoothstep(0.2, 2.1, uTransportAge);
         float clearing = smoothstep(3.0, 16.0, uTransportAge);
-        float front = mix(1.1, 0.12, clearing);
-        float bulk = fill * (1.0 - smoothstep(front - 0.13, front + 0.13, h));
-        concentration = max(dye * (1.0 - clearing), bulk);
+        // The inlet field carries the dye; its three descending folds are
+        // resolved here at each ray sample, leaving clear channels between.
+        float x = q.x / (radius * 2.0);
+        float descent = smoothstep(0.25, 2.4, uTransportAge);
+        float aTongue = exp(-pow((x + 0.30 + 0.045 * sin(h * 29.0 - uTransportAge * 1.7)) / 0.12, 2.0)
+          - pow((h - (0.82 - 0.39 * descent)) / 0.21, 2.0));
+        float bTongue = exp(-pow((x - 0.015 - 0.06 * sin(h * 24.0 + uTransportAge * 1.3)) / 0.13, 2.0)
+          - pow((h - (0.72 - 0.49 * descent)) / 0.23, 2.0));
+        float cTongue = exp(-pow((x - 0.34 + 0.045 * sin(h * 27.0 - uTransportAge * 1.1)) / 0.11, 2.0)
+          - pow((h - (0.91 - 0.32 * descent)) / 0.19, 2.0));
+        float tongues = pow(max(max(aTongue * 0.88, bTongue), cTongue * 0.83), 0.68)
+          * smoothstep(0.15, 0.75, uTransportAge);
+        concentration = max(smoothstep(0.025, 0.70, dye), smoothstep(0.16, 0.48, tongues))
+          * (1.0 - clearing);
       }
       opticalDepth += vec3(2.7, 6.5, 2.3) * concentration * distance / (8.0 * radius);
     }
