@@ -313,7 +313,12 @@ describe("tube reaction rendering contract", () => {
     const plume = f.get<THREE.InstancedMesh>("TubeNO2");
     expect(plume.visible).toBe(true);
     expect((plume.material as THREE.ShaderMaterial).uniforms.uOpacity.value).toBeLessThan(0.06);
-    expect(f.get("TubeNO2Headspace").visible).toBe(false);
+    // The air in the tube browns faintly at first, then NO displaces it.
+    const headspace = f.get<THREE.Mesh>("TubeNO2Headspace");
+    expect(headspace.visible).toBe(true);
+    expect((headspace.material as THREE.ShaderMaterial).uniforms.uDensity.value).toBeLessThanOrEqual(0.6);
+    f.advance(35, chemistry(0.6, 1, 1));
+    expect(headspace.visible).toBe(false);
     f.advance(2, chemistry(1, 0, 0));
     expect(plume.visible).toBe(false);
   });

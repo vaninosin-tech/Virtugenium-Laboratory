@@ -690,6 +690,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   let disposed = false;
   let lastTime: number | undefined;
   let mouthFill = 0;
+  // Seconds since vigorous NO evolution began; -1 while it has not.
+  let airBrownAge = -1;
   let bubblePhase = 0;
   let surfaceActivity = 0;
   let bubbleStopAge = Infinity;
@@ -1190,13 +1192,25 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         * THREE.MathUtils.smoothstep(temperature, 0.15, 0.65);
       mouthFill = THREE.MathUtils.lerp(mouthFill, mouthTarget, 1 - Math.exp(-dt * 3));
       gas.visible = kind === "copper-nitric" && mouthFill > 0.01;
-      headspace.visible = false;
+      // The tube starts full of air: the first NO turns it into faint brown
+      // NO2 in the upper part, which fades as NO displaces the air. Next to
+      // the liquid the gas stays colourless (dilute acid, reference exp1dil-*).
+      const vigorous = kind === "copper-nitric" && drive > 0.05 && temperature > 0.1;
+      if (kind !== "copper-nitric" || p <= 0 || reverseTime) airBrownAge = -1;
+      else if (airBrownAge < 0) { if (vigorous) airBrownAge = 0; }
+      else airBrownAge += dt;
+      const airBrown = airBrownAge < 0 ? 0 : THREE.MathUtils.smoothstep(airBrownAge, 0, 3)
+        * (1 - THREE.MathUtils.smoothstep(airBrownAge, 8, 30));
+      headspace.visible = airBrown > 0.01;
       gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * mouthFill;
       gasMaterial.uniforms.uTime.value = time;
       gasMaterial.uniforms.uWorldUp.value.copy(gravity);
-      headMaterial.uniforms.uDensity.value = 0;
-      headMaterial.uniforms.uFront.value = 0;
-      headMaterial.uniforms.uMouth.value = mouthFill;
+      // NO rises from the liquid and pushes the air out: the faint brown
+      // front climbs to the mouth over ~12 s, leaves, and the tube clears.
+      const airAge = Math.max(0, airBrownAge);
+      headMaterial.uniforms.uDensity.value = airBrown * 0.6;
+      headMaterial.uniforms.uFront.value = THREE.MathUtils.smoothstep(airAge, 0, 12);
+      headMaterial.uniforms.uMouth.value = 1 - THREE.MathUtils.smoothstep(airAge, 12, 30);
       headMaterial.uniforms.uMouthHeight.value = up.value.dot(lip) - level.value;
       headMaterial.uniforms.uResidue.value = 0;
       headMaterial.uniforms.uTime.value = time;

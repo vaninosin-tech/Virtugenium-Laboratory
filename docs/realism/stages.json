@@ -24,9 +24,9 @@
     { "label": "держится", "ref": ["exp3-EZH58Ggfi3I", 27], "game": "baso4-20s" }
   ],
   "exp4": [
-    { "label": "KMnO4 в пробирке", "ref": ["exp4-L-fIkM1d63A", 38], "game": "kmno4-redox-0p5s" },
-    { "label": "начало обесцвечивания", "ref": ["exp4-L-fIkM1d63A", 46], "game": "kmno4-redox-2s" },
-    { "label": "градиент сверху вниз", "ref": ["exp4-L-fIkM1d63A", 50], "game": "kmno4-redox-5s" },
-    { "label": "почти бесцветно сверху", "ref": ["exp4-L-fIkM1d63A", 56], "game": "kmno4-redox-8s" }
+    { "label": "плотный KMnO4", "ref": ["exp4-L-fIkM1d63A", 38], "game": "kmno4-redox-2s" },
+    { "label": "начало обесцвечивания", "ref": ["exp4-L-fIkM1d63A", 46], "game": "kmno4-redox-5s" },
+    { "label": "градиент сверху вниз", "ref": ["exp4-L-fIkM1d63A", 50], "game": "kmno4-redox-8s" },
+    { "label": "почти бесцветно сверху", "ref": ["exp4-L-fIkM1d63A", 56], "game": "kmno4-redox-12s" }
   ]
 }
