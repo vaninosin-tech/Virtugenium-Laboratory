@@ -5,6 +5,7 @@ import * as THREE from "three";
 
 import { useBurnerStore } from "../lib/useBurnerStore";
 import { standTargetEvents } from "./standTargetEvents";
+import { SpiritLampFlame } from "./SpiritLampFlame";
 import { useCircleObstacle } from "../lib/worktopBounds";
 
 export const SPIRIT_LAMP_MODEL_PATH = "/assets/models/SpiritLamp.glb";
@@ -19,7 +20,6 @@ const MODEL_PATH = SPIRIT_LAMP_MODEL_PATH;
 export const FLAME_BASE_Y = 0.0765;
 /** Nominal flame height `H`. */
 export const FLAME_HEIGHT = 0.04;
-const FLAME_CORE_HEIGHT = FLAME_HEIGHT * 0.3;
 
 /** The cap comes off straight up first — the wick holder inside leaves only 0.5 mm of play. */
 const CAP_LIFT = 0.035;
@@ -28,9 +28,6 @@ const CAP_ASIDE = new THREE.Vector3(0.07, -0.0505, 0);
 const CAP_MOVE_SECONDS = 0.6;
 /** The flame under a replaced cap goes out once the air in it is used up, not the instant the cap seats. */
 const SMOTHER_SECONDS = 0.3;
-
-const FLAME_COLOR = "#ffb347";
-const FLAME_CORE_COLOR = "#4f73ff";
 
 /**
  * The model's glass uses `KHR_materials_transmission`, which in three.js adds
@@ -70,59 +67,7 @@ export function prepareLampMaterials(root: THREE.Object3D): THREE.Material[] {
 }
 
 function Flame({ strength }: { readonly strength: React.MutableRefObject<number> }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const lightRef = useRef<THREE.PointLight>(null);
-
-  useFrame((state) => {
-    const group = groupRef.current;
-    if (!group) return;
-    // Calm air: ±5 % height at 1.5–3 Hz (flame logic, section 4).
-    const t = state.clock.elapsedTime;
-    const flicker = 1 + Math.sin(t * 2 * Math.PI * 2.3) * 0.03 + Math.sin(t * 2 * Math.PI * 1.6 + 1.3) * 0.02;
-    const s = strength.current;
-    group.visible = s > 0.01;
-    group.scale.set(s * (1 + (flicker - 1) * 0.4), s * flicker, s * (1 + (flicker - 1) * 0.4));
-    if (lightRef.current) lightRef.current.intensity = 0.03 * s * flicker;
-  });
-
-  // A spirit-lamp flame is pale and nearly see-through. Kept dim on purpose:
-  // it has to LIGHT the tube, not hide it.
-  return (
-    <>
-      <group ref={groupRef} position={[0, FLAME_BASE_Y, 0]}>
-        <mesh position={[0, FLAME_HEIGHT / 2, 0]}>
-          <coneGeometry args={[0.006, FLAME_HEIGHT, 12]} />
-          <meshStandardMaterial
-            color={FLAME_COLOR}
-            emissive={FLAME_COLOR}
-            emissiveIntensity={0.4}
-            transparent
-            opacity={0.32}
-            depthWrite={false}
-          />
-        </mesh>
-        <mesh position={[0, FLAME_CORE_HEIGHT / 2, 0]}>
-          <coneGeometry args={[0.0033, FLAME_CORE_HEIGHT, 10]} />
-          <meshStandardMaterial
-            color={FLAME_CORE_COLOR}
-            emissive={FLAME_CORE_COLOR}
-            emissiveIntensity={0.5}
-            transparent
-            opacity={0.45}
-            depthWrite={false}
-          />
-        </mesh>
-      </group>
-      <pointLight
-        ref={lightRef}
-        position={[0, FLAME_BASE_Y + FLAME_HEIGHT * 0.4, 0]}
-        color="#ffb060"
-        intensity={0}
-        distance={0.6}
-        decay={1}
-      />
-    </>
-  );
+  return <SpiritLampFlame strength={strength} baseY={FLAME_BASE_Y} height={FLAME_HEIGHT} />;
 }
 
 /**
