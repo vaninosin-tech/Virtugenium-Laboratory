@@ -1,6 +1,11 @@
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
+import { flameAirflow, flameHotZone } from "../lib/flameAirflow";
+import { EQUIPMENT } from "../lib/layout";
+import { useBurnerStore } from "../lib/useBurnerStore";
+import { useFumeHoodControlsStore } from "../lib/useFumeHoodControlsStore";
+import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
 
 /**
  * Spirit-lamp flame per `docs/assets/SpiritLamp_flame_logic.txt` (section 3):
@@ -31,6 +36,8 @@ uniform float uTime;
 uniform float uStrength;
 uniform float uFlickerHz;
 uniform float uFlickerAmp;
+uniform float uRaggedness;
+uniform float uDetach;
 varying vec2 vUv;
 
 float hash(float n) { return fract(sin(n) * 43758.5453); }
@@ -59,12 +66,14 @@ void main() {
   float sway = (noise1(t * 1.3 + y * 2.0) * 0.06 + noise1(t * 3.7 - y * 5.0) * 0.025)
     * smoothstep(0.15, 1.0, y / tip);
   float x = (vUv.x - 0.5) * 2.0 - sway;
+  x -= uRaggedness * smoothstep(0.18, 0.9, y) * noise1(t * 8.0 + y * 24.0) * 0.11;
 
   float w = halfWidth(y, tip);
+  w *= 1.0 + uRaggedness * (noise1(y * 37.0 + t * 11.0) * 0.2);
   float edge = abs(x) / max(w, 0.001);
   float inside = 1.0 - smoothstep(0.72, 1.0, edge);
   // Soft root just above the wick and a soft, thinning tip.
-  float root = smoothstep(0.0, 0.05, y);
+  float root = smoothstep(0.015 * uDetach, 0.05 + 0.09 * uDetach, y);
   float fadeTop = 1.0 - smoothstep(tip * 0.55, tip, y);
   float h = clamp(y / tip, 0.0, 1.0);
 
@@ -105,10 +114,19 @@ export interface SpiritLampFlameProps {
 /** Calm air on the table: ±5 % height at 1.5–3 Hz (flame logic, section 4). */
 const CALM_FLICKER_HZ = 2.2;
 const CALM_FLICKER_AMP = 0.05;
+const HOOD = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
+const UP = new THREE.Vector3(0, 1, 0);
+const worldPosition = new THREE.Vector3();
+const hoodPosition = new THREE.Vector3();
+const localDirection = new THREE.Vector3();
+const hotCenter = new THREE.Vector3();
+const worldQuaternion = new THREE.Quaternion();
 
 export function SpiritLampFlame({ strength, baseY, height }: SpiritLampFlameProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const lightRef = useRef<THREE.PointLight>(null);
+  const transition = useRef(0);
+  const nearSeconds = useRef(0);
   // The quad is a little taller than H so the flickering tip never clips;
   // half-width 0.006 m covers the 0.012 m maximum width.
   const quadHeight = height * 1.2;
@@ -125,6 +143,8 @@ export function SpiritLampFlame({ strength, baseY, height }: SpiritLampFlameProp
       uStrength: { value: 0 },
       uFlickerHz: { value: CALM_FLICKER_HZ },
       uFlickerAmp: { value: CALM_FLICKER_AMP },
+      uRaggedness: { value: 0 },
+      uDetach: { value: 0 },
     },
     transparent: true,
     depthWrite: false,
@@ -136,19 +156,59 @@ export function SpiritLampFlame({ strength, baseY, height }: SpiritLampFlameProp
     toneMapped: false,
   }), []);
 
-  useFrame((state) => {
+  useFrame((state, rawDelta) => {
     const s = strength.current;
     const mesh = meshRef.current;
     if (mesh) mesh.visible = s > 0.01;
     const t = state.clock.elapsedTime;
+    const lamp = useBurnerStore.getState();
+    const inHood = lamp.place === "fumeHood";
+    const fanOn = inHood && (useFumeHoodControlsStore.getState().fanOnById[HOOD.id] ?? false);
+    const meshWorld = mesh ?? lightRef.current;
+    let d = 1;
+    let hoodYaw = HOOD.rotationY;
+    if (inHood && meshWorld) {
+      meshWorld.getWorldPosition(worldPosition);
+      const override = useFurniturePositionStore.getState().getOverride(HOOD.id);
+      hoodPosition.set(...override.position);
+      hoodYaw = override.rotationY ?? HOOD.rotationY;
+      worldPosition.sub(hoodPosition).applyAxisAngle(UP, -hoodYaw);
+      d = 0.35 - worldPosition.z;
+    }
+    const delta = Math.min(rawDelta, 0.1);
+    transition.current = THREE.MathUtils.clamp(transition.current + (fanOn ? delta : -delta), 0, 1);
+    nearSeconds.current = fanOn && d < 0.15 && lamp.lit ? nearSeconds.current + delta : 0;
+    const airflow = flameAirflow({ inHood, fanOn, d, transition: transition.current, nearSeconds: nearSeconds.current });
+    material.uniforms.uFlickerHz.value = airflow.flickerHz;
+    material.uniforms.uFlickerAmp.value = airflow.flickerAmp;
+    material.uniforms.uRaggedness.value = airflow.raggedness;
+    material.uniforms.uDetach.value = airflow.detachment;
+    const zone = flameHotZone(baseY, height, airflow);
+    if (mesh) {
+      // Hood -Z is the rear wall. Convert that vector to the lamp's frame.
+      mesh.parent?.getWorldQuaternion(worldQuaternion);
+      localDirection.set(0, 0, -1).applyAxisAngle(UP, hoodYaw).applyQuaternion(worldQuaternion.invert());
+      const axis = localDirection.multiplyScalar(Math.sin(airflow.tiltRad)).addScaledVector(UP, Math.cos(airflow.tiltRad)).normalize();
+      mesh.quaternion.setFromUnitVectors(UP, axis);
+      mesh.scale.set(1, (0.35 + 0.65 * s) * airflow.heightScale, 1);
+      hotCenter.set(axis.x * height * airflow.heightScale * 0.8,
+        zone.point.y,
+        axis.z * height * airflow.heightScale * 0.8);
+      mesh.parent?.localToWorld(hotCenter);
+      // VL-020 (not yet committed) publishes this tilted hot spot as LAMP_FLAME.point.
+    }
     material.uniforms.uTime.value = t;
     // Grows from the wick when lit, shrinks into it when smothered.
     material.uniforms.uStrength.value = Math.min(1, s * 1.15);
-    if (mesh) mesh.scale.set(1, 0.35 + 0.65 * s, 1);
     if (lightRef.current) {
-      const flicker = 1 + Math.sin(t * 2 * Math.PI * CALM_FLICKER_HZ) * 0.03
+      const flicker = 1 + Math.sin(t * 2 * Math.PI * airflow.flickerHz) * 0.03
         + Math.sin(t * 2 * Math.PI * 1.6 + 1.3) * 0.02;
-      lightRef.current.intensity = 0.06 * s * flicker;
+      lightRef.current.intensity = 0.38 * s * flicker;
+      lightRef.current.position.set(
+        localDirection.x * height * airflow.heightScale * 0.4,
+        baseY + height * 0.4 * airflow.heightScale * Math.cos(airflow.tiltRad),
+        localDirection.z * height * airflow.heightScale * 0.4,
+      );
     }
   });
 
