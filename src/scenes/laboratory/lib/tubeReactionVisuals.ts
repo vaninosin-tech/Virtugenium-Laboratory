@@ -4,6 +4,7 @@ import { deferDispose } from "./deferredDispose";
 import { TubeLiquidMaterial } from "./tubeLiquidMaterial";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
+import { TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
 import { testTubeLiquidFill } from "./testTubeContents";
 import type { ReactionKind, TubeChemistry } from "./tubeReactions";
 import type { RuntimeQuality } from "./useRuntimeQualityStore";
@@ -208,7 +209,7 @@ uniform vec3 uOpticalCamera;
 uniform float uOpticalKind, uOpticalProgress, uOpticalCloud, uOpticalHaze, uOpticalAge;
 varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
 vec3 transmitThroughTube(vec3 background) {
-  if (uOpticalKind < 0.5 || uOpticalKind > 3.5) return background;
+  if (uOpticalKind < 2.5 || uOpticalKind > 3.5) return background;
   vec3 ray = normalize(vBackdropPoint - uOpticalCamera);
   float radius = ${radius.toFixed(7)};
   float bottom = ${minY.toFixed(7)};
@@ -331,6 +332,10 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const physical = base as THREE.MeshPhysicalMaterial;
   const baseOpacity = physical instanceof TubeLiquidMaterial ? physical.uniforms.uOpacity.value : physical.opacity;
   const baseColor = physical instanceof TubeLiquidMaterial ? physical.uniforms.uBaseColor.value : physical.color;
+  const originalBaseReactionKind = base instanceof TubeLiquidMaterial ? base.uniforms.uReactionKind.value : 0;
+  const standalonePermanganate = kind === null && base instanceof TubeLiquidMaterial
+    && baseColor?.getHexString() === new THREE.Color(REAGENTS.kmno4.contentsColor).getHexString();
+  if (standalonePermanganate) base.uniforms.uReactionKind.value = 4;
   const liquid = kind ? new TubeLiquidMaterial(volume.geometry, {
     color: kind === "permanganate-redox" ? REAGENTS.kmno4.contentsColor : `#${baseColor?.getHexString() ?? "ffffff"}`,
     opacity: baseOpacity,
@@ -341,23 +346,23 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
     liquid.uniforms.uTopHighlight.value = 0.04;
   }
   const originalShellMaterial = shell.material;
-  const dyedShellMaterial = kind === "permanganate-redox" && options.incomingDyed
+  const dyedShellMaterial = (kind === "permanganate-redox" || kind === "copper-nitric" || standalonePermanganate)
     && shell.material instanceof THREE.MeshPhysicalMaterial ? shell.material.clone() : null;
   if (dyedShellMaterial) {
     // three.js does not copy onBeforeCompile when cloning a material.
     const compileShell = (originalShellMaterial as THREE.MeshPhysicalMaterial).onBeforeCompile;
     dyedShellMaterial.onBeforeCompile = (shader, renderer) => {
       compileShell(shader, renderer);
-      // Broad white glass reflections washed out the dyed liquid and formed
-      // oval holes. Preserve the contour while clearing the lower window.
+      // The front glass otherwise repaints the already filtered background.
+      // Preserve its contour while letting the coloured column show through.
       shader.fragmentShader = shader.fragmentShader.replace(
         "diffuseColor.a = max(diffuseColor.a, crack * 0.95);",
         `diffuseColor.a = max(diffuseColor.a, crack * 0.95);
 float dyeWindow = 1.0 - smoothstep(0.31, 0.35, vTubeHeight);
-diffuseColor.a *= mix(1.0, 0.22, dyeWindow);
-outgoingLight *= mix(1.0, 0.32, dyeWindow);`);
+diffuseColor.a *= mix(1.0, 0.10, dyeWindow);
+outgoingLight *= mix(1.0, 0.80, dyeWindow);`);
     };
-    dyedShellMaterial.customProgramCacheKey = () => "test-tube-clear-dyed-window-v1";
+    dyedShellMaterial.customProgramCacheKey = () => "test-tube-coloured-window-v2";
     shell.material = dyedShellMaterial;
   }
 
@@ -407,13 +412,34 @@ outgoingLight *= mix(1.0, 0.32, dyeWindow);`);
     backdropWall.visible = false;
     backdropCap.visible = false;
     backdropCap.frustumCulled = false;
+    backdropWall.renderOrder = backdropCap.renderOrder = -0.5;
     backdropWall.raycast = backdropCap.raycast = () => {};
     group.add(backdropWall, backdropCap);
+  }
+  const absorption = hasLiquid && (kind === "copper-nitric" || kind === "permanganate-redox" || standalonePermanganate)
+    ? new TubeAbsorptionMaterial(radius, box.min.y, size.y) : null;
+  const absorptionWall = absorption ? new THREE.Mesh(wallGeometry, absorption) : null;
+  const absorptionCap = absorption ? new THREE.Mesh(capGeometry, absorption) : null;
+  if (absorptionWall && absorptionCap) {
+    absorptionWall.name = "TubeAbsorptionWall";
+    absorptionCap.name = "TubeAbsorptionSurface";
+    absorptionWall.visible = absorptionCap.visible = false;
+    absorptionWall.renderOrder = absorptionCap.renderOrder = 0.5;
+    absorptionCap.frustumCulled = false;
+    absorptionWall.raycast = absorptionCap.raycast = () => {};
+    group.add(absorptionWall, absorptionCap);
+  }
+  const originalVolumeOrder = volume.renderOrder;
+  const originalGlassOrder = glassShell.renderOrder;
+  if (absorption) {
+    volume.renderOrder = 3;
+    glassShell.renderOrder = 4;
   }
   const cap = new THREE.Mesh(capGeometry, baseline);
   cap.name = "TubeLiquidSurface";
   cap.visible = hasLiquid;
   cap.frustumCulled = false;
+  if (absorption) cap.renderOrder = 3;
   cap.raycast = () => {};
   group.add(cap);
   const filmGeometry = new THREE.PlaneGeometry(1, 1, 8, 48);
@@ -462,7 +488,7 @@ void main() {
   const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1,
     envMapIntensity: 0.15, transparent: true, depthWrite: true });
   white.onBeforeCompile = (shader) => {
-    shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 0.92 : 0.96 };
+    shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 0.92 : 0.90 };
     shader.uniforms.uPowder = { value: kind === "barium-sulfate" ? 1 : 0 };
     shader.uniforms.uSedimentBottom = { value: box.min.y };
     shader.uniforms.uSedimentRadius = { value: radius * 0.98 };
@@ -721,9 +747,17 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   const copper = root.getObjectByName("TubeCopperGranules");
   const immersion = new TubeImmersion(center, radius, box.min.y, size.y);
   const detachImmersion = [immersion.attach(white), immersion.attach(bubbleMaterial)];
+  const copperDrawState: { mesh: THREE.Mesh; transparent: boolean; order: number }[] = [];
   if (copper) copper.traverse(object => {
-    if (object instanceof THREE.Mesh && object.material instanceof THREE.Material)
+    if (object instanceof THREE.Mesh && object.material instanceof THREE.Material) {
       detachImmersion.push(immersion.attach(object.material));
+      if (absorption) {
+        copperDrawState.push({ mesh: object, transparent: object.material.transparent, order: object.renderOrder });
+        object.material.transparent = true;
+        object.material.needsUpdate = true;
+        object.renderOrder = 2;
+      }
+    }
   });
   const copperPoints = copper?.children.map(child => new THREE.Vector3(child.position.x,
     typeof child.userData.dropTargetY === "number" ? child.userData.dropTargetY : child.position.y, child.position.z)) ?? [];
@@ -813,6 +847,21 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       inverse.copy(volume.matrixWorld).invert();
       if (cameraPosition) cameraLocal.copy(cameraPosition).applyMatrix4(inverse);
+      if (absorption && absorptionWall && absorptionCap) {
+        absorption.uniforms.uUp.value.copy(up.value);
+        absorption.uniforms.uLevel.value = level.value;
+        absorption.uniforms.uCameraLocal.value.copy(cameraLocal);
+        absorption.uniforms.uKind.value = kind === "copper-nitric" ? 1 : 2;
+        absorption.uniforms.uProgress.value = p;
+        absorption.uniforms.uTransport.value = transport?.texture ?? null;
+        absorption.uniforms.uTransportAge.value = transport?.age ?? 0;
+        absorption.uniforms.uIncomingDyed.value = kind === "permanganate-redox" && options.incomingDyed ? 1 : 0;
+        absorptionWall.visible = hasLiquid && (standalonePermanganate
+          || (kind === "permanganate-redox"
+            ? options.incomingDyed ? (transport?.age ?? 0) < 18 : p < 0.999
+            : p > 0.001));
+        absorptionCap.visible = absorptionWall.visible;
+      }
       immersion.uniforms.uImmersionWorldToLocal.value.copy(inverse);
       immersion.uniforms.uImmersionCamera.value.copy(cameraLocal);
       immersion.uniforms.uImmersionUp.value.copy(up.value);
@@ -918,7 +967,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const count = TUBE_VISUALS.particleCounts[quality];
       const precipitate = kind === "silver-chloride" || kind === "barium-sulfate";
       const curds = kind === "silver-chloride";
-      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.025 : 0.006);
+      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.006 : 0.006);
       const settled = precipitate ? THREE.MathUtils.smoothstep(p,
         curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
       if (kind === "barium-sulfate") bariumCompletionAge = p >= 0.999
@@ -1090,7 +1139,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         const z = curds ? center.z + (2 * random(i + 413) - 1)
           * Math.sqrt(Math.max(0, radius * radius * 0.88 - (x - center.x) ** 2))
           : center.z + Math.sin(angle) * radial;
-        const grain = radius * (curds ? (0.17 + random(i + 31) * 0.19)
+        const grain = radius * (curds ? (0.22 + random(i + 31) * 0.22)
           * (0.55 + 0.45 * THREE.MathUtils.smoothstep(p, 0.02, 0.35)) : 0.06);
         const floor = box.min.y + size.y * (curds ? 0.045 + random(i + 14) * 0.11
           : 0.07 + random(i + 14) * 0.025);
@@ -1226,7 +1275,15 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       disposed = true;
       volume.material = baseline;
       volume.geometry = originalGeometry;
+      if (standalonePermanganate) base.uniforms.uReactionKind.value = originalBaseReactionKind;
+      volume.renderOrder = originalVolumeOrder;
+      glassShell.renderOrder = originalGlassOrder;
       if (dyedShellMaterial) glassShell.material = originalShellMaterial;
+      for (const { mesh, transparent, order } of copperDrawState) {
+        (mesh.material as THREE.Material).transparent = transparent;
+        (mesh.material as THREE.Material).needsUpdate = true;
+        mesh.renderOrder = order;
+      }
       detachImmersion.forEach(detach => detach());
       immersion.dispose();
       group.removeFromParent();
@@ -1238,6 +1295,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         bottomCausticMaterial.dispose(); standCausticMaterial.dispose();
         curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
+        absorption?.dispose();
         dyedShellMaterial?.dispose();
         for (const mesh of [flakes, bubbles, pourAir, attachedBubbles, gas, splash, condensate, foam]) mesh.dispose();
       });

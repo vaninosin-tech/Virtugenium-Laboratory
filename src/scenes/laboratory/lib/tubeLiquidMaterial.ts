@@ -164,7 +164,7 @@ if (p <= 0.0 && uReactionKind < 3.5) { localMix = 0.0; cloud = 0.0; }
 if (uReactionKind > 1.5 && uReactionKind < 2.5 && uTransportActive > 0.01)
   cloud *= 0.85 + 0.15 * smoothstep(0.015, 0.65, transportedMatter.g);
 if (uReactionKind > 1.5 && uReactionKind < 2.5)
-  cloud *= 0.84 + 0.16 * smoothstep(0.05, 0.40, h);
+  cloud *= 0.97 + 0.03 * smoothstep(0.05, 0.40, h);
 if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTransportActive > 0.01)
   // The inlet only shapes the first plume. Fine precipitate disperses through
   // the entire column before the transport field itself has faded away.
@@ -248,12 +248,17 @@ outgoingLight = mix(outgoingLight, mix(vec3(0.90, 0.97, 1.0), body + (vec3(1.0) 
 outgoingLight *= 1.0 - waveDark * mix(0.55, 0.25, tinted);
 // Permanganate absorbs green strongly even under the bright bench lights.
 // Override the neutral water lighting only where a dense tongue is present.
-outgoingLight = mix(outgoingLight, vec3(0.38, 0.001, 0.075) + boundedSpecular * 0.025,
-  raspberry * 0.98);
+if ((uReactionKind > 0.5 && uReactionKind < 1.5) || uReactionKind > 3.5) {
+  // Chromatic density comes from the multiplicative absorption pass. This
+  // material contributes only the surface sheen and the moving meniscus.
+  diffuseColor.a = clamp(0.035 + waterEdge * 0.11 + capRim * 0.11
+    + meniscus * 0.07 + vCap * abs(vTubeWaveSlope) * 2.0, 0.0, 0.30);
+  outgoingLight = mix(outgoingLight, vec3(0.66, 0.77, 0.82), 0.55);
+}
 #include <opaque_fragment>
 if (uReactionKind > 1.5 && uReactionKind < 2.5) {
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.92), cloud * 0.82);
-  gl_FragColor.a = max(gl_FragColor.a, cloud * 0.83);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.94), cloud * 0.93);
+  gl_FragColor.a = max(gl_FragColor.a, cloud * 0.97);
 }
 // BaSO4 suspension is an opaque milk on reference footage (exp3-*): the
 // background must not show through while the column is still cloudy.
@@ -263,5 +268,5 @@ if (uReactionKind > 2.5 && uReactionKind < 3.5) {
 }`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v20-opaque-baso4"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v21-absorption-sheen-agcl"; }
 }

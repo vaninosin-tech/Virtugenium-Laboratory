@@ -14,7 +14,8 @@ afterEach(() => {
 });
 const chemistry = (progress = 0.5, rate = 0, temperature = 0): TubeChemistry => ({ progress, rate, temperature });
 
-function fixture(kind: ReactionKind | null, withCopper = false, pour = false, withSurface = false) {
+function fixture(kind: ReactionKind | null, withCopper = false, pour = false, withSurface = false,
+  colorOverride?: string) {
   const parent = new THREE.Group();
   const root = new THREE.Group();
   parent.add(root);
@@ -28,7 +29,7 @@ function fixture(kind: ReactionKind | null, withCopper = false, pour = false, wi
   const geometry = new THREE.CylinderGeometry(0.007, 0.007, 0.055, 16);
   geometry.translate(0, 0.028, 0);
   const baseline = new TubeLiquidMaterial(geometry, {
-    color: kind === "permanganate-redox" ? REAGENTS.kmno4.contentsColor : "#eef6fb",
+    color: colorOverride ?? (kind === "permanganate-redox" ? REAGENTS.kmno4.contentsColor : "#eef6fb"),
     opacity: kind === "permanganate-redox" ? REAGENTS.kmno4.contentsOpacity : 0.3,
   });
   const volume = new THREE.Mesh(geometry, baseline);
@@ -150,6 +151,39 @@ describe("tube reaction rendering contract", () => {
     expect(f.get("TubeRefractedBackdrop").visible).toBe(false);
   });
 
+  it("multiplies coloured transmission before drawing copper and glass", () => {
+    const f = fixture("copper-nitric", true);
+    f.update(chemistry(0.6));
+    const wall = f.get("TubeAbsorptionWall");
+    const cap = f.get("TubeAbsorptionSurface");
+    const material = wall.material as THREE.ShaderMaterial;
+    expect(wall.visible).toBe(true);
+    expect(cap.visible).toBe(true);
+    expect(material.blending).toBe(THREE.CustomBlending);
+    expect(material.blendEquation).toBe(THREE.AddEquation);
+    expect(material.blendSrc).toBe(THREE.ZeroFactor);
+    expect(material.blendDst).toBe(THREE.SrcColorFactor);
+    expect(material.depthWrite).toBe(false);
+    expect(material.toneMapped).toBe(false);
+    expect(wall.renderOrder).toBeLessThan(f.copper!.children[0].renderOrder);
+    expect(f.copper!.children[0].renderOrder).toBeLessThan(f.get("Tube_Glass").renderOrder);
+    expect(((f.copper!.children[0] as THREE.Mesh).material as THREE.Material).transparent).toBe(true);
+    f.update(chemistry(0));
+    expect(wall.visible).toBe(false);
+  });
+
+  it("keeps a standalone permanganate tube absorbing without a reaction kind", () => {
+    const f = fixture(null, false, false, false, REAGENTS.kmno4.contentsColor);
+    f.update(chemistry(0));
+    expect(f.get("TubeAbsorptionWall").visible).toBe(true);
+    expect(f.get("TubeAbsorptionSurface").visible).toBe(true);
+    expect(f.baseline.uniforms.uReactionKind.value).toBe(4);
+    f.update(chemistry(1));
+    expect(f.get("TubeAbsorptionWall").visible).toBe(true);
+    f.visuals.dispose();
+    expect(f.baseline.uniforms.uReactionKind.value).toBe(0);
+  });
+
   it.each(kinds)("%s supports completion and reverse seeking while retaining GPU resources", kind => {
     const f = fixture(kind, false, false, true);
     f.update(chemistry(0));
@@ -176,7 +210,8 @@ describe("tube reaction rendering contract", () => {
       if (resource.mesh instanceof THREE.InstancedMesh) expect(resource.mesh.instanceMatrix.array).toBe(resource.array);
       expect(resource.mesh.visible).toBe((["TubeLiquidSurface", "TubeBottomCaustic", "TubeStandCaustic"].includes(resource.mesh.name)
         && (kind !== "silver-chloride" || resource.mesh.name === "TubeLiquidSurface"))
-        || kind === "copper-nitric" && resource.mesh.name === "TubeNOBubbles");
+        || kind === "copper-nitric" && resource.mesh.name === "TubeNOBubbles"
+        || kind === "permanganate-redox" && ["TubeAbsorptionWall", "TubeAbsorptionSurface"].includes(resource.mesh.name));
     }
     expect(f.get("TubeLiquidSurface").material).toBe(held);
     f.update(chemistry(0.5));
@@ -577,11 +612,11 @@ describe("tube reaction rendering contract", () => {
     expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
   });
 
-  it("brings AgCl flocs and BaSO4 milk in gradually over their first second", () => {
+  it("fills AgCl with immediate milk while BaSO4 rises during its first second", () => {
     const silver = fixture("silver-chloride");
     silver.update(chemistry(0.1 / 12));
     expect(liquid(silver).uniforms.uCloudiness.value).toBeGreaterThan(0);
-    expect(liquid(silver).uniforms.uCloudiness.value).toBeLessThan(0.5);
+    expect(liquid(silver).uniforms.uCloudiness.value).toBeCloseTo(1);
     const flocs = silver.get<THREE.InstancedMesh>("TubePrecipitate");
     expect(flocs.visible).toBe(true);
     expect(particleBounds(flocs).max.y).toBeGreaterThan(0);

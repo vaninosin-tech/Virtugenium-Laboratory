@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
+import { freezeTubeFrame, renderTubeFrame, tubeTopView, thawTubeFrame } from "./frozenTubeFrame.mjs";
 
 const out = process.env.VISUAL_OUT ?? "tmp/visual/30d/immersion";
 await mkdir(out, { recursive: true });
@@ -16,6 +17,10 @@ try {
   await page.getByText("Играть", { exact: true }).click();
   await page.getByText("Песочница (временно)").click();
   await page.waitForFunction(() => window.__sceneStore?.getState().cabinetPhase === "inspecting", null, { timeout: 90000 });
+  await page.waitForFunction(async () => {
+    const { useLabBootStore } = await import("/src/features/lab-boot/lib/useLabBootStore.ts");
+    return useLabBootStore.getState().phase === "done";
+  }, null, { timeout: 90000 });
   await page.evaluate(async () => {
     const { standLocation } = await import("/src/scenes/laboratory/lib/standStationActions.ts");
     const location = standLocation();
@@ -32,7 +37,53 @@ try {
     await page.evaluate(value => window.__tubeVisualTuningStore.setState({ progress: value }), progress);
     await page.waitForTimeout(2400);
     if (errors.length) throw new Error(errors.join(" | "));
-    await page.screenshot({ path: `${out}/copper-p${String(progress).replace(".", "p")}.png` });
+    const stem = `${out}/copper-p${String(progress).replace(".", "p")}`;
+    await freezeTubeFrame(page);
+    await renderTubeFrame(page, `${stem}.png`);
+    if (progress === 0.6 && process.env.VISUAL_DIAG === "1") {
+      await page.evaluate(() => {
+        const materials = new Set();
+        window.__three.scene.traverse(o => {
+          if (o.name === "TubeRefractedBackdrop") materials.add(o.material);
+        });
+        window.__rawBackgroundRestore = [];
+        for (const m of materials) {
+          const compile = m.onBeforeCompile, key = m.customProgramCacheKey;
+          m.onBeforeCompile = (shader, renderer) => {
+            compile.call(m, shader, renderer);
+            shader.fragmentShader = shader.fragmentShader.replace("backdrop = transmitThroughTube(backdrop);", "");
+          };
+          m.customProgramCacheKey = () => key.call(m) + "-raw-diagnostic";
+          m.needsUpdate = true;
+          window.__rawBackgroundRestore.push(() => {
+            m.onBeforeCompile = compile; m.customProgramCacheKey = key; m.needsUpdate = true;
+          });
+        }
+      });
+      await renderTubeFrame(page, `${stem}-raw-background.png`);
+      for (const [label, names] of [
+        ["cap", ["TubeLiquidSurface"]], ["backdrop", ["TubeRefractedBackdrop", "TubeRefractedSurface"]],
+        ["gas", ["TubeNO2Headspace", "TubeNO2"]], ["foam", ["TubeSurfaceFoam"]],
+        ["condensate", ["TubeCondensate"]], ["glass", ["Tube_Glass"]],
+        ["glass-backdrop", ["TubeGlassRefractedBackdrop"]], ["caustics", ["TubeBottomCaustic", "TubeStandCaustic"]],
+      ]) {
+        await page.evaluate(names => {
+          window.__hiddenTubeLayers = [];
+          window.__three.scene.traverse(o => {
+            if (names.includes(o.name)) { window.__hiddenTubeLayers.push([o, o.visible]); o.visible = false; }
+          });
+        }, names);
+        await renderTubeFrame(page, `${stem}-raw-no-${label}.png`);
+        await page.evaluate(() => window.__hiddenTubeLayers.forEach(([o, visible]) => { o.visible = visible; }));
+      }
+      await page.evaluate(() => window.__rawBackgroundRestore.forEach(restore => restore()));
+      await renderTubeFrame(page, `${stem}-solution-background.png`);
+    }
+    if (progress > 0) {
+      await tubeTopView(page);
+      await renderTubeFrame(page, `${stem}-top.png`);
+    }
+    await thawTubeFrame(page);
   }
 } finally {
   await browser.close();
