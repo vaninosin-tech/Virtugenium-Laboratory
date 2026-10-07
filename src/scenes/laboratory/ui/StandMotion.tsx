@@ -7,6 +7,7 @@ import { HAND, useHandStore } from "../lib/useHandStore";
 import { constrainOnWorktop, registerWorktopObstacle, shownInWorld } from "../lib/worktopBounds";
 import { publishGhostShape } from "../lib/handGhost";
 import { ReagentHoverRim } from "./ReagentHoverRim";
+import { PourStream } from "./PourStream";
 import {
   CLAMP_TUBE_MOUTH,
   POUR_MS,
@@ -440,6 +441,7 @@ export function PourMotion({
   return (
     <group ref={groupRef} position={position}>
       {children}
+      <PourStream instanceId={instanceId} bottleRef={groupRef} mouth={restRef} />
     </group>
   );
 }
