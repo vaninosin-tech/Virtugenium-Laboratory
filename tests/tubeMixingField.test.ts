@@ -24,6 +24,22 @@ describe("tube mixing field", () => {
     field.dispose();
   });
 
+  it("carries BaSO4 clouds downward faster than the ordinary clear inlet", () => {
+    const ordinary = new TubeMixingField();
+    const barium = new TubeMixingField();
+    ordinary.start(false);
+    barium.start(false, "barium");
+    for (let i = 0; i < 60; i++) {
+      ordinary.advance(1 / 30, 0.8);
+      barium.advance(1 / 30, 0.8);
+    }
+    expect(barium.centerOfMassHeight("tracer")).toBeLessThan(
+      ordinary.centerOfMassHeight("tracer"));
+    expect(barium.totalMass("tracer")).toBeGreaterThan(0);
+    ordinary.dispose();
+    barium.dispose();
+  });
+
   it("sinks heavy dye under circulation and does no work at rest", () => {
     const field = new TubeMixingField();
     field.start(true);

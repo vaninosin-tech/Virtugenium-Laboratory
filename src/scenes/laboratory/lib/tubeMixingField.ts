@@ -13,6 +13,7 @@ export class TubeMixingField {
   private elapsed = 0;
   private injecting = false;
   private active = false;
+  private precipitate: "silver" | "barium" | null = null;
 
   constructor() {
     this.texture = new THREE.DataTexture(this.pixels, this.width, this.height, THREE.RGBAFormat);
@@ -24,7 +25,7 @@ export class TubeMixingField {
   }
 
   /** Starts a 1.3 s inlet pulse. The channels share transport, but remain optically distinct. */
-  start(dyed: boolean) {
+  start(dyed: boolean, precipitate: "silver" | "barium" | null = null) {
     this.dye.fill(0);
     this.tracer.fill(0);
     this.elapsed = 0;
@@ -32,6 +33,7 @@ export class TubeMixingField {
     this.injecting = true;
     this.active = true;
     this.dyed = dyed;
+    this.precipitate = precipitate;
     this.writeTexture();
   }
 
@@ -58,13 +60,24 @@ export class TubeMixingField {
           const x = Math.min(this.width - 2, Math.floor(this.width *
             ([0.70, 0.38, 0.82][branch] + 0.025 * Math.sin(this.elapsed * 19 + branch * 2.3))));
           const y = Math.max(2, yTop - [0, 3, 7][branch] - [0, 2, 1, 4][pulse]);
-          field[y * this.width + x] += step * 1.2 / branches;
+          if (this.precipitate === "barium") {
+            // Nucleation spreads around the incoming jet rather than tracing
+            // a one-cell line. Each deposited puff is then advected below.
+            for (let dy = -3; dy <= 3; dy++) for (let dx = -5; dx <= 5; dx++) {
+              const sx = Math.max(1, Math.min(this.width - 2, x + dx));
+              const sy = Math.max(1, Math.min(yTop, y + dy));
+              field[sy * this.width + sx] += step * 0.22
+                * Math.exp(-dx * dx / 9 - dy * dy / 3);
+            }
+          } else field[y * this.width + x] += step * 1.2 / branches;
         }
       }
       this.transport(this.dye, yTop, 0.10);
       this.transport(this.dye, yTop, 0.10);
-      this.transport(this.tracer, yTop, 0.045);
-      this.transport(this.tracer, yTop, 0.045);
+      const tracerSinking = this.precipitate === "barium" ? 0.62
+        : this.precipitate === "silver" ? 0.48 : 0.045;
+      this.transport(this.tracer, yTop, tracerSinking);
+      this.transport(this.tracer, yTop, tracerSinking);
       if (this.elapsed > 12) {
         this.active = false;
       }

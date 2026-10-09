@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { copperConcentrationGLSL } from "./tubeAbsorptionMaterial";
 
 /** Shared optical path for solids and bubbles rendered after the liquid. */
 export class TubeImmersion {
@@ -13,6 +14,9 @@ export class TubeImmersion {
     uImmersionLevel: { value: 0 },
     uImmersionKind: { value: 0 },
     uImmersionProgress: { value: 0 },
+    uImmersionRate: { value: 0 },
+    uImmersionTime: { value: 0 },
+    uImmersionCopperSource: { value: new THREE.Vector3() },
     uImmersionDye: { value: new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat) },
     uImmersionDyeActive: { value: 0 },
   };
@@ -45,7 +49,9 @@ vImmersionPoint = (uImmersionWorldToLocal * modelMatrix * immersionWorld).xyz;
 uniform vec3 uImmersionCamera, uImmersionCenter, uImmersionUp;
 uniform float uImmersionRadius, uImmersionBottom, uImmersionHeight, uImmersionLevel;
 uniform float uImmersionKind, uImmersionProgress, uImmersionDyeActive;
+uniform float uImmersionRate, uImmersionTime; uniform vec3 uImmersionCopperSource;
 uniform sampler2D uImmersionDye;
+${copperConcentrationGLSL}
 vec3 tubeTransmission() {
   vec3 p = vImmersionPoint;
   float depth = uImmersionLevel - dot(uImmersionUp, p);
@@ -61,10 +67,8 @@ vec3 tubeTransmission() {
   float path = clamp(min(side, surface), 0.0, uImmersionHeight * 2.0);
   vec3 absorption = vec3(0.0);
   if (uImmersionKind < 1.5) {
-    float h = clamp((p.y - uImmersionBottom) / uImmersionHeight, 0.0, 1.0);
-    float mixed = pow(smoothstep(0.06, 0.94, uImmersionProgress), 2.0);
-    float concentration = mixed * (0.79 + 0.21 * (1.0 - h));
-    concentration = mix(concentration, 1.0, smoothstep(0.72, 1.0, uImmersionProgress));
+    float concentration = copperConcentration(p, uImmersionCopperSource,
+      uImmersionRadius, uImmersionHeight, uImmersionProgress, uImmersionRate, uImmersionTime);
     absorption = mix(vec3(1.25, 0.40, 0.18), vec3(3.7, 0.50, 0.18),
       smoothstep(0.62, 1.0, uImmersionProgress)) * concentration;
   } else if (uImmersionDyeActive > 0.01) {
@@ -83,7 +87,7 @@ vec3 tubeTransmission() {
 ${shader.fragmentShader}`.replace("#include <opaque_fragment>", `outgoingLight *= tubeTransmission();
 #include <opaque_fragment>`);
     };
-    material.customProgramCacheKey = () => `${previousKey.call(material)}-tube-immersion-v1`;
+    material.customProgramCacheKey = () => `${previousKey.call(material)}-tube-immersion-v2-copper-plumes`;
     material.needsUpdate = true;
     return () => {
       material.onBeforeCompile = previous;

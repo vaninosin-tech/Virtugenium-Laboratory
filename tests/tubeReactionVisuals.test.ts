@@ -327,13 +327,15 @@ describe("tube reaction rendering contract", () => {
     expect(waveRange(heated)).toBeGreaterThan(0);
   });
 
-  it.each<RuntimeQuality>(["LOW", "HIGH"])("keeps dilute NO clear inside the tube at %s", quality => {
+  it.each<RuntimeQuality>(["LOW", "HIGH"])("keeps a thin gas layer at the liquid while dilute NO forms at %s", quality => {
     const f = fixture("copper-nitric", true);
     f.update(chemistry(0.4, 0.25), quality);
     f.advance(2, chemistry(0.4, 0.25), quality);
-    expect(f.get("TubeNO2Headspace").visible).toBe(false);
+    expect(f.get("TubeNO2Headspace").visible).toBe(true);
     expect(f.get("TubeNO2").visible).toBe(false);
     expect(density(f)).toBe(0);
+    expect((f.get("TubeNO2Headspace").material as THREE.ShaderMaterial).uniforms.uSurfaceGas.value)
+      .toBeGreaterThan(0);
     expect(front(f)).toBe(0);
     expect(residue(f)).toBe(0);
     expect(f.get("TubeNOBubbles").visible).toBe(true);
@@ -341,7 +343,7 @@ describe("tube reaction rendering contract", () => {
     expect(f.get("TubeSurfaceFoam").visible).toBe(false);
   });
 
-  it("shows only a faint, short outlet wisp during vigorous heating", () => {
+  it("shows a faint outlet wisp and a surface veil during vigorous heating", () => {
     const f = fixture("copper-nitric", true);
     f.update(chemistry(0.5, 1, 1));
     f.advance(1, chemistry(0.5, 1, 1));
@@ -353,9 +355,11 @@ describe("tube reaction rendering contract", () => {
     expect(headspace.visible).toBe(true);
     expect((headspace.material as THREE.ShaderMaterial).uniforms.uDensity.value).toBeLessThanOrEqual(0.6);
     f.advance(35, chemistry(0.6, 1, 1));
-    expect(headspace.visible).toBe(false);
+    expect(headspace.visible).toBe(true);
+    expect((headspace.material as THREE.ShaderMaterial).uniforms.uSurfaceGas.value).toBeGreaterThan(0);
     f.advance(2, chemistry(1, 0, 0));
     expect(plume.visible).toBe(false);
+    expect(headspace.visible).toBe(false);
   });
 
   it("keeps the final copper solution saturated yet transparent", () => {
@@ -604,7 +608,7 @@ describe("tube reaction rendering contract", () => {
     const silverTop = particleBounds(silver.get<THREE.InstancedMesh>("TubePrecipitate")).max.y;
     const bariumBed = barium.get("TubeSediment");
     expect(silverTop).toBeGreaterThan(0.055 * 0.10);
-    expect(silverTop).toBeLessThan(0.055 * 0.28);
+    expect(silverTop).toBeLessThan(0.055 * 0.36);
     expect(barium.get("TubePrecipitate").visible).toBe(false);
     expect(bariumBed.visible).toBe(true);
     expect((bariumBed.material as THREE.MeshStandardMaterial).roughness).toBe(1);
@@ -612,7 +616,25 @@ describe("tube reaction rendering contract", () => {
     expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
   });
 
-  it("fills AgCl with immediate milk while BaSO4 rises during its first second", () => {
+  it("starts some AgCl flocs at the meniscus and carries them to the bottom", () => {
+    const f = fixture("silver-chloride");
+    const flocs = f.get<THREE.InstancedMesh>("TubePrecipitate");
+    const matrix = new THREE.Matrix4();
+    f.update(chemistry(0.02));
+    flocs.getMatrixAt(0, matrix);
+    const start = new THREE.Vector3().setFromMatrixPosition(matrix).y;
+    flocs.getMatrixAt(1, matrix);
+    const interior = new THREE.Vector3().setFromMatrixPosition(matrix).y;
+    expect(start).toBeGreaterThan(0.04);
+    expect(start).toBeGreaterThan(interior);
+    f.update(chemistry(0.9));
+    flocs.getMatrixAt(0, matrix);
+    const end = new THREE.Vector3().setFromMatrixPosition(matrix).y;
+    expect(end).toBeLessThan(0.015);
+    expect(start - end).toBeGreaterThan(0.035);
+  });
+
+  it("keeps precipitate opacity available for the transported onset and later stages", () => {
     const silver = fixture("silver-chloride");
     silver.update(chemistry(0.1 / 12));
     expect(liquid(silver).uniforms.uCloudiness.value).toBeGreaterThan(0);

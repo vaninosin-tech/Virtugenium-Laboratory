@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { REAGENTS } from "../../../entities/laboratory/reagents";
 import { deferDispose } from "./deferredDispose";
-import { TubeLiquidMaterial } from "./tubeLiquidMaterial";
+import { TubeLiquidMaterial, bariumCloudGLSL } from "./tubeLiquidMaterial";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
 import { TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
@@ -208,6 +208,7 @@ uniform sampler2D uTracer; uniform float uTracerStrength;
 uniform vec3 uOpticalCamera;
 uniform float uOpticalKind, uOpticalProgress, uOpticalCloud, uOpticalHaze, uOpticalAge;
 varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
+${bariumCloudGLSL}
 vec3 transmitThroughTube(vec3 background) {
   if (uOpticalKind < 2.5 || uOpticalKind > 3.5) return background;
   vec3 ray = normalize(vBackdropPoint - uOpticalCamera);
@@ -236,12 +237,14 @@ vec3 transmitThroughTube(vec3 background) {
     } else if (uOpticalKind > 2.5) {
       float fill = max(0.001, uBackdropLevel - bottom);
       float liquidH = clamp((dot(uBackdropUp, q) - bottom) / fill, 0.0, 1.0);
-      float clearing = smoothstep(0.42, 0.98, uOpticalProgress);
+      float clearing = smoothstep(0.42, 0.98, uOpticalProgress)
+        * smoothstep(15.0, 40.0, uOpticalAge);
       float front = mix(1.06, -0.06, clearing);
       float cloud = uOpticalCloud * (1.0 - smoothstep(front - 0.055, front + 0.055, liquidH));
-      vec2 uv = vec2(clamp(0.5 + dot(q.xz / (radius * 2.0), vec2(0.42, 0.91)), 0.0, 1.0), h);
-      cloud *= mix(0.12 + 0.88 * smoothstep(0.015, 0.65, texture2D(uTracer, uv).g),
-        1.0, smoothstep(0.35, 1.9, uOpticalAge));
+      float shape = bariumCloud(vec2(q.x / radius, h), uOpticalAge,
+        clamp(fill / ${height.toFixed(7)}, 0.05, 1.0));
+      cloud *= mix(shape, 1.0,
+        smoothstep(2.5, 3.3, uOpticalAge));
       scattering += clamp(cloud + uOpticalHaze, 0.0, 1.0) * distance / (6.0 * radius) * 3.0;
     }
   }
@@ -268,7 +271,7 @@ backdrop = mix(straight, backdrop, edgeSoft);
 backdrop = transmitThroughTube(backdrop);
 gl_FragColor = vec4(backdrop, 1.0);`);
   };
-  material.customProgramCacheKey = () => "tube-water-backdrop-v3-vivid-copper";
+  material.customProgramCacheKey = () => "tube-water-backdrop-v6-barium-cloud";
   return { material, up, level, tracerStrength };
 }
 
@@ -393,7 +396,8 @@ outgoingLight *= mix(1.0, 0.80, dyeWindow);`);
   const transportDisabled = import.meta.env.DEV && typeof window !== "undefined"
     && new URLSearchParams(window.location.search).has("noTubeTransport");
   const transport = options.pour && hasLiquid && !transportDisabled ? new TubeMixingField() : null;
-  transport?.start(!!options.incomingDyed);
+  transport?.start(!!options.incomingDyed, kind === "silver-chloride" ? "silver"
+    : kind === "barium-sulfate" ? "barium" : null);
   if (hasLiquid) volume.geometry = wallGeometry;
 
   const group = new THREE.Group();
@@ -486,20 +490,22 @@ void main() {
   group.add(bottomCaustic, standCaustic);
   const geometry = new THREE.IcosahedronGeometry(1, 1);
   const white = new THREE.MeshStandardMaterial({ color: "#c9c7c2", roughness: 1,
-    envMapIntensity: 0.15, transparent: true, depthWrite: true });
+    envMapIntensity: 0.15, transparent: true, opacity: kind === "silver-chloride" ? 0.82 : 1,
+    depthWrite: kind !== "silver-chloride" });
   white.onBeforeCompile = (shader) => {
     shader.uniforms.uSedimentWhite = { value: kind === "barium-sulfate" ? 0.92 : 0.97 };
     shader.uniforms.uPowder = { value: kind === "barium-sulfate" ? 1 : 0 };
     shader.uniforms.uSedimentBottom = { value: box.min.y };
     shader.uniforms.uSedimentRadius = { value: radius * 0.98 };
     shader.uniforms.uSedimentCenter = { value: center };
-    shader.vertexShader = `varying vec3 vSedimentPoint;\n${shader.vertexShader}`.replace("#include <project_vertex>", `
+    shader.vertexShader = `varying vec3 vSedimentPoint; varying vec3 vSedimentLocal;\n${shader.vertexShader}`.replace("#include <project_vertex>", `
+vSedimentLocal = transformed;
 vSedimentPoint = transformed;
 #ifdef USE_INSTANCING
 vSedimentPoint = (instanceMatrix * vec4(transformed, 1.0)).xyz;
 #endif
 #include <project_vertex>`);
-    shader.fragmentShader = `varying vec3 vSedimentPoint; uniform float uSedimentWhite; uniform float uPowder;
+    shader.fragmentShader = `varying vec3 vSedimentPoint; varying vec3 vSedimentLocal; uniform float uSedimentWhite; uniform float uPowder;
 uniform float uSedimentBottom; uniform float uSedimentRadius; uniform vec3 uSedimentCenter;
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
 vec3 bowlPoint = vec3(vSedimentPoint.xz - uSedimentCenter.xz, min(vSedimentPoint.y - uSedimentBottom - uSedimentRadius, 0.0));
@@ -509,18 +515,28 @@ if (vSedimentPoint.y < uSedimentBottom || length(bowlPoint) > uSedimentRadius) d
     shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
 float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
  outgoingLight = vec3(uSedimentWhite) * relief;
+ if (uPowder < 0.5) {
+   float weave = sin(vSedimentLocal.x * 17.0 + vSedimentLocal.y * 13.0)
+     * sin(vSedimentLocal.z * 19.0 - vSedimentLocal.y * 11.0);
+   float wisps = sin(vSedimentLocal.x * 39.0 + vSedimentLocal.z * 23.0)
+     * sin(vSedimentLocal.y * 31.0 - vSedimentLocal.x * 17.0);
+   float rim = abs(dot(normalize(normal), normalize(vViewPosition)));
+   diffuseColor.a *= smoothstep(0.08, 0.62, rim + weave * 0.19 + wisps * 0.10);
+ }
  diffuseColor.a *= mix(0.40 + 0.60 * smoothstep(0.0, 0.68,
    abs(dot(normalize(normal), normalize(vViewPosition)))), 1.0, uPowder);
  #include <opaque_fragment>`);
   };
-  // Lobed, asymmetric AgCl flocs cast their own small shading variations.
+  // Irregular overlapping pieces form a single soft cotton mass.
   const curdGeometry = new THREE.IcosahedronGeometry(1, 3);
   const vertices = curdGeometry.getAttribute("position");
   for (let i = 0; i < vertices.count; i++) {
     const x = vertices.getX(i), y = vertices.getY(i), z = vertices.getZ(i);
-    const lump = 0.75 + 0.23 * Math.sin(x * 5.8 + y * 3.7) * Math.cos(z * 6.4 - y * 4.1)
-      + 0.16 * Math.sin(z * 8.1 + x * 4.8) + 0.12 * Math.sin(x * 12 + z * 9);
-    vertices.setXYZ(i, x * lump, y * lump * 0.66, z * lump);
+    const curl = Math.sin(x * 5.8 + y * 3.7) * Math.cos(z * 6.4 - y * 4.1);
+    const tear = Math.sin(z * 12.1 + x * 8.8) * Math.sin(y * 13.0 - z * 5.0);
+    const lump = 0.85 + 0.29 * curl + 0.12 * tear + 0.045 * Math.sin(x * 24 + z * 19);
+    vertices.setXYZ(i, x * lump + 0.12 * y * y * Math.sin(z * 7),
+      y * lump * (0.70 + 0.18 * Math.sin(x * 5 + z * 4)), z * lump);
   }
   curdGeometry.computeVertexNormals();
   const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e8f7fa", transparent: true, opacity: 0.85, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
@@ -582,13 +598,13 @@ void main() {
   headGeometry.translate(center.x, (lip.y + box.min.y) / 2, center.z);
   const headMaterial = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.FrontSide, toneMapped: false,
-    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uFront: { value: 0 }, uMouth: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
+    uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uSurfaceGas: { value: 0 }, uFront: { value: 0 }, uMouth: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
       uMouthHeight: { value: lip.y - box.max.y },
       uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) } },
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 void main() { vP = position; vN = normalize(normalMatrix * normal);
 vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uFront; uniform float uMouth; uniform float uResidue; uniform float uTime; uniform float uDetail; uniform float uMouthHeight;
+    fragmentShader: `uniform vec3 uUp; uniform float uLevel; uniform float uDensity; uniform float uSurfaceGas; uniform float uFront; uniform float uMouth; uniform float uResidue; uniform float uTime; uniform float uDetail; uniform float uMouthHeight;
 uniform float uLip; uniform float uRadius; uniform vec3 uColor;
 varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 float gasNoise(vec3 p) {
@@ -621,7 +637,11 @@ float rise = mix(1.0 - smoothstep(uFront - 0.12, uFront + 0.08, h),
   uMouth, smoothstep(0.76, 1.0, h));
 float mist = (1.0 - exp(-uDensity * 1.55 * heightDensity)) * edgeFade
   * lowerFade * rise * motion;
-gl_FragColor = vec4(uColor, min(0.9, mist + uResidue * wallBand * smoothstep(0.0, 0.12, facing)));
+// A thin, dilute NO2 veil sits immediately above the bubbling meniscus.
+float surfaceBand = exp(-pow(aboveWater / max(uRadius * 1.8, 0.001), 2.0))
+  * smoothstep(-0.001, 0.0015, aboveWater) * (0.65 + 0.35 * edgeFade);
+gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
+  + uResidue * wallBand * smoothstep(0.0, 0.12, facing)));
 #include <colorspace_fragment>
 }`,
   });
@@ -761,6 +781,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   });
   const copperPoints = copper?.children.map(child => new THREE.Vector3(child.position.x,
     typeof child.userData.dropTargetY === "number" ? child.userData.dropTargetY : child.position.y, child.position.z)) ?? [];
+  const copperSource = copperPoints[0] ?? new THREE.Vector3(center.x, box.min.y + radius, center.z);
   const copperBounds = copper?.children.map(child => {
     if (!(child instanceof THREE.Mesh)) return 0;
     const positions = child.geometry.getAttribute("position");
@@ -853,6 +874,9 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         absorption.uniforms.uCameraLocal.value.copy(cameraLocal);
         absorption.uniforms.uKind.value = kind === "copper-nitric" ? 1 : 2;
         absorption.uniforms.uProgress.value = p;
+        absorption.uniforms.uRate.value = rate;
+        absorption.uniforms.uTime.value = time;
+        absorption.uniforms.uCopperSource.value.copy(copperSource);
         absorption.uniforms.uTransport.value = transport?.texture ?? null;
         absorption.uniforms.uTransportAge.value = transport?.age ?? 0;
         absorption.uniforms.uIncomingDyed.value = kind === "permanganate-redox" && options.incomingDyed ? 1 : 0;
@@ -867,6 +891,9 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       immersion.uniforms.uImmersionUp.value.copy(up.value);
       immersion.uniforms.uImmersionLevel.value = level.value;
       immersion.uniforms.uImmersionProgress.value = p;
+      immersion.uniforms.uImmersionRate.value = rate;
+      immersion.uniforms.uImmersionTime.value = time;
+      immersion.uniforms.uImmersionCopperSource.value.copy(copperSource);
       immersion.uniforms.uImmersionKind.value = kind === "copper-nitric" ? 1 : options.incomingDyed ? 2 : 0;
       immersion.uniforms.uImmersionDyeActive.value = transport?.running ? 1 : 0;
       if (transport) immersion.uniforms.uImmersionDye.value = transport.texture;
@@ -969,9 +996,14 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const curds = kind === "silver-chloride";
       const curdProgress = curds && options.pour
         ? Math.min(p, THREE.MathUtils.smoothstep(pourAge, 0, 14)) : p;
-      const onset = THREE.MathUtils.smoothstep(p, 0, curds ? 0.006 : 0.006);
-      const settled = precipitate ? THREE.MathUtils.smoothstep(curdProgress,
-        curds ? 0.3 : 0.42, curds ? 0.82 : 0.98) : 0;
+      const onset = options.pour && precipitate
+        ? THREE.MathUtils.smoothstep(pourAge, 0, 0.3)
+        : THREE.MathUtils.smoothstep(p, 0, 0.006);
+      const settled = precipitate ? curds && options.pour
+        ? Math.max(THREE.MathUtils.smoothstep(curdProgress, 0.3, 0.82),
+          THREE.MathUtils.smoothstep(pourAge, 2.2, 4.5))
+        : THREE.MathUtils.smoothstep(curdProgress, curds ? 0.3 : 0.42,
+          curds ? 0.82 : 0.98) : 0;
       if (kind === "barium-sulfate") bariumCompletionAge = p >= 0.999
         ? bariumCompletionAge + dt : 0;
       // The permanganate hold stays at p=0; its vivid reaction material must
@@ -987,6 +1019,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         activeLiquid.uniforms.uTemperature.value = temperature;
         activeLiquid.uniforms.uTime.value = time;
         activeLiquid.uniforms.uCameraLocal.value.copy(cameraLocal);
+        activeLiquid.uniforms.uCopperSource.value.copy(copperSource);
       }
       if (transport) for (const material of [base, liquid]) {
         if (!(material instanceof TubeLiquidMaterial)) continue;
@@ -994,7 +1027,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         material.uniforms.uTransportActive.value = transport.running
           ? 1 - THREE.MathUtils.smoothstep(transport.age, 8, 12) : 0;
         material.uniforms.uTransportDye.value = options.incomingDyed ? 1 : 0;
-        material.uniforms.uTransportAge.value = transport.age;
+        material.uniforms.uTransportAge.value = precipitate ? pourAge : transport.age;
         material.uniforms.uTransportQuality.value = quality === "LOW" ? 6 : 16;
         material.uniforms.uCameraLocal.value.copy(cameraLocal);
       }
@@ -1002,7 +1035,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         liquid.uniforms.uTime.value = time;
         liquid.uniforms.uReactionProgress.value = curdProgress;
         liquid.uniforms.uReactionKind.value = kind === "copper-nitric" ? 1 : curds ? 2 : kind === "barium-sulfate" ? 3 : 4;
-        liquid.uniforms.uCloudiness.value = curds ? onset * (1 - settled)
+        liquid.uniforms.uCloudiness.value = curds ? onset
           : kind === "barium-sulfate" ? onset : 0;
         liquid.uniforms.uResidualHaze.value = kind === "barium-sulfate"
           ? 0.035 * THREE.MathUtils.smoothstep(p, 0.90, 1)
@@ -1130,32 +1163,39 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       foam.count = Math.floor(count / 4);
       const foamFade = THREE.MathUtils.smoothstep(rate, 0.45, 0.7);
       foamMaterial.opacity = (0.16 + rate * 0.3) * foamFade;
-      const activeCount = Math.max(flakes.visible ? count : 0, bubbles.visible ? bubbles.count : 0,
+      const activeCount = Math.max(flakes.visible ? flakes.count : 0, bubbles.visible ? bubbles.count : 0,
         gas.visible ? gas.count : 0, condensate.visible ? condensate.count : 0, splash.visible ? splash.count : 0,
         foam.visible ? foam.count : 0);
       for (let i = 0; i < activeCount; i++) {
         const angle = random(i + 1) * Math.PI * 2;
         const radial = radius * 0.94 * Math.sqrt(random(i + 93));
-        const x = curds ? center.x + (2 * ((i * 0.61803398875) % 1) - 1) * radius * 0.90
+        const x = curds ? center.x + (2 * ((i * 0.61803398875) % 1) - 1) * radius * 0.97
           : center.x + Math.cos(angle) * radial;
         const z = curds ? center.z + (2 * random(i + 413) - 1)
           * Math.sqrt(Math.max(0, radius * radius * 0.88 - (x - center.x) ** 2))
           : center.z + Math.sin(angle) * radial;
-        const grain = radius * (curds ? (0.28 + random(i + 31) * 0.20)
+        const grain = radius * (curds ? (0.28 + random(i + 31) * 0.24)
           * (0.55 + 0.45 * THREE.MathUtils.smoothstep(p, 0.02, 0.35)) : 0.06);
-        const floor = box.min.y + size.y * (curds ? 0.045 + random(i + 14) * 0.11
+        const floor = box.min.y + size.y * (curds ? 0.05 + random(i + 14) * 0.14
           : 0.07 + random(i + 14) * 0.025);
         const drift = Math.sin(time * 0.75 + i * 2.4) * radius * 0.07 * (1 - settled);
         const ingress = curds ? THREE.MathUtils.smoothstep(p * 8, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
         if (flakes.visible) {
-          const individualSettled = curds ? THREE.MathUtils.smoothstep(curdProgress,
-            0.16 + random(i + 205) * 0.26, 0.57 + random(i + 371) * 0.28) : settled;
+          const individualSettled = curds && options.pour
+            ? THREE.MathUtils.smoothstep(pourAge, 0.45 + random(i + 205) * 0.55,
+              3.1 + random(i + 371) * 1.1)
+            : curds ? THREE.MathUtils.smoothstep(curdProgress,
+              0.16 + random(i + 205) * 0.26, 0.57 + random(i + 371) * 0.28) : settled;
           const settledX = x + drift - gravity.x * radius * individualSettled * 0.3;
           const settledZ = z - gravity.z * radius * individualSettled * 0.3;
           const arrival = transport?.concentratedTracerPoint(i + 17);
           const birthX = arrival && arrival.concentration > 0
             ? THREE.MathUtils.lerp(x, center.x + (arrival.x - 0.5) * radius * 1.3, 0.08) : x;
-          const birthY = box.min.y + size.y * (0.25 + random(i + 71) * 0.64);
+          // Each poured floc starts at the salt inlet and crosses clear water.
+          const surfaceBirth = curds && (options.pour || i % 4 === 0);
+          const birthY = surfaceBirth
+            ? Math.min(box.min.y + size.y * fill - grain * 1.2, box.max.y - grain)
+            : box.min.y + size.y * (0.25 + random(i + 71) * 0.64);
           const birthZ = z * 0.82 + center.z * 0.18;
           const radialSq = (settledX - center.x) ** 2 + (settledZ - center.z) ** 2;
           const bowlY = box.min.y + radius - Math.sqrt(Math.max(0, radius * radius - radialSq));
@@ -1252,7 +1292,9 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       else airBrownAge += dt;
       const airBrown = airBrownAge < 0 ? 0 : THREE.MathUtils.smoothstep(airBrownAge, 0, 3)
         * (1 - THREE.MathUtils.smoothstep(airBrownAge, 8, 30));
-      headspace.visible = airBrown > 0.01;
+      const surfaceGas = kind === "copper-nitric" && producingBubbles
+        ? (0.05 + 0.09 * Math.sqrt(drive)) * (0.65 + 0.55 * temperature) : 0;
+      headspace.visible = airBrown > 0.01 || surfaceGas > 0.001;
       gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * mouthFill;
       gasMaterial.uniforms.uTime.value = time;
       gasMaterial.uniforms.uWorldUp.value.copy(gravity);
@@ -1260,6 +1302,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       // front climbs to the mouth over ~12 s, leaves, and the tube clears.
       const airAge = Math.max(0, airBrownAge);
       headMaterial.uniforms.uDensity.value = airBrown * 0.6;
+      headMaterial.uniforms.uSurfaceGas.value = surfaceGas;
       headMaterial.uniforms.uFront.value = THREE.MathUtils.smoothstep(airAge, 0, 12);
       headMaterial.uniforms.uMouth.value = 1 - THREE.MathUtils.smoothstep(airAge, 12, 30);
       headMaterial.uniforms.uMouthHeight.value = up.value.dot(lip) - level.value;

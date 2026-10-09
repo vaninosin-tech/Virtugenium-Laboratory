@@ -1,5 +1,37 @@
 import * as THREE from "three";
 
+/** Shared Cu2+ field for the visible liquid, transmission, and immersed solids. */
+export const copperConcentrationGLSL = `
+float copperConcentration(vec3 q, vec3 source, float radius, float height,
+  float progress, float rate, float time) {
+  float h = clamp((q.y - source.y) / max(height, 0.0001), 0.0, 1.0);
+  float radial = length(q.xz - source.xz) / max(radius, 0.0001);
+  float activity = smoothstep(0.005, 0.16, progress);
+  float front = mix(0.12, 1.18, smoothstep(0.02, 0.82, progress));
+  float reach = 1.0 - smoothstep(front - 0.20, front + 0.14, h);
+  float base = activity * reach * (0.05 + 0.25 * progress)
+    * exp(-radial * radial * 0.95);
+  float plume = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float lane = float(i) - 1.0;
+    vec2 bend = vec2(sin(h * (8.0 + lane) - time * (0.55 + rate * 0.7) + lane * 2.4),
+      cos(h * 7.0 + time * 0.42 + lane * 2.1));
+    vec2 axis = source.xz + radius * (vec2(lane * 0.50, lane * 0.15)
+      + bend * (0.08 + h * 0.12));
+    float width = radius * (0.15 + h * 0.09);
+    float laneDensity = exp(-dot(q.xz - axis, q.xz - axis) / (width * width));
+    float pulse = 0.84 + (0.04 + rate * 0.12)
+      * sin(time * (1.4 + rate * 2.3) - h * 7.0 + lane * 2.0);
+    plume = max(plume, laneDensity * pulse);
+  }
+  float sourceCloud = exp(-radial * radial * 2.1 - h * h * 14.0);
+  float streams = activity * reach * (sourceCloud * 0.72
+    + plume * (0.25 + 0.20 * rate) * smoothstep(0.0, 0.05, h));
+  float homogeneous = smoothstep(0.58, 0.98, progress);
+  float partial = max(base, streams) * mix(0.48, 1.0, smoothstep(0.55, 1.0, progress));
+  return clamp(mix(partial, 1.0, homogeneous), 0.0, 1.0);
+}`;
+
 /** Multiplies the rendered scene by the light transmitted through a coloured solution. */
 export class TubeAbsorptionMaterial extends THREE.ShaderMaterial {
   constructor(radius: number, bottom: number, height: number) {
@@ -15,6 +47,8 @@ export class TubeAbsorptionMaterial extends THREE.ShaderMaterial {
         uLevel: { value: bottom + height },
         uCameraLocal: { value: new THREE.Vector3(0, 0, 1) },
         uKind: { value: 0 }, uProgress: { value: 0 },
+        uRate: { value: 0 }, uTime: { value: 0 },
+        uCopperSource: { value: new THREE.Vector3(0, bottom + radius, 0) },
         uTransport: { value: null as THREE.Texture | null },
         uTransportAge: { value: 0 }, uIncomingDyed: { value: 0 },
       },
@@ -33,8 +67,10 @@ void main() {
 }`,
       fragmentShader: `uniform vec3 uUp, uCameraLocal;
 uniform float uLevel, uKind, uProgress, uTransportAge, uIncomingDyed;
+uniform float uRate, uTime; uniform vec3 uCopperSource;
 uniform sampler2D uTransport;
 varying vec3 vPoint; varying float vCap;
+${copperConcentrationGLSL}
 void main() {
   float radius = ${radius.toFixed(7)};
   float bottom = ${bottom.toFixed(7)};
@@ -62,9 +98,8 @@ void main() {
     vec3 q = vPoint + ray * distance * (float(i) + 0.5) / 8.0;
     float h = clamp((q.y - bottom) / height, 0.0, 1.0);
     if (uKind < 1.5) {
-      float mixed = pow(smoothstep(0.06, 0.94, uProgress), 2.0);
-      float concentration = mixed * (0.79 + 0.21 * (1.0 - h));
-      concentration = mix(concentration, 1.0, smoothstep(0.72, 1.0, uProgress));
+      float concentration = copperConcentration(q, uCopperSource, radius, height,
+        uProgress, uRate, uTime);
       vec3 sigma = mix(vec3(1.25, 0.40, 0.18), vec3(3.7, 0.50, 0.18),
         smoothstep(0.62, 1.0, uProgress));
       opticalDepth += sigma * concentration * distance / (8.0 * radius);

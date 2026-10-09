@@ -1,7 +1,41 @@
 import * as THREE from "three";
 import { LiquidMaterial, type LiquidOptions } from "./reagentMaterials";
+import { copperConcentrationGLSL } from "./tubeAbsorptionMaterial";
 
 export const TUBE_LIQUID = { clearAlpha: 0.17, edgeAlpha: 0.42, meniscusAlpha: 0.22, clearHighlight: 0.30 };
+// Shared by the surface and the backdrop pass so a cloud has one silhouette.
+export const bariumCloudGLSL = `
+float bariumHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float bariumNoise(vec2 p) {
+  vec2 cell = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(bariumHash(cell), bariumHash(cell + vec2(1.0, 0.0)), f.x),
+    mix(bariumHash(cell + vec2(0.0, 1.0)), bariumHash(cell + vec2(1.0)), f.x), f.y);
+}
+float bariumCloud(vec2 xh, float age, float liquidHeight) {
+  float y = xh.y / max(liquidHeight, 0.05);
+  float descent = smoothstep(0.0, 2.25, age);
+  vec2 domain = vec2(xh.x * 2.7, y * 3.1 - age * 0.23);
+  vec2 warp = vec2(bariumNoise(domain * 1.3 + vec2(4.7, 1.2)),
+    bariumNoise(domain * 1.1 + vec2(9.1, 7.3))) - 0.5;
+  vec2 q = domain + warp * 1.1;
+  float coarse = bariumNoise(q * 1.8);
+  float fine = bariumNoise(q * 4.3 + vec2(5.2, 1.7));
+  float fiber = bariumNoise(q * vec2(8.0, 3.5) + vec2(2.3, 8.4));
+  float jetX = 0.39 + 0.17 * sin(y * 7.0 + age * 1.1);
+  float jetY = 0.92 - descent * 0.69;
+  float spread = 0.31 + descent * 0.42;
+  float jet = exp(-pow((xh.x - jetX + warp.x * 0.09) / spread, 2.0)
+    - pow((y - jetY + warp.y * 0.08) / (0.13 + descent * 0.36), 2.0));
+  float roll = exp(-pow((xh.x + 0.35 + 0.16 * sin(y * 9.0 + age)) / 0.43, 2.0)
+    - pow((y - 0.33) / 0.25, 2.0)) * smoothstep(0.65, 1.9, age);
+  float floorCloud = smoothstep(0.8, 2.35, age)
+    * exp(-pow((y - 0.12 - warp.y * 0.09) / 0.27, 2.0))
+    * (0.75 + 0.25 * coarse);
+  float density = max(max(jet, roll * 0.75), floorCloud)
+    * (0.43 + 0.48 * coarse + 0.22 * fine);
+  float edge = smoothstep(0.10, 0.68, density);
+  return edge * (0.58 + 0.27 * fine + 0.15 * fiber);
+}`;
 const emptyTransport = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
 emptyTransport.needsUpdate = true;
 
@@ -21,6 +55,7 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uTransportDye: { value: 0 }, uTransportQuality: { value: 1 },
       uTransportAge: { value: 0 },
       uCameraLocal: { value: new THREE.Vector3(0, 0, 1) },
+      uCopperSource: { value: new THREE.Vector3(0, 0, 0) },
     });
     this.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
@@ -52,7 +87,10 @@ uniform float uReactionKind; uniform float uRate; uniform float uTemperature; un
 uniform float uResidualHaze; uniform float uWallFilm;
 uniform sampler2D uTransport; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality; uniform float uTransportAge;
 uniform vec3 uCameraLocal;
+uniform vec3 uCopperSource;
 varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
+${copperConcentrationGLSL}
+${bariumCloudGLSL}
 vec2 transported(vec3 point) {
   vec3 center = uBoundsMin + uBoundsSize * 0.5;
   vec3 direction = normalize(point - uCameraLocal);
@@ -96,30 +134,38 @@ float cloud = uCloudiness;
 float dyeCloud = 0.0;
 float dyeHalo = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
-  // Rising gas mixes Cu2+ through the entire column from the outset.
-  // Keep only a soft enrichment near the granule and in the rising wake.
-  float mixed = smoothstep(0.04, 0.62, p);
-  float wake = exp(-pow(radial.x * 3.0 + 0.15 * stream, 2.0))
-    * (1.0 - smoothstep(0.35, 0.95, h));
-  localMix = mixed * (0.79 + 0.21 * (1.0 - h) + 0.035 * wake);
-  localMix = mix(localMix, 1.0, smoothstep(0.72, 1.0, p));
+  localMix = copperConcentration(vTubePoint, uCopperSource, uBoundsSize.x * 0.5,
+    uBoundsSize.y, p, uRate, uTime);
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
-  // The initial milk fills the tube. Later, flocs clear the supernatant
-  // from the top down, with only soft turbulence at the boundary.
+  // New curds are localized to the inlet. A weak veil develops only after
+  // they have fallen; the clear lower column remains visible at onset.
+  vec2 inletUv = vec2(clamp(0.5 + dot(radial, vec2(0.42, 0.91)), 0.0, 1.0), h);
+  float inlet = texture2D(uTransport, inletUv).g;
+  float local = smoothstep(0.035, 0.48, max(inlet, transportedMatter.g));
+  float milkAge = smoothstep(5.0, 8.0, uTransportAge);
+  float milkSpread = smoothstep(8.0, 25.0, uTransportAge);
+  float folded = tubeNoise(vec3(radial * 8.0 + vec2(sin(h * 18.0), cos(h * 15.0)) * 0.25,
+    h * 12.0 - uTime * 0.12));
+  float swirls = smoothstep(0.23, 0.75, folded)
+    * (1.0 - smoothstep(0.36, 0.85, h));
+  cloud *= max(local * 0.18, milkAge * mix(swirls * 0.62, 0.44, milkSpread));
   float clearing = smoothstep(0.32, 0.82, p);
   float clearFront = smoothstep(1.0 - clearing - 0.08, 1.0 - clearing + 0.08, h);
   cloud *= 1.0 - clearFront;
-  // Broad uneven scattering leaves pale gaps around loose AgCl curds.
-  cloud *= 0.66 + 0.48 * n;
+  cloud *= 0.82 + 0.30 * n;
 } else if (uReactionKind > 2.5 && uReactionKind < 3.5) {
   // Fine BaSO4 stays evenly milky longer; its clearing front descends slowly.
-  float clearing = smoothstep(0.42, 0.98, p);
+  float clearing = smoothstep(0.42, 0.98, p)
+    * smoothstep(15.0, 40.0, uTransportAge);
   float liquidH = clamp((dot(uUp, vTubePoint) - uBoundsMin.y)
     / max(0.001, uLevel - uBoundsMin.y), 0.0, 1.0);
   float front = mix(1.06, -0.06, clearing);
   float clearFront = smoothstep(front - 0.055, front + 0.055, liquidH);
   cloud *= 1.0 - clearFront;
-  cloud *= 0.97 + 0.06 * n;
+  float liquidHeight = clamp((uLevel - uBoundsMin.y) / uBoundsSize.y, 0.05, 1.0);
+  float shape = bariumCloud(vec2(radial.x * 2.0, h), uTransportAge, liquidHeight);
+  cloud *= mix(shape, 1.0,
+    smoothstep(2.5, 3.3, uTransportAge));
 } else if (uReactionKind > 3.5) {
   // Only the advected dye is raspberry. The reaction fades each plume
   // after it has had time to curl below the inlet.
@@ -162,15 +208,6 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   localMix = 1.0 - dyeCloud;
 }
 if (p <= 0.0 && uReactionKind < 3.5) { localMix = 0.0; cloud = 0.0; }
-if (uReactionKind > 1.5 && uReactionKind < 2.5 && uTransportActive > 0.01)
-  cloud *= 0.85 + 0.15 * smoothstep(0.015, 0.65, transportedMatter.g);
-if (uReactionKind > 1.5 && uReactionKind < 2.5)
-  cloud *= 0.97 + 0.03 * smoothstep(0.05, 0.40, h);
-if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTransportActive > 0.01)
-  // The inlet only shapes the first plume. Fine precipitate disperses through
-  // the entire column before the transport field itself has faded away.
-  cloud *= mix(0.12 + 0.88 * smoothstep(0.015, 0.65, transportedMatter.g),
-    1.0, smoothstep(0.35, 1.9, uTransportAge));
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 reactionTint = uReactionColor;
 if (uReactionKind > 0.5 && uReactionKind < 1.5)
@@ -271,5 +308,5 @@ if (uReactionKind > 2.5 && uReactionKind < 3.5) {
 }`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v21-absorption-sheen-agcl"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v25-barium-cloud"; }
 }
