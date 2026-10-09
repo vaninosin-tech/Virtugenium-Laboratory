@@ -4,6 +4,8 @@
 //   node tests/snap-closeups.mjs   ->  tmp/visual/closeups/*.png
 import { chromium } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const out = process.env.VISUAL_OUT ?? "tmp/visual/closeups";
 await mkdir(out, { recursive: true });
@@ -15,11 +17,13 @@ try {
     await context.addInitScript(() => localStorage.setItem("virtugenium.runtime-quality.v1", "LOW"));
   const page = await context.newPage();
   page.on("pageerror", e => console.log("pageerror", e.message));
+  page.on("console", e => { if (e.type() === "error") console.log("console error", e.text()); });
   await page.goto(process.env.VISUAL_URL ?? "http://127.0.0.1:5173");
   await page.getByText("Играть", { exact: true }).click();
   await page.getByText("Песочница (временно)").click();
   await page.waitForFunction(() => window.__sceneStore?.getState().cabinetPhase === "inspecting", null, { timeout: 90000 });
   await page.waitForTimeout(3000);
+  console.log("scene ready");
 
   const fresh = (ingredients) => page.evaluate(async (ingredients) => {
     const { standLocation } = await import("/src/scenes/laboratory/lib/standStationActions.ts");
@@ -34,7 +38,9 @@ try {
   const tune = (state) => page.evaluate(s => window.__tubeVisualTuningStore.setState(s), state);
   const onsetShots = async (prefix, reagent) => {
     const kind = prefix.startsWith("2-") ? 2 : prefix.startsWith("3-") ? 3 : 4;
-    const seconds = [...Array.from({ length: 12 }, (_, i) => (i + 1) * 0.25), 5, 8, 12];
+    const seconds = process.env.VISUAL_SHORT
+      ? [0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3]
+      : [...Array.from({ length: 12 }, (_, i) => (i + 1) * 0.25), 5, 8];
     // Arm the frame sampler in the same browser task that adds the reagent.
     // Round trips to Node otherwise miss the first second on a busy GPU.
     const frames = await page.evaluate(async ({ kind, reagent, seconds }) => {
@@ -47,6 +53,8 @@ try {
       for (const second of seconds) {
         let age = -1;
         while (age < second) {
+          if (performance.now() - startTime > 180000)
+            throw new Error(`Capture stalled at ${second}s, last age ${age}, frames ${frameCount}`);
           await new Promise(r => requestAnimationFrame(r));
           frameCount++;
           scene.traverse(o => {
@@ -137,7 +145,7 @@ try {
   };
 
   // 1. Cu + dilute HNO3, heated (tuning drives progress, rate and temperature; it eases in).
-  if (!process.env.VISUAL_PRECIPITATES_ONLY) {
+  if (!process.env.VISUAL_PRECIPITATES_ONLY && !process.env.VISUAL_TARGET_ONLY) {
   await fresh(["cu", "hno3"]);
   await page.waitForTimeout(1500);
   await tune({ enabled: true, progress: 0, rate: 0.2, temperature: 0 });
@@ -189,6 +197,44 @@ try {
   if (!process.env.VISUAL_PRECIPITATES_ONLY && !process.env.VISUAL_COPPER_ONLY) {
   await fresh(["na2so3", "h2so4"]); await page.waitForTimeout(2500);
   await onsetShots("4-kmno4", "kmno4");
+  if (process.env.VISUAL_QUALITY === "LOW") {
+    await fresh(["na2so3", "h2so4"]); await page.waitForTimeout(150);
+    await add("kmno4");
+    const fps = await page.evaluate(() => new Promise(resolve => {
+      const start = performance.now();
+      let frames = 0;
+      const tick = () => {
+        frames++;
+        const elapsed = performance.now() - start;
+        if (elapsed >= 5000) resolve(frames * 1000 / elapsed);
+        else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }));
+    console.log("4-kmno4 LOW FPS (5 s without screenshots):", fps.toFixed(1));
+  }
+  if (!process.env.VISUAL_SHORT && !process.env.VISUAL_QUALITY) {
+    const rows = [
+      ["0.5", "0p5", "f010"], ["1", "1", "f011"],
+      ["1.5", "1p5", "f012"], ["2", "2", "f013"],
+      ["2.5", "2p5", "f014"], ["3", "3", "f015"],
+      ["5", "5", "f016"], ["8", "8", "f017"],
+    ];
+    const html = `<!doctype html><meta charset="utf-8"><title>KMnO4: игра | эталон</title>
+<style>body{font:17px Arial;background:#f4f4f4;margin:20px;color:#222}
+h1{font-size:24px}.row{display:grid;grid-template-columns:240px 250px 250px;align-items:start;
+border-top:1px solid #bbb;padding:12px 0;height:422px}.crop{width:130px;height:390px;overflow:hidden;position:relative;background:#ccc}
+.crop img{position:absolute;left:-535px;top:-260px}.ref{width:202px;height:414px;image-rendering:auto}</style>
+<h1>KMnO₄: игра | эталон, кадры по 0.25 с</h1>
+${rows.map(([age, game, reference]) => `<div class="row"><strong>${age} с</strong>
+<div class="crop"><img src="4-kmno4-${game}s.png"></div>
+<div><img class="ref" src="../../../reference/frames/exp4b-2q-fine/${reference}.jpg"><br>${reference}</div></div>`).join("\n")}`;
+    const sheetPath = resolve(out, "sheet-kmno4.html");
+    await writeFile(sheetPath, html);
+    await page.goto(pathToFileURL(sheetPath).href);
+    await page.screenshot({ path: resolve(out, "sheet-kmno4.png"), fullPage: true });
+    console.log("sheet", resolve(out, "sheet-kmno4.png"));
+  }
   }
 } finally {
   await browser.close();

@@ -1,5 +1,24 @@
 import * as THREE from "three";
 
+function dyeNoise(x: number, y: number) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const hash = (a: number, b: number) => {
+    let n = Math.imul(a, 374761393) + Math.imul(b, 668265263);
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+  };
+  const low = hash(ix, iy) * (1 - sx) + hash(ix + 1, iy) * sx;
+  const high = hash(ix, iy + 1) * (1 - sx) + hash(ix + 1, iy + 1) * sx;
+  return low * (1 - sy) + high * sy;
+}
+
+function smoothDye(value: number, low: number, high: number) {
+  const t = Math.max(0, Math.min(1, (value - low) / (high - low)));
+  return t * t * (3 - 2 * t);
+}
+
 /** A conservative two-dimensional dye/tracer field in a tube cross section. */
 export class TubeMixingField {
   readonly width = 32;
@@ -82,7 +101,9 @@ export class TubeMixingField {
         this.active = false;
       }
     }
-    this.writeTexture();
+    // Optical dye is fully bleached by 3 s; keep conserving its simulated
+    // mass, but stop rebuilding a texture that can no longer be seen.
+    if (!this.dyed || this.elapsed < 3.1) this.writeTexture();
   }
 
   private transport(field: Float32Array, yTop: number, sinking: number) {
@@ -109,8 +130,11 @@ export class TubeMixingField {
         const xn = (x - 1) / (w - 3);
         const yn = (y - 1) / yTop;
         const circulation = amplitude * Math.PI * Math.cos(Math.PI * xn) * Math.sin(Math.PI * yn);
-        const eddy = 0.075 * Math.sin(x * 0.67 + y * 0.39 + this.elapsed * 3.4)
-          * Math.sin(y * 0.19 - this.elapsed * 2.1);
+        const eddy = this.dyed && field === this.dye
+          ? 0.15 * (dyeNoise(x * 0.12 + this.elapsed * 0.32, y * 0.085 - this.elapsed * 0.21) - 0.5)
+            + 0.07 * (dyeNoise(x * 0.28 - this.elapsed * 0.18, y * 0.19 + 6.7) - 0.5)
+          : 0.075 * Math.sin(x * 0.67 + y * 0.39 + this.elapsed * 3.4)
+            * Math.sin(y * 0.19 - this.elapsed * 2.1);
         const downward = circulation + eddy < 0 ? -circulation - eddy + sinking : sinking * 0.15;
         const upward = circulation + eddy > 0 ? circulation + eddy : 0;
         const flux = downward * field[i] - upward * field[j] + (field[i] - field[j]) * 0.006;
@@ -121,27 +145,50 @@ export class TubeMixingField {
   }
 
   private writeTexture() {
+    const sampleDye = (x: number, y: number) => {
+      const sx = Math.max(0, Math.min(this.width - 1.001, x));
+      const sy = Math.max(0, Math.min(this.height - 1.001, y));
+      const ix = Math.floor(sx), iy = Math.floor(sy);
+      const fx = sx - ix, fy = sy - iy;
+      const a = this.dye[iy * this.width + ix] * (1 - fx)
+        + this.dye[iy * this.width + ix + 1] * fx;
+      const b = this.dye[(iy + 1) * this.width + ix] * (1 - fx)
+        + this.dye[(iy + 1) * this.width + ix + 1] * fx;
+      return a * (1 - fy) + b * fy;
+    };
     for (let i = 0; i < this.dye.length; i++) {
       const p = i * 4;
-      // The physical field can fold a tiny clear island inside a dense eddy.
-      // Blur only its optical upload: the conservative simulation and its
-      // mass stay unchanged, while the projected plume has a filled core.
       let opticalDye = this.dye[i];
       if (this.dyed) {
         const x = i % this.width, y = Math.floor(i / this.width);
-        let sum = 0, weight = 0;
-        for (let dy = -4; dy <= 4; dy++) {
-          const sy = Math.max(0, Math.min(this.height - 1, y + dy));
-          for (let dx = -4; dx <= 4; dx++) {
-            const sx = Math.max(0, Math.min(this.width - 1, x + dx));
-            const w = 1 / (1 + dx * dx * 0.45 + dy * dy * 0.45);
-            sum += this.dye[sy * this.width + sx] * w;
-            weight += w;
-          }
-        }
-        opticalDye = Math.max(opticalDye, sum / weight * 0.9);
+        // Warp the transported concentration, then break only its optical
+        // edge into folds and fine threads. The simulation retains its mass.
+        const coarseX = dyeNoise(x * 0.085 + 3.7, y * 0.062 + 1.9);
+        const coarseY = dyeNoise(x * 0.071 + 12.1, y * 0.054 + 5.3);
+        const fold = dyeNoise(x * 0.19 + 7.4, y * 0.13 + 11.8);
+        const fiber = dyeNoise(x * 0.47 + 2.8, y * 0.31 + 6.2);
+        const warped = sampleDye(x + (coarseX - 0.5) * 4.2 + (fold - 0.5) * 1.2,
+          y + (coarseY - 0.5) * 3.1);
+        const concentration = warped * 900;
+        const edge = 0.13 + (1 - fold) * 0.28 + (1 - fiber) * 0.08;
+        const ribbon = (center: number, seed: number, width: number) => {
+          const bend = (dyeNoise(y * 0.065 + seed, this.elapsed * 0.24 + seed * 1.7) - 0.5) * 0.15
+            + (dyeNoise(y * 0.17 + seed * 2.1, this.elapsed * 0.31 + 7.3) - 0.5) * 0.055;
+          const radius = width * (0.73 + 0.65 * dyeNoise(y * 0.11 + seed * 3.4, 2.8));
+          const distance = (x / (this.width - 1) - center - bend) / radius;
+          return Math.exp(-distance * distance * 1.35);
+        };
+        const tongues = Math.max(
+          ribbon(0.70, 1.3, 0.13),
+          ribbon(0.38, 4.7, 0.085) * smoothDye(this.elapsed, 0.26, 0.55)
+            * smoothDye(dyeNoise(y * 0.18 + 3.1, this.elapsed * 0.21 + 1.2), 0.29, 0.67),
+          ribbon(0.82, 8.1, 0.055) * smoothDye(this.elapsed, 0.48, 0.85)
+            * smoothDye(dyeNoise(y * 0.23 + 9.7, this.elapsed * 0.16 + 4.5), 0.35, 0.72),
+        );
+        const threads = 0.70 + 0.30 * fiber;
+        opticalDye = smoothDye(concentration, edge, edge + 0.63) * tongues * threads;
       }
-      this.pixels[p] = Math.min(255, opticalDye * 30000);
+      this.pixels[p] = Math.min(255, opticalDye * (this.dyed ? 255 : 30000));
       this.pixels[p + 1] = Math.min(255, this.tracer[i] * 30000);
       this.pixels[p + 2] = 0;
       this.pixels[p + 3] = 255;

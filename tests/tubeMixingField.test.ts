@@ -13,6 +13,23 @@ describe("tube mixing field", () => {
     field.dispose();
   });
 
+  it("keeps clear channels beside the optically rendered permanganate tongues", () => {
+    const field = new TubeMixingField();
+    field.start(true);
+    for (let i = 0; i < 45; i++) field.advance(1 / 30, 0.7);
+    const pixels = field.texture.image.data as Uint8Array;
+    const top = Math.floor(0.7 * (field.height - 1));
+    let coloured = 0;
+    let clear = 0;
+    for (let y = top - 22; y <= top; y++) for (let x = 1; x < field.width - 1; x++) {
+      if (pixels[(y * field.width + x) * 4] > 48) coloured++;
+      else clear++;
+    }
+    expect(coloured).toBeGreaterThan(0);
+    expect(clear).toBeGreaterThan(coloured);
+    field.dispose();
+  });
+
   it("moves concentrated inlet tracer downward and smooths its contrast", () => {
     const field = new TubeMixingField();
     field.start(false);

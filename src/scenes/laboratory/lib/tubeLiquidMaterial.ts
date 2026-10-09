@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { LiquidMaterial, type LiquidOptions } from "./reagentMaterials";
-import { copperConcentrationGLSL } from "./tubeAbsorptionMaterial";
+import { copperConcentrationGLSL, permanganateTongueGLSL } from "./tubeAbsorptionMaterial";
 
 export const TUBE_LIQUID = { clearAlpha: 0.17, edgeAlpha: 0.42, meniscusAlpha: 0.22, clearHighlight: 0.30 };
 // Shared by the surface and the backdrop pass so a cloud has one silhouette.
@@ -90,6 +90,7 @@ uniform vec3 uCameraLocal;
 uniform vec3 uCopperSource;
 varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
 ${copperConcentrationGLSL}
+${permanganateTongueGLSL}
 ${bariumCloudGLSL}
 vec2 transported(vec3 point) {
   vec3 center = uBoundsMin + uBoundsSize * 0.5;
@@ -123,7 +124,7 @@ if (vCap < 0.5 && surfaceDistance > 0.0004) discard;`)
         .replace("#include <color_fragment>", `#include <color_fragment>
 float h = clamp((vTubePoint.y - uBoundsMin.y) / uBoundsSize.y, 0.0, 1.0);
 vec2 radial = (vTubePoint.xz - uBoundsMin.xz - uBoundsSize.xz * 0.5) / uBoundsSize.xz;
-vec2 transportedMatter = uTransportActive > 0.01
+vec2 transportedMatter = uTransportActive > 0.01 && uReactionKind < 3.5
   ? transported(vTubePoint) : vec2(0.0);
 float p = uReactionProgress;
 float n = tubeNoise(vec3(radial * 10.0, h * 6.0 - uTime * (0.14 + uTemperature * 0.24)));
@@ -167,41 +168,11 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   cloud *= mix(shape, 1.0,
     smoothstep(2.5, 3.3, uTransportAge));
 } else if (uReactionKind > 3.5) {
-  // Only the advected dye is raspberry. The reaction fades each plume
-  // after it has had time to curl below the inlet.
-  vec2 dyeUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x
-    + 0.045 * sin(h * 32.0 - uTime * 3.1), 0.0, 1.0), h);
-  float nearDye = texture2D(uTransport, dyeUv).r;
-  vec2 crossingUv = vec2(clamp(0.5 + dot(radial, vec2(-0.76, 0.65)), 0.0, 1.0), h);
-  nearDye = max(nearDye, texture2D(uTransport, crossingUv).r * 0.65);
-  float acrossPlume = min(texture2D(uTransport, dyeUv + vec2(0.10, 0.0)).r,
-    texture2D(uTransport, dyeUv - vec2(0.10, 0.0)).r);
-  float alongPlume = min(texture2D(uTransport, dyeUv + vec2(0.0, 0.028)).r,
-    texture2D(uTransport, dyeUv - vec2(0.0, 0.028)).r);
-  // Close small clear pockets enclosed by dye without spanning the genuinely
-  // clear space between separate descending plumes.
-  nearDye = max(nearDye, max(acrossPlume, alongPlume) * 0.75);
-  dyeHalo = max(max(texture2D(uTransport, dyeUv + vec2(0.13, 0.0)).r,
-    texture2D(uTransport, dyeUv - vec2(0.13, 0.0)).r),
-    max(texture2D(uTransport, dyeUv + vec2(0.0, 0.04)).r,
-      texture2D(uTransport, dyeUv - vec2(0.0, 0.04)).r));
-  // Three separated descending tongues. The advected field supplies their
-  // movement, while the envelope closes small clear islands inside each
-  // tongue and leaves genuinely transparent channels between them.
-  float liquidHeight = clamp((uLevel - uBoundsMin.y) / uBoundsSize.y, 0.08, 1.0);
-  float descent = smoothstep(0.25, 2.4, uTransportAge);
-  float lobeA = exp(-pow((radial.x + 0.30 + 0.045 * sin(h * 29.0 - uTime * 1.7)) / 0.19, 2.0)
-    - pow((h - liquidHeight * (0.82 - 0.39 * descent)) / (liquidHeight * 0.31), 2.0));
-  float lobeB = exp(-pow((radial.x - 0.015 - 0.06 * sin(h * 24.0 + uTime * 1.3)) / 0.21, 2.0)
-    - pow((h - liquidHeight * (0.72 - 0.49 * descent)) / (liquidHeight * 0.37), 2.0));
-  float lobeC = exp(-pow((radial.x - 0.34 + 0.045 * sin(h * 27.0 - uTime * 1.1)) / 0.18, 2.0)
-    - pow((h - liquidHeight * (0.91 - 0.32 * descent)) / (liquidHeight * 0.28), 2.0));
-  float tongues = pow(max(max(lobeA * 0.88, lobeB), lobeC * 0.83), 0.68)
-    * smoothstep(0.15, 0.75, uTransportAge);
-  float transportedDye = 1.0 - exp(-nearDye * 2.8 - transportedMatter.r * 5.0);
-  dyeCloud = max(tongues, transportedDye * (0.08 + tongues * 0.76));
-  // A faint fringe belongs to each tongue, never a grey veil across the tube.
-  dyeHalo *= smoothstep(0.08, 0.30, tongues);
+  // The inlet transport alone sets the dyed region. A shared multiscale warp
+  // softens and tears its outline; no regular spatial oscillation is added.
+  vec2 dyeUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x, 0.0, 1.0), h);
+  dyeCloud = permanganateTongue(uTransport, dyeUv, uTransportAge);
+  dyeHalo = permanganateTongue(uTransport, dyeUv + vec2(0.035, 0.0), uTransportAge) * 0.12;
   // The excess acidified sulfite bleaches each incoming fold within seconds.
   float dyeFade = 1.0 - smoothstep(0.65, 3.0, uTransportAge);
   dyeCloud *= dyeFade;

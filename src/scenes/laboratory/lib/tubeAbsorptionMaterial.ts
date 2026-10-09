@@ -26,6 +26,12 @@ float copperConcentration(vec3 q, vec3 source, float radius, float height,
   return clamp(mix(partial, 1.0, homogeneous), 0.0, 1.0);
 }`;
 
+/** The same transported, irregular dye silhouette on the liquid and in its optical depth. */
+export const permanganateTongueGLSL = `
+float permanganateTongue(sampler2D field, vec2 uv, float age) {
+  return texture2D(field, clamp(uv, vec2(0.0), vec2(1.0))).r;
+}`;
+
 /** Multiplies the rendered scene by the light transmitted through a coloured solution. */
 export class TubeAbsorptionMaterial extends THREE.ShaderMaterial {
   constructor(radius: number, bottom: number, height: number) {
@@ -65,6 +71,7 @@ uniform float uRate, uTime; uniform vec3 uCopperSource;
 uniform sampler2D uTransport;
 varying vec3 vPoint; varying float vCap;
 ${copperConcentrationGLSL}
+${permanganateTongueGLSL}
 void main() {
   float radius = ${radius.toFixed(7)};
   float bottom = ${bottom.toFixed(7)};
@@ -100,23 +107,14 @@ void main() {
     } else {
       float concentration = 1.0 - smoothstep(0.02, 0.98, uProgress);
       if (uIncomingDyed > 0.5) {
-        vec2 uv = vec2(clamp(0.5 + dot(q.xz / (radius * 2.0), vec2(0.42, 0.91)), 0.0, 1.0), h);
-        float dye = texture2D(uTransport, uv).r;
+        // Integrate one projected silhouette through the chord. Sampling the
+        // narrow dye at eight distinct ray positions prints eight parallel
+        // bands, even when the transport texture itself has no such pattern.
+        vec2 uv = vec2(clamp(0.5 + vPoint.x / (radius * 2.0), 0.0, 1.0),
+          clamp((vPoint.y - bottom) / height, 0.0, 1.0));
+        float dye = permanganateTongue(uTransport, uv, uTransportAge);
         float clearing = smoothstep(0.65, 3.0, uTransportAge);
-        // The inlet field carries the dye; its three descending folds are
-        // resolved here at each ray sample, leaving clear channels between.
-        float x = q.x / (radius * 2.0);
-        float descent = smoothstep(0.25, 2.4, uTransportAge);
-        float aTongue = exp(-pow((x + 0.30 + 0.045 * sin(h * 29.0 - uTransportAge * 1.7)) / 0.12, 2.0)
-          - pow((h - (0.82 - 0.39 * descent)) / 0.21, 2.0));
-        float bTongue = exp(-pow((x - 0.015 - 0.06 * sin(h * 24.0 + uTransportAge * 1.3)) / 0.13, 2.0)
-          - pow((h - (0.72 - 0.49 * descent)) / 0.23, 2.0));
-        float cTongue = exp(-pow((x - 0.34 + 0.045 * sin(h * 27.0 - uTransportAge * 1.1)) / 0.11, 2.0)
-          - pow((h - (0.91 - 0.32 * descent)) / 0.19, 2.0));
-        float tongues = pow(max(max(aTongue * 0.88, bTongue), cTongue * 0.83), 0.68)
-          * smoothstep(0.15, 0.75, uTransportAge);
-        concentration = max(smoothstep(0.025, 0.70, dye), smoothstep(0.16, 0.48, tongues))
-          * (1.0 - clearing);
+        concentration = dye * (1.0 - clearing);
       }
       opticalDepth += vec3(0.16, 0.78, 0.33) * concentration * distance / (8.0 * radius);
     }
