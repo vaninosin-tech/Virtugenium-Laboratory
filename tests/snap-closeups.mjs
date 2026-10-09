@@ -33,7 +33,7 @@ try {
   const add = (id) => page.evaluate(id => window.__testTubeStorageStore.getState().addTubeContents(window.__closeLocation, 0, id), id);
   const tune = (state) => page.evaluate(s => window.__tubeVisualTuningStore.setState(s), state);
   const onsetShots = async (prefix, reagent) => {
-    const kind = prefix.startsWith("2-") ? 2 : 3;
+    const kind = prefix.startsWith("2-") ? 2 : prefix.startsWith("3-") ? 3 : 4;
     const seconds = [...Array.from({ length: 12 }, (_, i) => (i + 1) * 0.25), 5, 8, 12];
     // Arm the frame sampler in the same browser task that adds the reagent.
     // Round trips to Node otherwise miss the first second on a busy GPU.
@@ -142,23 +142,29 @@ try {
   await page.waitForTimeout(1500);
   await tune({ enabled: true, progress: 0, rate: 0.2, temperature: 0 });
   await page.waitForTimeout(4000); await shot("1-copper-a-start");
-  await tune({ progress: 0.35, rate: 1, temperature: 0.9 });
-  await page.waitForTimeout(8000); await shot("1-copper-b-heated");
+  await tune({ progress: 0.035, rate: 1, temperature: 0.9 });
+  await page.waitForTimeout(3000); await shot("1-heated-3s");
+  await tune({ progress: 0.08 });
+  await page.waitForTimeout(3000); await shot("1-heated-6s");
+  await tune({ progress: 0.16 });
+  await page.waitForTimeout(4000); await shot("1-heated-10s");
+  await tune({ progress: 0.27 });
+  await page.waitForTimeout(5000); await shot("1-heated-15s");
   await tune({ progress: 0.65 });
-  await page.waitForTimeout(9000); await shot("1-copper-c-turquoise");
+  await page.waitForTimeout(9000); await shot("1-mid");
   await tune({ progress: 1, rate: 0, temperature: 0.3 });
-  await page.waitForTimeout(9000); await shot("1-copper-d-end");
+  await page.waitForTimeout(9000); await shot("1-end");
   await tune({ enabled: false });
   }
 
   // 2. AgNO3 + NaCl.
-  if (!process.env.VISUAL_BARIUM_ONLY && !process.env.VISUAL_REGRESSION_ONLY) {
+  if (!process.env.VISUAL_BARIUM_ONLY && !process.env.VISUAL_REGRESSION_ONLY && !process.env.VISUAL_TARGET_ONLY) {
     await fresh(["agno3"]); await page.waitForTimeout(150);
     await onsetShots("2-agcl", "nacl");
   }
 
   // 3. BaCl2 + K2SO4.
-  if (!process.env.VISUAL_AGCL_ONLY && !process.env.VISUAL_REGRESSION_ONLY) {
+  if (!process.env.VISUAL_AGCL_ONLY && !process.env.VISUAL_REGRESSION_ONLY && !process.env.VISUAL_TARGET_ONLY) {
     await fresh(["bacl2"]); await page.waitForTimeout(150);
     await onsetShots("3-baso4", "k2so4");
     if (process.env.VISUAL_QUALITY === "LOW") {
@@ -180,12 +186,9 @@ try {
   }
 
   // 4. Na2SO3 + H2SO4, then KMnO4.
-  if (!process.env.VISUAL_PRECIPITATES_ONLY) {
+  if (!process.env.VISUAL_PRECIPITATES_ONLY && !process.env.VISUAL_COPPER_ONLY) {
   await fresh(["na2so3", "h2so4"]); await page.waitForTimeout(2500);
-  await add("kmno4");
-  await page.waitForTimeout(1000); await shot("4-kmno4-a-1s");
-  await page.waitForTimeout(2000); await shot("4-kmno4-b-3s");
-  await page.waitForTimeout(5000); await shot("4-kmno4-c-8s");
+  await onsetShots("4-kmno4", "kmno4");
   }
 } finally {
   await browser.close();

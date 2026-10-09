@@ -202,7 +202,8 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   dyeCloud = max(tongues, transportedDye * (0.08 + tongues * 0.76));
   // A faint fringe belongs to each tongue, never a grey veil across the tube.
   dyeHalo *= smoothstep(0.08, 0.30, tongues);
-  float dyeFade = 1.0 - smoothstep(7.0, 11.0, uTransportAge);
+  // The excess acidified sulfite bleaches each incoming fold within seconds.
+  float dyeFade = 1.0 - smoothstep(0.65, 3.0, uTransportAge);
   dyeCloud *= dyeFade;
   dyeHalo *= dyeFade;
   localMix = 1.0 - dyeCloud;
@@ -211,7 +212,7 @@ if (p <= 0.0 && uReactionKind < 3.5) { localMix = 0.0; cloud = 0.0; }
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 reactionTint = uReactionColor;
 if (uReactionKind > 0.5 && uReactionKind < 1.5)
-  reactionTint = mix(vec3(0.26, 0.60, 0.58), uReactionColor, smoothstep(0.55, 1.0, p));
+  reactionTint = mix(vec3(0.34, 0.67, 0.68), uReactionColor, smoothstep(0.55, 1.0, p));
 vec3 tubeColor = mix(uBaseColor, reactionTint, localMix);
 if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), vec3(0.25, 0.002, 0.075),
   max(dyeCloud, dyeHalo * 0.30));

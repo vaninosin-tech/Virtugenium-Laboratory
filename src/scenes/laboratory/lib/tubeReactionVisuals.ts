@@ -638,7 +638,7 @@ float rise = mix(1.0 - smoothstep(uFront - 0.12, uFront + 0.08, h),
 float mist = (1.0 - exp(-uDensity * 1.55 * heightDensity)) * edgeFade
   * lowerFade * rise * motion;
 // A thin, dilute NO2 veil sits immediately above the bubbling meniscus.
-float surfaceBand = exp(-pow(aboveWater / max(uRadius * 1.8, 0.001), 2.0))
+float surfaceBand = exp(-pow(aboveWater / max(uRadius * 0.65, 0.001), 2.0))
   * smoothstep(-0.001, 0.0015, aboveWater) * (0.65 + 0.35 * edgeFade);
 gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   + uResidue * wallBand * smoothstep(0.0, 0.12, facing)));
@@ -882,7 +882,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         absorption.uniforms.uIncomingDyed.value = kind === "permanganate-redox" && options.incomingDyed ? 1 : 0;
         absorptionWall.visible = hasLiquid && (standalonePermanganate
           || (kind === "permanganate-redox"
-            ? options.incomingDyed ? (transport?.age ?? 0) < 18 : p < 0.999
+            ? options.incomingDyed ? (transport?.age ?? 0) < 3.1 : p < 0.999
             : p > 0.001));
         absorptionCap.visible = absorptionWall.visible;
       }
@@ -1058,6 +1058,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           && (mesh !== standCaustic || causticSurfaceStrength > 0.001);
         material.uniforms.uTint.value.set(causticTint);
         material.uniforms.uStrength.value = causticStrength * scale
+          * (kind === "permanganate-redox"
+            ? 1 - THREE.MathUtils.smoothstep(transport?.age ?? 0, 0.6, 3) : 1)
           * (mesh === standCaustic ? causticSurfaceStrength : 1);
         material.uniforms.uWave.value = surfaceActivity;
         material.uniforms.uTime.value = time;
@@ -1293,7 +1295,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       const airBrown = airBrownAge < 0 ? 0 : THREE.MathUtils.smoothstep(airBrownAge, 0, 3)
         * (1 - THREE.MathUtils.smoothstep(airBrownAge, 8, 30));
       const surfaceGas = kind === "copper-nitric" && producingBubbles
-        ? (0.05 + 0.09 * Math.sqrt(drive)) * (0.65 + 0.55 * temperature) : 0;
+        ? (0.22 + 0.22 * Math.sqrt(drive)) * (0.65 + 0.55 * temperature) : 0;
       headspace.visible = airBrown > 0.01 || surfaceGas > 0.001;
       gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * mouthFill;
       gasMaterial.uniforms.uTime.value = time;

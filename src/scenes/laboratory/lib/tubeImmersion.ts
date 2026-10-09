@@ -69,7 +69,7 @@ vec3 tubeTransmission() {
   if (uImmersionKind < 1.5) {
     float concentration = copperConcentration(p, uImmersionCopperSource,
       uImmersionRadius, uImmersionHeight, uImmersionProgress, uImmersionRate, uImmersionTime);
-    absorption = mix(vec3(1.25, 0.40, 0.18), vec3(3.7, 0.50, 0.18),
+    absorption = mix(vec3(0.55, 0.17, 0.07), vec3(0.42, 0.08, 0.0),
       smoothstep(0.62, 1.0, uImmersionProgress)) * concentration;
   } else if (uImmersionDyeActive > 0.01) {
     // Sample along the view ray: plumes in front of the object tint it.

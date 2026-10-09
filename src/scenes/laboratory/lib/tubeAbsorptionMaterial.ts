@@ -6,29 +6,23 @@ float copperConcentration(vec3 q, vec3 source, float radius, float height,
   float progress, float rate, float time) {
   float h = clamp((q.y - source.y) / max(height, 0.0001), 0.0, 1.0);
   float radial = length(q.xz - source.xz) / max(radius, 0.0001);
-  float activity = smoothstep(0.005, 0.16, progress);
-  float front = mix(0.12, 1.18, smoothstep(0.02, 0.82, progress));
-  float reach = 1.0 - smoothstep(front - 0.20, front + 0.14, h);
-  float base = activity * reach * (0.05 + 0.25 * progress)
-    * exp(-radial * radial * 0.95);
-  float plume = 0.0;
-  for (int i = 0; i < 3; i++) {
-    float lane = float(i) - 1.0;
-    vec2 bend = vec2(sin(h * (8.0 + lane) - time * (0.55 + rate * 0.7) + lane * 2.4),
-      cos(h * 7.0 + time * 0.42 + lane * 2.1));
-    vec2 axis = source.xz + radius * (vec2(lane * 0.50, lane * 0.15)
-      + bend * (0.08 + h * 0.12));
-    float width = radius * (0.15 + h * 0.09);
-    float laneDensity = exp(-dot(q.xz - axis, q.xz - axis) / (width * width));
-    float pulse = 0.84 + (0.04 + rate * 0.12)
-      * sin(time * (1.4 + rate * 2.3) - h * 7.0 + lane * 2.0);
-    plume = max(plume, laneDensity * pulse);
-  }
-  float sourceCloud = exp(-radial * radial * 2.1 - h * h * 14.0);
-  float streams = activity * reach * (sourceCloud * 0.72
-    + plume * (0.25 + 0.20 * rate) * smoothstep(0.0, 0.05, h));
+  float activity = smoothstep(0.0, 0.035, progress);
+  float front = mix(0.20, 1.15, smoothstep(0.0, 0.80, progress));
+  float reach = 1.0 - smoothstep(front - 0.20, front + 0.17, h);
+  // A broad source cloud and one soft, wandering current. Narrow fixed lanes
+  // read as vertical stripes when the dye grows denser.
+  float pulse = 0.80 + 0.20 * sin(time * (2.3 + rate * 1.8) - h * 8.0);
+  vec2 bend = vec2(sin(h * 8.0 - time * (0.65 + rate * 0.35)),
+    cos(h * 6.0 + time * 0.43)) * (0.12 + h * 0.12);
+  float streamRadius = length(q.xz - source.xz - radius * bend) / max(radius, 0.0001);
+  float sourceCloud = exp(-radial * radial * 1.6 - h * h * 18.0);
+  float current = exp(-streamRadius * streamRadius * mix(2.5, 1.2, h))
+    * exp(-h * 0.8) * pulse;
+  float base = reach * activity * (0.11 + 0.28 * progress);
+  float streams = activity * reach * (sourceCloud * (0.67 + 0.25 * rate)
+    + current * (0.24 + 0.26 * rate) * smoothstep(0.0, 0.06, h));
   float homogeneous = smoothstep(0.58, 0.98, progress);
-  float partial = max(base, streams) * mix(0.48, 1.0, smoothstep(0.55, 1.0, progress));
+  float partial = max(base, streams);
   return clamp(mix(partial, 1.0, homogeneous), 0.0, 1.0);
 }`;
 
@@ -100,7 +94,7 @@ void main() {
     if (uKind < 1.5) {
       float concentration = copperConcentration(q, uCopperSource, radius, height,
         uProgress, uRate, uTime);
-      vec3 sigma = mix(vec3(1.25, 0.40, 0.18), vec3(3.7, 0.50, 0.18),
+      vec3 sigma = mix(vec3(0.55, 0.17, 0.07), vec3(0.42, 0.08, 0.0),
         smoothstep(0.62, 1.0, uProgress));
       opticalDepth += sigma * concentration * distance / (8.0 * radius);
     } else {
@@ -108,7 +102,7 @@ void main() {
       if (uIncomingDyed > 0.5) {
         vec2 uv = vec2(clamp(0.5 + dot(q.xz / (radius * 2.0), vec2(0.42, 0.91)), 0.0, 1.0), h);
         float dye = texture2D(uTransport, uv).r;
-        float clearing = smoothstep(3.0, 16.0, uTransportAge);
+        float clearing = smoothstep(0.65, 3.0, uTransportAge);
         // The inlet field carries the dye; its three descending folds are
         // resolved here at each ray sample, leaving clear channels between.
         float x = q.x / (radius * 2.0);
@@ -124,7 +118,7 @@ void main() {
         concentration = max(smoothstep(0.025, 0.70, dye), smoothstep(0.16, 0.48, tongues))
           * (1.0 - clearing);
       }
-      opticalDepth += vec3(2.7, 6.5, 2.3) * concentration * distance / (8.0 * radius);
+      opticalDepth += vec3(0.16, 0.78, 0.33) * concentration * distance / (8.0 * radius);
     }
   }
   gl_FragColor = vec4(exp(-opticalDepth), 1.0);
