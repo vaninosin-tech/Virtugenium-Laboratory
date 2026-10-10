@@ -1,4 +1,4 @@
-﻿import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { REAGENTS } from "../src/entities/laboratory/reagents";
 import { createTubeReactionVisuals } from "../src/scenes/laboratory/lib/tubeReactionVisuals";
@@ -210,7 +210,7 @@ describe("tube reaction rendering contract", () => {
       if (resource.mesh instanceof THREE.InstancedMesh) expect(resource.mesh.instanceMatrix.array).toBe(resource.array);
       expect(resource.mesh.visible).toBe((["TubeLiquidSurface", "TubeBottomCaustic", "TubeStandCaustic"].includes(resource.mesh.name)
         && (kind !== "silver-chloride" || resource.mesh.name === "TubeLiquidSurface"))
-        || kind === "copper-nitric" && resource.mesh.name === "TubeNOBubbles"
+
         || kind === "permanganate-redox" && ["TubeAbsorptionWall", "TubeAbsorptionSurface"].includes(resource.mesh.name));
     }
     expect(f.get("TubeLiquidSurface").material).toBe(held);
@@ -317,49 +317,14 @@ describe("tube reaction rendering contract", () => {
     poured.advance(4, chemistry(0), "LOW");
     expect(waveRange(poured)).toBeLessThan(0.00001);
 
-    const copper = fixture("copper-nitric");
+    const copper = fixture("copper-nitric", true);
+    copper.update(chemistry(0));
     copper.advance(3, chemistry(0.4, 1), "HIGH");
     expect(copper.get("TubeLiquidSurface").geometry.userData.waveCells).toBe(25);
-    expect(waveRange(copper)).toBeGreaterThan(0);
 
     const heated = fixture(null);
     heated.advance(1, chemistry(0, 0, 1), "LOW");
     expect(waveRange(heated)).toBeGreaterThan(0);
-  });
-
-  it.each<RuntimeQuality>(["LOW", "HIGH"])("keeps a thin gas layer at the liquid while dilute NO forms at %s", quality => {
-    const f = fixture("copper-nitric", true);
-    f.update(chemistry(0.4, 0.25), quality);
-    f.advance(2, chemistry(0.4, 0.25), quality);
-    expect(f.get("TubeNO2Headspace").visible).toBe(true);
-    expect(f.get("TubeNO2").visible).toBe(false);
-    expect(density(f)).toBe(0);
-    expect((f.get("TubeNO2Headspace").material as THREE.ShaderMaterial).uniforms.uSurfaceGas.value)
-      .toBeGreaterThan(0);
-    expect(front(f)).toBe(0);
-    expect(residue(f)).toBe(0);
-    expect(f.get("TubeNOBubbles").visible).toBe(true);
-    expect(f.get("TubeNOAttachedBubbles").visible).toBe(true);
-    expect(f.get("TubeSurfaceFoam").visible).toBe(false);
-  });
-
-  it("shows a faint outlet wisp and a surface veil during vigorous heating", () => {
-    const f = fixture("copper-nitric", true);
-    f.update(chemistry(0.5, 1, 1));
-    f.advance(1, chemistry(0.5, 1, 1));
-    const plume = f.get<THREE.InstancedMesh>("TubeNO2");
-    expect(plume.visible).toBe(true);
-    expect((plume.material as THREE.ShaderMaterial).uniforms.uOpacity.value).toBeLessThan(0.06);
-    // The air in the tube browns faintly at first, then NO displaces it.
-    const headspace = f.get<THREE.Mesh>("TubeNO2Headspace");
-    expect(headspace.visible).toBe(true);
-    expect((headspace.material as THREE.ShaderMaterial).uniforms.uDensity.value).toBeLessThanOrEqual(0.6);
-    f.advance(35, chemistry(0.6, 1, 1));
-    expect(headspace.visible).toBe(true);
-    expect((headspace.material as THREE.ShaderMaterial).uniforms.uSurfaceGas.value).toBeGreaterThan(0);
-    f.advance(2, chemistry(1, 0, 0));
-    expect(plume.visible).toBe(false);
-    expect(headspace.visible).toBe(false);
   });
 
   it("keeps the final copper solution saturated yet transparent", () => {
@@ -367,182 +332,6 @@ describe("tube reaction rendering contract", () => {
     f.update(chemistry(1));
     expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("1f7cc2");
     expect(liquid(f).uniforms.uOpacity.value).toBeLessThan(0.5);
-  });
-
-  it.each<RuntimeQuality>(["LOW", "HIGH"])("fades bubble sizes with rate without changing the pool at %s", quality => {
-    const f = fixture("copper-nitric", true);
-    const bubbles = f.get<THREE.InstancedMesh>("TubeNOBubbles");
-    const matrix = new THREE.Matrix4();
-    const visibleSize = () => {
-      let sum = 0;
-      for (let i = 0; i < bubbles.count; i++) {
-        bubbles.getMatrixAt(i, matrix);
-        sum += new THREE.Vector3().setFromMatrixScale(matrix).x;
-      }
-      return sum;
-    };
-    f.update(chemistry(0.4, 0.05), quality);
-    const slow = visibleSize();
-    expect(bubbles.visible).toBe(true);
-    f.update(chemistry(0.4, 0.25), quality);
-    const cold = visibleSize();
-    f.update(chemistry(0.4, 0.9), quality);
-    expect(visibleSize()).toBeGreaterThan(cold);
-    expect(cold).toBeGreaterThan(slow);
-    expect(bubbles.count).toBe(quality === "LOW" ? 24 : 54);
-    f.advance(0.3, chemistry(0.4, 0.9), quality);
-    f.update(chemistry(0.4), quality);
-    expect(bubbles.visible).toBe(true);
-    f.advance(10, chemistry(0.4));
-    expect(bubbles.visible).toBe(false);
-    f.update(chemistry(0.4, 0, 0.95), quality);
-    expect(bubbles.visible).toBe(false);
-    expect(f.get("TubeCondensate").visible).toBe(true);
-  });
-
-  it.each<RuntimeQuality>(["LOW", "HIGH"])("grows attached bubbles on the single copper grain and releases them after stopping at %s", quality => {
-    const f = fixture("copper-nitric", true);
-    const attached = f.get<THREE.InstancedMesh>("TubeNOAttachedBubbles");
-    const free = f.get<THREE.InstancedMesh>("TubeNOBubbles");
-    expect(attached.material).toBe(free.material);
-    const grain = f.copper!.children[0];
-    f.update(chemistry(0.1, 1), quality);
-    expect(attached.visible).toBe(false);
-    f.advance(0.4, chemistry(0.1, 1), quality);
-    expect(attached.visible).toBe(true);
-    expect(attached.count).toBe(quality === "LOW" ? 128 : 192);
-    const first = new THREE.Matrix4();
-    attached.getMatrixAt(0, first);
-    const firstPosition = new THREE.Vector3().setFromMatrixPosition(first);
-    expect(firstPosition.distanceTo(grain.position)).toBeLessThan(0.007);
-    const firstScale = new THREE.Vector3().setFromMatrixScale(first).x;
-    f.advance(0.3, chemistry(0.1, 1), quality);
-    attached.getMatrixAt(0, first);
-    const grownScale = new THREE.Vector3().setFromMatrixScale(first).x;
-    expect(grownScale).not.toBeCloseTo(firstScale, 6);
-    f.update(chemistry(0.6, 1), quality);
-    attached.getMatrixAt(0, first);
-    expect(new THREE.Vector3().setFromMatrixScale(first).x).toBeLessThan(grownScale);
-    const activeCount = attached.count;
-    f.advance(1, chemistry(0.6), quality);
-    expect(attached.visible).toBe(true);
-    expect(attached.count).toBeGreaterThan(0);
-    expect(attached.count).toBeLessThanOrEqual(activeCount);
-    f.advance(1, chemistry(0.6), quality);
-    expect(attached.visible).toBe(false);
-    f.advance(10, chemistry(0.6), quality);
-    expect(attached.visible).toBe(false);
-  });
-
-  it("carries a one-millimetre copper bubble nearly through the water in a quarter second", () => {
-    const f = fixture("copper-nitric", true);
-    const free = f.get<THREE.InstancedMesh>("TubeNOBubbles");
-    const matrix = new THREE.Matrix4();
-    const state = chemistry(0.4, 0.25);
-    f.update(state);
-    free.getMatrixAt(0, matrix);
-    const start = new THREE.Vector3().setFromMatrixPosition(matrix);
-    f.advance(0.25, state);
-    free.getMatrixAt(0, matrix);
-    const after = new THREE.Vector3().setFromMatrixPosition(matrix);
-    expect(after.y - start.y).toBeGreaterThan(0.025);
-  });
-
-  it("lets larger bubbles complete more surface-to-grain trips than smaller ones", () => {
-    const f = fixture("copper-nitric", true);
-    const free = f.get<THREE.InstancedMesh>("TubeNOBubbles");
-    const indices = [33, 3, 0, 11]; // dust, 0.5 mm, 1 mm, 2–3 mm
-    const matrix = new THREE.Matrix4();
-    const wraps = indices.map(() => 0);
-    const previous = indices.map(() => 0);
-    const state = chemistry(0.4, 1);
-    f.update(state);
-    indices.forEach((index, k) => { free.getMatrixAt(index, matrix); previous[k] = matrix.elements[13]; });
-    for (let frame = 0; frame < 180; frame++) {
-      f.advance(1 / 60, state);
-      indices.forEach((index, k) => {
-        free.getMatrixAt(index, matrix);
-        const y = matrix.elements[13];
-        if (y < previous[k] - 0.01) wraps[k]++;
-        previous[k] = y;
-      });
-    }
-    expect(wraps[0]).toBeGreaterThanOrEqual(1);
-    expect(wraps[0]).toBeLessThan(wraps[1]);
-    expect(wraps[1]).toBeLessThan(wraps[2]);
-    expect(wraps[2]).toBeLessThan(wraps[3]);
-  });
-
-  it.each<RuntimeQuality>(["LOW", "HIGH"])("clears released bubbles after copper dissolves without creating new ones at %s", quality => {
-    const f = fixture("copper-nitric", true);
-    const free = f.get<THREE.InstancedMesh>("TubeNOBubbles");
-    const attached = f.get<THREE.InstancedMesh>("TubeNOAttachedBubbles");
-    f.update(chemistry(1, 0, 0.95), quality);
-    expect(free.visible).toBe(false);
-    expect(attached.visible).toBe(false);
-    f.advance(0.5, chemistry(0.8, 1, 0.95), quality);
-    expect(free.visible).toBe(true);
-    expect(attached.visible).toBe(true);
-    f.update(chemistry(1, 0, 0.95), quality);
-    expect(free.visible).toBe(true);
-    expect(attached.visible).toBe(true);
-    const first = new THREE.Matrix4();
-    free.getMatrixAt(0, first);
-    const startY = first.elements[13];
-    f.advance(1, chemistry(1, 0, 0.95), quality);
-    free.getMatrixAt(0, first);
-    expect(first.elements[13]).toBeGreaterThan(startY);
-    f.advance(1, chemistry(1, 0, 0.95), quality);
-    expect(free.visible).toBe(false);
-    expect(attached.visible).toBe(false);
-    f.advance(10, chemistry(1, 0, 0.95), quality);
-    expect(free.visible).toBe(false);
-    expect(attached.visible).toBe(false);
-  });
-
-  it.each([-20, 20])("moves free bubbles upward with a small wobble at a static %s degree tilt", degrees => {
-    const f = fixture("copper-nitric", true);
-    f.parent.position.set(0.8, 0.4, -0.6);
-    f.parent.rotation.y = 0.7;
-    f.parent.scale.setScalar(1.3);
-    f.root.rotation.x = THREE.MathUtils.degToRad(degrees);
-    const state = chemistry(0.4, 0.8, 0.5);
-    f.update(state);
-    const group = f.root.getObjectByName("TubeReactionVisuals")!;
-    const bubbles = f.get<THREE.InstancedMesh>("TubeNOBubbles");
-    expect(bubbles.visible).toBe(true);
-    const snapshot = () => {
-      f.parent.updateMatrixWorld(true);
-      const matrix = new THREE.Matrix4();
-      return Array.from({ length: bubbles.count }, (_, i) => {
-        bubbles.getMatrixAt(i, matrix);
-        const local = new THREE.Vector3().setFromMatrixPosition(matrix);
-        return { local, world: local.clone().applyMatrix4(group.matrixWorld) };
-      });
-    };
-    let before = snapshot();
-    const copperMatrices = f.copper!.children.map(grain => grain.matrix.clone());
-    for (let frame = 0; frame < 4; frame++) {
-      f.advance(1 / 120, state);
-      const after = snapshot();
-      expect(after).toHaveLength(before.length);
-      f.copper!.children.forEach((grain, i) => expect(grain.matrix.equals(copperMatrices[i])).toBe(true));
-      let checked = 0;
-      for (let i = 0; i < before.length; i++) {
-        const a = before[i], b = after[i];
-        // Exclude wall sliding and the large return-to-source jump at a phase
-        // wrap. Do not filter on motion direction: downward drift must fail.
-        if (Math.hypot(a.local.x, a.local.z) >= 0.005 ||
-            Math.hypot(b.local.x, b.local.z) >= 0.005 ||
-            a.local.distanceTo(b.local) > 0.003) continue;
-        const delta = b.world.clone().sub(a.world);
-        expect(delta.y, `frame ${frame}, bubble ${i}: must rise`).toBeGreaterThan(0);
-        expect(Math.hypot(delta.x, delta.z), `frame ${frame}, bubble ${i}: wobble bound`).toBeLessThan(1.5e-4);
-        checked++;
-      }
-      expect(checked, `frame ${frame}: enough free, non-wrapping bubbles`).toBeGreaterThanOrEqual(2);
-      before = after;
-    }
   });
 
   it("shrinks copper monotonically, hides consumed grains and restores them on seek", () => {

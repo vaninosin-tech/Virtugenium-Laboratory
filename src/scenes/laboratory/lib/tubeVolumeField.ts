@@ -126,11 +126,15 @@ export class VelocityField {
     const plume = strength * Math.exp(-0.65 * radial2);
     const plumeY = plume * 1.3 * (U * cxY + V * czY);
     const accel = this.contributions.acceleration;
+    // The rising filament turns sideways at the closed liquid surface.
+    // Reverse the source-directed lateral drift there instead of letting
+    // colour pile up in a single top voxel row.
+    const surfaceTurn = 1 - 1.9 * THREE.MathUtils.smoothstep(Y, 0.58, 0.78);
     const vx = -0.8 * dSdy - 0.7 * dSdz - fineY - fineZ - U * plumeY + cxY * plume
-      + (this.sourceX - X) * 0.006 * anchor - accel.x * 0.0001 / h;
+      + (this.sourceX - X) * 0.006 * anchor * surfaceTurn - accel.x * 0.0001 / h;
     const vy = dSdz + 0.8 * dSdx + fineZ + fineX + plume * (2 - 1.3 * radial2);
     const vz = 0.7 * dSdx - dSdy + fineX - fineY - V * plumeY + czY * plume
-      + (this.sourceZ - Z) * 0.006 * anchor + accel.z * 0.0001 / r;
+      + (this.sourceZ - Z) * 0.006 * anchor * surfaceTurn + accel.z * 0.0001 / r;
     const g = this.gravityUp;
     this.result[0] = vx + vy * g.x;
     this.result[1] = vy * g.y;
@@ -380,7 +384,10 @@ export class TubeVolumeField {
           reconstructed = fraction >= 0 ? values[a] + 0.5 * (1 - fraction) * slopeA
             : values[b] - 0.5 * (1 + fraction) * slopeB;
         }
-        const raw = reconstructed * fraction + (values[a] - values[b]) * mix;
+        const topFace = axis !== 1 && a + m.nx < m.data.length && b + m.nx < m.data.length
+          && (!m.data[a + m.nx] || !m.data[b + m.nx]);
+        const lateralMix = topFace ? Math.min(0.42, mix * 2.5) : mix;
+        const raw = reconstructed * fraction + (values[a] - values[b]) * lateralMix;
         fluxes[a] = raw;
         if (raw > 0) outgoing[a] += raw;
         else outgoing[b] -= raw;
