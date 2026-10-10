@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { LiquidMaterial, type LiquidOptions } from "./reagentMaterials";
-import { copperConcentrationGLSL, permanganateTongueGLSL } from "./tubeAbsorptionMaterial";
+import { copperFieldGLSL, permanganateTongueGLSL } from "./tubeAbsorptionMaterial";
 
 export const TUBE_LIQUID = { clearAlpha: 0.17, edgeAlpha: 0.42, meniscusAlpha: 0.22, clearHighlight: 0.30 };
 // Shared by the surface and the backdrop pass so a cloud has one silhouette.
@@ -43,6 +43,7 @@ emptyTransport.needsUpdate = true;
 export class TubeLiquidMaterial extends LiquidMaterial {
   constructor(geometry: THREE.BufferGeometry, options: LiquidOptions) {
     super(geometry, options);
+    (this as unknown as THREE.Material & { glslVersion: string }).glslVersion = THREE.GLSL3;
     this.name = "TubeLiquidContents";
     this.roughness = 0.13;
     this.side = THREE.FrontSide;
@@ -55,7 +56,11 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uTransportDye: { value: 0 }, uTransportQuality: { value: 1 },
       uTransportAge: { value: 0 },
       uCameraLocal: { value: new THREE.Vector3(0, 0, 1) },
-      uCopperSource: { value: new THREE.Vector3(0, 0, 0) },
+      uCuPrevious: { value: null as THREE.Data3DTexture | null },
+      uCuCurrent: { value: null as THREE.Data3DTexture | null },
+      uCuBlend: { value: 0 },
+      uCuBoundsMin: { value: new THREE.Vector3() },
+      uCuBoundsSize: { value: new THREE.Vector3(1, 1, 1) },
     });
     this.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
@@ -79,7 +84,9 @@ if (tubeSurface > 0.5) {
   transformed.y += tubeWave;
 }
 vTubePoint = transformed;`);
-      shader.fragmentShader = `uniform vec3 uBaseColor; uniform vec3 uReactionColor;
+      shader.fragmentShader = `out vec4 pc_fragColor;
+#define gl_FragColor pc_fragColor
+uniform vec3 uBaseColor; uniform vec3 uReactionColor;
 uniform float uReactionProgress; uniform float uCloudiness; uniform float uOpacity;
 uniform float uClearAlpha; uniform float uEdgeAlpha; uniform float uMeniscusAlpha; uniform float uClearHighlight;
 uniform vec3 uUp; uniform float uLevel; uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
@@ -87,9 +94,8 @@ uniform float uReactionKind; uniform float uRate; uniform float uTemperature; un
 uniform float uResidualHaze; uniform float uWallFilm;
 uniform sampler2D uTransport; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality; uniform float uTransportAge;
 uniform vec3 uCameraLocal;
-uniform vec3 uCopperSource;
 varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
-${copperConcentrationGLSL}
+${copperFieldGLSL}
 ${permanganateTongueGLSL}
 ${bariumCloudGLSL}
 vec2 transported(vec3 point) {
@@ -135,8 +141,7 @@ float cloud = uCloudiness;
 float dyeCloud = 0.0;
 float dyeHalo = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
-  localMix = copperConcentration(vTubePoint, uCopperSource, uBoundsSize.x * 0.5,
-    uBoundsSize.y, p, uRate, uTime);
+  localMix = copperField(vTubePoint);
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   // New curds are localized to the inlet. A weak veil develops only after
   // they have fallen; the clear lower column remains visible at onset.

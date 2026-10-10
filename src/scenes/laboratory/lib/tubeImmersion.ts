@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { copperConcentrationGLSL } from "./tubeAbsorptionMaterial";
+import { copperFieldGLSL } from "./tubeAbsorptionMaterial";
 
 /** Shared optical path for solids and bubbles rendered after the liquid. */
 export class TubeImmersion {
@@ -16,7 +16,11 @@ export class TubeImmersion {
     uImmersionProgress: { value: 0 },
     uImmersionRate: { value: 0 },
     uImmersionTime: { value: 0 },
-    uImmersionCopperSource: { value: new THREE.Vector3() },
+    uCuPrevious: { value: null as THREE.Data3DTexture | null },
+    uCuCurrent: { value: null as THREE.Data3DTexture | null },
+    uCuBlend: { value: 0 },
+    uCuBoundsMin: { value: new THREE.Vector3() },
+    uCuBoundsSize: { value: new THREE.Vector3(1, 1, 1) },
     uImmersionDye: { value: new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat) },
     uImmersionDyeActive: { value: 0 },
   };
@@ -31,6 +35,7 @@ export class TubeImmersion {
   }
 
   attach(material: THREE.Material) {
+    (material as THREE.Material & { glslVersion: string }).glslVersion = THREE.GLSL3;
     const previous = material.onBeforeCompile;
     const previousKey = material.customProgramCacheKey;
     material.onBeforeCompile = (shader, renderer) => {
@@ -45,13 +50,15 @@ immersionWorld = instanceMatrix * immersionWorld;
 #endif
 vImmersionPoint = (uImmersionWorldToLocal * modelMatrix * immersionWorld).xyz;
 #include <project_vertex>`);
-      shader.fragmentShader = `varying vec3 vImmersionPoint;
+      shader.fragmentShader = `out vec4 pc_fragColor;
+#define gl_FragColor pc_fragColor
+varying vec3 vImmersionPoint;
 uniform vec3 uImmersionCamera, uImmersionCenter, uImmersionUp;
 uniform float uImmersionRadius, uImmersionBottom, uImmersionHeight, uImmersionLevel;
 uniform float uImmersionKind, uImmersionProgress, uImmersionDyeActive;
-uniform float uImmersionRate, uImmersionTime; uniform vec3 uImmersionCopperSource;
+uniform float uImmersionRate, uImmersionTime;
 uniform sampler2D uImmersionDye;
-${copperConcentrationGLSL}
+${copperFieldGLSL}
 vec3 tubeTransmission() {
   vec3 p = vImmersionPoint;
   float depth = uImmersionLevel - dot(uImmersionUp, p);
@@ -67,10 +74,10 @@ vec3 tubeTransmission() {
   float path = clamp(min(side, surface), 0.0, uImmersionHeight * 2.0);
   vec3 absorption = vec3(0.0);
   if (uImmersionKind < 1.5) {
-    float concentration = copperConcentration(p, uImmersionCopperSource,
-      uImmersionRadius, uImmersionHeight, uImmersionProgress, uImmersionRate, uImmersionTime);
-    absorption = mix(vec3(0.55, 0.17, 0.07), vec3(0.42, 0.08, 0.0),
-      smoothstep(0.62, 1.0, uImmersionProgress)) * concentration;
+    for (int i = 0; i < 8; i++) {
+      vec3 q = p + ray * path * (float(i) + 0.5) / 8.0;
+      absorption += vec3(0.42, 0.12, 0.005) * copperField(q) / 8.0;
+    }
   } else if (uImmersionDyeActive > 0.01) {
     // Sample along the view ray: plumes in front of the object tint it.
     for (int i = 0; i < 4; i++) {

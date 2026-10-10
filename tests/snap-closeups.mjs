@@ -16,7 +16,7 @@ try {
   if (process.env.VISUAL_QUALITY === "LOW")
     await context.addInitScript(() => localStorage.setItem("virtugenium.runtime-quality.v1", "LOW"));
   const page = await context.newPage();
-  page.on("pageerror", e => console.log("pageerror", e.message));
+  page.on("pageerror", e => console.log("pageerror", e.stack ?? e.message));
   page.on("console", e => { if (e.type() === "error") console.log("console error", e.text()); });
   await page.goto(process.env.VISUAL_URL ?? "http://127.0.0.1:5173");
   await page.getByText("Играть", { exact: true }).click();
@@ -144,35 +144,89 @@ try {
     }
   };
 
-  // 1. Cu + dilute HNO3, heated (tuning drives progress, rate and temperature; it eases in).
+  const copperViews = async (name) => {
+    const images = await page.evaluate(async () => {
+      const THREE = await import("/node_modules/three/build/three.module.js");
+      const { gl, scene, camera: gameCamera } = window.__three;
+      await new Promise(r => requestAnimationFrame(r));
+      let group = null;
+      scene.traverse(o => {
+        if (group || o.name !== "TubeReactionVisuals") return;
+        for (let x = o; x; x = x.parent) if (!x.visible) return;
+        group = o;
+      });
+      if (!group) return [];
+      const target = group.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.03, 0));
+      const front = gameCamera.position.clone().sub(target).setY(0).normalize();
+      const side = new THREE.Vector3(-front.z, 0, front.x);
+      const views = [
+        ["front", front.clone().multiplyScalar(0.3).add(new THREE.Vector3(0, 0.06, 0))],
+        ["side", side.clone().multiplyScalar(0.3).add(new THREE.Vector3(0, 0.06, 0))],
+        ["top", front.clone().multiplyScalar(0.12).add(new THREE.Vector3(0, 0.31, 0))],
+        ["45", front.clone().add(side).normalize().multiplyScalar(0.3).add(new THREE.Vector3(0, 0.08, 0))],
+      ];
+      return views.map(([label, offset]) => {
+        const camera = new THREE.PerspectiveCamera(24, gl.domElement.width / gl.domElement.height, 0.01, 20);
+        camera.position.copy(target).add(offset); camera.lookAt(target); camera.updateMatrixWorld();
+        gl.render(scene, camera);
+        return [label, gl.domElement.toDataURL("image/png")];
+      });
+    });
+    for (const [angle, dataUrl] of images) {
+      await writeFile(`${out}/${name}-${angle}.png`, Buffer.from(dataUrl.split(",")[1], "base64"));
+    }
+    console.log("views", name, images.map(([angle]) => angle).join(", "));
+  };
+
+  // 1. Cu + dilute HNO3, cold and hot, with four independent camera directions.
   if (!process.env.VISUAL_PRECIPITATES_ONLY && !process.env.VISUAL_TARGET_ONLY) {
-  await fresh(["cu", "hno3"]);
-  await page.waitForTimeout(1500);
-  await tune({ enabled: true, progress: 0, rate: 0.2, temperature: 0 });
-  await page.waitForTimeout(4000); await shot("1-copper-a-start");
-  await tune({ progress: 0.035, rate: 1, temperature: 0.9 });
-  await page.waitForTimeout(3000); await shot("1-heated-3s");
-  await tune({ progress: 0.08 });
-  await page.waitForTimeout(3000); await shot("1-heated-6s");
-  await tune({ progress: 0.16 });
-  await page.waitForTimeout(4000); await shot("1-heated-10s");
-  await tune({ progress: 0.27 });
-  await page.waitForTimeout(5000); await shot("1-heated-15s");
-  await tune({ progress: 0.65 });
-  await page.waitForTimeout(9000); await shot("1-mid");
-  await tune({ progress: 1, rate: 0, temperature: 0.3 });
-  await page.waitForTimeout(9000); await shot("1-end");
-  await tune({ enabled: false });
+    for (const heat of process.env.VISUAL_COPPER_QUICK ? [true] : [false, true]) {
+      const label = heat ? "hot" : "cold";
+      await fresh(["cu", "hno3"]);
+      await page.waitForTimeout(1000);
+      await tune({ enabled: true, progress: 0, rate: heat ? 1 : 0.25, temperature: heat ? 0.9 : 0 });
+      let previous = 0;
+      for (const second of process.env.VISUAL_COPPER_QUICK ? [3, 6, 10] : [3, 6, 10, 20, 40]) {
+        await tune({ progress: Math.min(0.97, second * (heat ? 0.022 : 0.007)) });
+        await page.waitForTimeout((second - previous) * 1000);
+        await copperViews(`1-${label}-${second}s`);
+        previous = second;
+      }
+      await tune({ progress: 1, rate: 0, temperature: heat ? 0.3 : 0 });
+      await page.waitForTimeout(5000);
+      await copperViews(`1-${label}-end`);
+    }
+    await tune({ enabled: false });
+    if (process.env.VISUAL_QUALITY === "LOW") {
+      const fps = await page.evaluate(() => new Promise(resolve => {
+        const start = performance.now(); let frames = 0;
+        const tick = () => { frames++; const elapsed = performance.now() - start;
+          if (elapsed >= 5000) resolve(frames * 1000 / elapsed); else requestAnimationFrame(tick); };
+        requestAnimationFrame(tick);
+      }));
+      console.log("1-copper LOW FPS (5 s without screenshots):", fps.toFixed(1));
+    }
+    for (const label of process.env.VISUAL_COPPER_QUICK ? [] : ["cold", "hot"]) {
+      const rows = [3, 6, 10, 20, 40, "end"];
+      const html = `<!doctype html><meta charset="utf-8"><style>body{font:18px sans-serif;background:#ddd} .row{display:flex;gap:8px;margin:10px 0}img{width:23vw}strong{width:65px}</style><h1>Cu(II): ${label}</h1><p>front · side · top · 45°</p>${rows.map(second => `<div class="row"><strong>${second}</strong>${["front", "side", "top", "45"].map(angle => `<img src="1-${label}-${typeof second === "number" ? `${second}s` : second}-${angle}.png">`).join("")}</div>`).join("")}`;
+      const sheet = resolve(out, `sheet-copper-${label}.html`);
+      await writeFile(sheet, html);
+      const sheetPage = await context.newPage();
+      await sheetPage.goto(pathToFileURL(sheet).href);
+      await sheetPage.screenshot({ path: resolve(out, `sheet-copper-${label}.png`), fullPage: true });
+      await sheetPage.close();
+      console.log("sheet", resolve(out, `sheet-copper-${label}.png`));
+    }
   }
 
   // 2. AgNO3 + NaCl.
-  if (!process.env.VISUAL_BARIUM_ONLY && !process.env.VISUAL_REGRESSION_ONLY && !process.env.VISUAL_TARGET_ONLY) {
+  if (!process.env.VISUAL_BARIUM_ONLY && !process.env.VISUAL_REGRESSION_ONLY && !process.env.VISUAL_TARGET_ONLY && !process.env.VISUAL_COPPER_ONLY) {
     await fresh(["agno3"]); await page.waitForTimeout(150);
     await onsetShots("2-agcl", "nacl");
   }
 
   // 3. BaCl2 + K2SO4.
-  if (!process.env.VISUAL_AGCL_ONLY && !process.env.VISUAL_REGRESSION_ONLY && !process.env.VISUAL_TARGET_ONLY) {
+  if (!process.env.VISUAL_AGCL_ONLY && !process.env.VISUAL_REGRESSION_ONLY && !process.env.VISUAL_TARGET_ONLY && !process.env.VISUAL_COPPER_ONLY) {
     await fresh(["bacl2"]); await page.waitForTimeout(150);
     await onsetShots("3-baso4", "k2so4");
     if (process.env.VISUAL_QUALITY === "LOW") {

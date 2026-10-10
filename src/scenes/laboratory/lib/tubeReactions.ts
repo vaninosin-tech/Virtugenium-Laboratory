@@ -94,6 +94,20 @@ export const TEMPERATURE_COOL_SECONDS = 40;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
+/** R1 bookkeeping in normalized game units; ξmax = 1. Progress/rate remain the controller's source of truth. */
+export interface CopperReactionState {
+  extent: number;
+  copper: number;
+  acid: number;
+  copperII: number;
+  nitricOxide: number;
+}
+export const copperReactionState = (progress: number): CopperReactionState => {
+  const extent = clamp01(Number.isFinite(progress) ? progress : 0);
+  return { extent, copper: 3 * (1 - extent), acid: 8 * (1 - extent),
+    copperII: 3 * extent, nitricOxide: 2 * extent };
+};
+
 /**
  * One step of a tube's chemistry. `inFlame` is whether the flame is heating
  * the contents right now. Temperature is tracked for every tube, reacting or
@@ -152,3 +166,7 @@ export const useTubeReactionStore = create<TubeReactionState>((set) => ({
     }),
   reset: () => set({ chemistryById: {} }),
 }));
+
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  (window as unknown as { __tubeReactionStore?: unknown }).__tubeReactionStore = useTubeReactionStore;
+}

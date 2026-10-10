@@ -4,10 +4,11 @@ import { deferDispose } from "./deferredDispose";
 import { TubeLiquidMaterial, bariumCloudGLSL } from "./tubeLiquidMaterial";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
-import { TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
+import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
+import { TubeVolumeField } from "./tubeVolumeField";
 import { testTubeLiquidFill } from "./testTubeContents";
 import type { ReactionKind, TubeChemistry } from "./tubeReactions";
-import type { RuntimeQuality } from "./useRuntimeQualityStore";
+import { useRuntimeQualityStore, type RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
   copperColor: "#1f7cc2",
@@ -764,6 +765,16 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   const gravity = new THREE.Vector3();
   const inverse = new THREE.Matrix4();
   const cameraLocal = new THREE.Vector3();
+  const renderInverse = new THREE.Matrix4();
+  const renderCameraWorld = new THREE.Vector3();
+  if (absorption && absorptionWall && absorptionCap) {
+    const syncAbsorptionCamera = (_renderer: THREE.WebGLRenderer, _scene: THREE.Scene,
+      camera: THREE.Camera) => {
+      cameraInTubeSpace(camera, volume, renderInverse, renderCameraWorld,
+        absorption.uniforms.uCameraLocal.value);
+    };
+    absorptionWall.onBeforeRender = absorptionCap.onBeforeRender = syncAbsorptionCamera;
+  }
   const copper = root.getObjectByName("TubeCopperGranules");
   const immersion = new TubeImmersion(center, radius, box.min.y, size.y);
   const detachImmersion = [immersion.attach(white), immersion.attach(bubbleMaterial)];
@@ -781,7 +792,6 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   });
   const copperPoints = copper?.children.map(child => new THREE.Vector3(child.position.x,
     typeof child.userData.dropTargetY === "number" ? child.userData.dropTargetY : child.position.y, child.position.z)) ?? [];
-  const copperSource = copperPoints[0] ?? new THREE.Vector3(center.x, box.min.y + radius, center.z);
   const copperBounds = copper?.children.map(child => {
     if (!(child instanceof THREE.Mesh)) return 0;
     const positions = child.geometry.getAttribute("position");
@@ -790,6 +800,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       Math.hypot(positions.getX(i), positions.getY(i), positions.getZ(i)));
     return bound;
   }) ?? [];
+  const sourcePoints = Array.from({ length: (copper?.children.length ?? 0) * 4 }, () => new THREE.Vector3());
+  const copperField = kind === "copper-nitric" && hasLiquid
+    ? new TubeVolumeField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
+      radius, box.min.y, size.y, copperPoints) : null;
   const source = new THREE.Vector3();
   const bubblePoint = new THREE.Vector3();
   const causticRay = new THREE.Raycaster();
@@ -801,13 +815,14 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   let causticSurfaceStrength = 0;
   return {
     update(chemistry: TubeChemistry, time: number, quality: RuntimeQuality, splashAge: number,
-      refraction = false, cameraPosition?: THREE.Vector3) {
+      refraction = false, cameraPosition?: THREE.Vector3, reactionProgress?: number) {
       const { progress } = chemistry;
       const rate = Number.isFinite(chemistry.rate) ? THREE.MathUtils.clamp(chemistry.rate, 0, 1) : 0;
       const temperature = Number.isFinite(chemistry.temperature) ? THREE.MathUtils.clamp(chemistry.temperature, 0, 1) : 0;
       const p = Number.isFinite(progress) ? THREE.MathUtils.clamp(progress, 0, 1) : 0;
       const reverseTime = lastTime !== undefined && time < lastTime;
-      const dt = lastTime === undefined ? 0 : THREE.MathUtils.clamp(time - lastTime, 0, 0.1);
+      const elapsed = lastTime === undefined ? 0 : Math.max(0, time - lastTime);
+      const dt = Math.min(elapsed, 0.1);
       lastTime = time;
       pourAge += dt;
       const fill = THREE.MathUtils.lerp(startFill, targetFill,
@@ -856,6 +871,21 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       up.value.set(-slope.x, 1, -slope.y).normalize();
       level.value = up.value.x * center.x + up.value.y * (box.min.y + size.y * fill) + up.value.z * center.z;
+      if (copperField && cameraPosition) {
+        let sourceCount = 0;
+        copper?.children.forEach((child, i) => {
+          if (!(child instanceof THREE.Mesh) || !child.visible) return;
+          const bound = copperBounds[i] * child.scale.x;
+          for (let k = 0; k < 4; k++) {
+            const angle = k * Math.PI * 0.5 + i * 1.7;
+            sourcePoints[sourceCount++].set(child.position.x + Math.cos(angle) * bound * 0.95,
+              child.position.y + bound * (0.55 + 0.08 * k),
+              child.position.z + Math.sin(angle) * bound * 0.95);
+          }
+        });
+        copperField.setSources(sourcePoints, sourceCount);
+        copperField.advance(Math.min(elapsed, 0.25), reactionProgress ?? p, up.value, level.value, rate, temperature);
+      }
       if (backdrop && backdropWall && backdropCap) {
         backdrop.up.value.copy(up.value);
         backdrop.level.value = level.value;
@@ -874,9 +904,21 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         absorption.uniforms.uCameraLocal.value.copy(cameraLocal);
         absorption.uniforms.uKind.value = kind === "copper-nitric" ? 1 : 2;
         absorption.uniforms.uProgress.value = p;
-        absorption.uniforms.uRate.value = rate;
-        absorption.uniforms.uTime.value = time;
-        absorption.uniforms.uCopperSource.value.copy(copperSource);
+        if (copperField) {
+          absorption.uniforms.uCuPrevious.value = copperField.previous;
+          absorption.uniforms.uCuCurrent.value = copperField.current;
+          absorption.uniforms.uCuBlend.value = copperField.alpha;
+          absorption.uniforms.uSteps.value = 12;
+          const spheres = absorption.uniforms.uCuSpheres.value as THREE.Vector4[];
+          let count = 0;
+          copper?.children.forEach((child, i) => {
+            if (count < spheres.length && child instanceof THREE.Mesh && child.visible) {
+              spheres[count++].set(child.position.x, child.position.y, child.position.z,
+                copperBounds[i] * child.scale.x * 0.55);
+            }
+          });
+          absorption.uniforms.uCuCount.value = count;
+        }
         absorption.uniforms.uTransport.value = transport?.texture ?? null;
         absorption.uniforms.uTransportAge.value = transport?.age ?? 0;
         absorption.uniforms.uIncomingDyed.value = kind === "permanganate-redox" && options.incomingDyed ? 1 : 0;
@@ -893,7 +935,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       immersion.uniforms.uImmersionProgress.value = p;
       immersion.uniforms.uImmersionRate.value = rate;
       immersion.uniforms.uImmersionTime.value = time;
-      immersion.uniforms.uImmersionCopperSource.value.copy(copperSource);
+      if (copperField) {
+        immersion.uniforms.uCuPrevious.value = copperField.previous;
+        immersion.uniforms.uCuCurrent.value = copperField.current;
+        immersion.uniforms.uCuBlend.value = copperField.alpha;
+        immersion.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
+        immersion.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
+      }
       immersion.uniforms.uImmersionKind.value = kind === "copper-nitric" ? 1 : options.incomingDyed ? 2 : 0;
       immersion.uniforms.uImmersionDyeActive.value = transport?.running ? 1 : 0;
       if (transport) immersion.uniforms.uImmersionDye.value = transport.texture;
@@ -1019,7 +1067,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         activeLiquid.uniforms.uTemperature.value = temperature;
         activeLiquid.uniforms.uTime.value = time;
         activeLiquid.uniforms.uCameraLocal.value.copy(cameraLocal);
-        activeLiquid.uniforms.uCopperSource.value.copy(copperSource);
+        if (copperField) {
+          activeLiquid.uniforms.uCuPrevious.value = copperField.previous;
+          activeLiquid.uniforms.uCuCurrent.value = copperField.current;
+          activeLiquid.uniforms.uCuBlend.value = copperField.alpha;
+          activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
+          activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
+        }
       }
       if (transport) for (const material of [base, liquid]) {
         if (!(material instanceof TubeLiquidMaterial)) continue;
@@ -1333,6 +1387,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       detachImmersion.forEach(detach => detach());
       immersion.dispose();
+      copperField?.dispose();
       group.removeFromParent();
       deferDispose(group, () => {
         geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();
