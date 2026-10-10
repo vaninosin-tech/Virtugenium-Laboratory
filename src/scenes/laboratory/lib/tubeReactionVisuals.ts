@@ -783,7 +783,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   const copperDrawState: { mesh: THREE.Mesh; transparent: boolean; order: number }[] = [];
   if (copper) copper.traverse(object => {
     if (object instanceof THREE.Mesh && object.material instanceof THREE.Material) {
-      detachImmersion.push(immersion.attach(object.material));
+      detachImmersion.push(immersion.attach(object.material, true));
       if (absorption) {
         copperDrawState.push({ mesh: object, transparent: object.material.transparent, order: object.renderOrder });
         object.material.transparent = true;
@@ -922,6 +922,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           absorption.uniforms.uCuPrevious.value = copperField.previous;
           absorption.uniforms.uCuCurrent.value = copperField.current;
           absorption.uniforms.uCuBlend.value = copperField.alpha;
+          absorption.uniforms.uCuCompletion.value = p;
+          absorption.uniforms.uCuTime.value = time;
           absorption.uniforms.uSteps.value = 12;
           const spheres = absorption.uniforms.uCuSpheres.value as THREE.Vector4[];
           let count = 0;
@@ -953,6 +955,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         immersion.uniforms.uCuPrevious.value = copperField.previous;
         immersion.uniforms.uCuCurrent.value = copperField.current;
         immersion.uniforms.uCuBlend.value = copperField.alpha;
+        immersion.uniforms.uCuCompletion.value = p;
+        immersion.uniforms.uCuTime.value = time;
         immersion.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
         immersion.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
       }
@@ -1085,6 +1089,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           activeLiquid.uniforms.uCuPrevious.value = copperField.previous;
           activeLiquid.uniforms.uCuCurrent.value = copperField.current;
           activeLiquid.uniforms.uCuBlend.value = copperField.alpha;
+          activeLiquid.uniforms.uCuCompletion.value = p;
+          activeLiquid.uniforms.uCuTime.value = time;
           activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
           activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
         }

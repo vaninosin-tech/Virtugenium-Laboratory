@@ -19,13 +19,33 @@ export function cameraInTubeSpace(camera: THREE.Camera, tube: THREE.Object3D,
 
 export const copperFieldGLSL = `
 uniform sampler3D uCuPrevious, uCuCurrent;
-uniform float uCuBlend;
+uniform float uCuBlend, uCuCompletion, uCuTime;
 uniform vec3 uCuBoundsMin, uCuBoundsSize;
 float copperField(vec3 p) {
   vec3 uvw = (p - uCuBoundsMin) / uCuBoundsSize;
   if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return 0.0;
-  float density = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
-  return min(pow(max(0.0, density), 0.25) * 1.5, 1.6);
+  if (uCuCompletion > 0.95) {
+    float settled = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
+    return 2.05 * settled / (settled + 0.12);
+  }
+  float density = texture(uCuCurrent, uvw).r;
+  float neighbour = texture(uCuCurrent, clamp(uvw + vec3(0.045, 0.0, 0.045), 0.0, 1.0)).r;
+  float edge = smoothstep(0.005, 0.12, abs(density - neighbour));
+  float warp = edge * (1.0 - smoothstep(0.65, 1.0, uCuCompletion));
+  vec3 bend = vec3(
+    0.065 * sin(uvw.y * 9.5 + uvw.z * 5.0 - uCuTime * 0.53),
+    0.0,
+    0.05 * cos(uvw.y * 8.0 - uvw.x * 5.0 + uCuTime * 0.47));
+  vec3 folded = clamp(uvw + bend * warp, 0.0, 1.0);
+  density = mix(texture(uCuPrevious, folded).r, texture(uCuCurrent, folded).r, uCuBlend);
+  float threshold = mix(0.045, 0.015, smoothstep(0.38, 0.95, uCuCompletion));
+  float flowing = 2.3 * smoothstep(threshold, threshold + 0.32, max(0.0, density));
+  if (uCuCompletion > 0.75) {
+    float settled = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
+    return mix(flowing, 2.05 * settled / (settled + 0.12),
+      smoothstep(0.75, 0.95, uCuCompletion));
+  }
+  return flowing;
 }`;
 
 export const permanganateTongueGLSL = `
@@ -48,6 +68,8 @@ export class TubeAbsorptionMaterial extends THREE.ShaderMaterial {
         uCameraLocal: { value: new THREE.Vector3() }, uKind: { value: 0 }, uProgress: { value: 0 },
         uCuPrevious: { value: null as THREE.Data3DTexture | null },
         uCuCurrent: { value: null as THREE.Data3DTexture | null }, uCuBlend: { value: 0 },
+        uCuCompletion: { value: 0 },
+        uCuTime: { value: 0 },
         uCuBoundsMin: { value: bounds.min },
         uCuBoundsSize: { value: bounds.size },
         uCuSpheres: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) },
@@ -101,7 +123,8 @@ void main() {
     float wall = h < radius ? radius * radius - (h - radius) * (h - radius) : radius * radius;
     if (h < 0.0 || h > height || dot(q.xz, q.xz) > wall || dot(uUp, q) > uLevel) continue;
     if (uKind < 1.5) {
-      opticalDepth += vec3(0.42, 0.12, 0.005) * max(0.0, copperField(q)) * distance / (uSteps * radius);
+      opticalDepth += mix(vec3(1.0, 0.26, 0.008), vec3(0.95, 0.20, 0.07),
+        smoothstep(0.65, 0.95, uCuCompletion)) * max(0.0, copperField(q)) * distance / (uSteps * radius);
     } else {
       float c = 1.0 - smoothstep(0.02, 0.98, uProgress);
       if (uIncomingDyed > 0.5) {

@@ -96,6 +96,14 @@ export class VelocityField {
     const dSdx = swirl * 3.7 / r * Math.cos(ax) * sy * sz;
     const dSdy = swirl * 4.1 / h * sx * Math.cos(ay) * sz;
     const dSdz = swirl * 3.2 / r * sx * sy * Math.cos(az);
+    // A smaller curl scale bends filaments without a volume source.
+    const fx = 11.3 * X - time * 1.37 * motion;
+    const fy = 8.7 * Y + time * 0.91 * motion;
+    const fz = 10.1 * Z - time * 1.11 * motion;
+    const fine = 0.00000012 + heat * 0.00000017;
+    const fineX = fine * 11.3 / r * Math.cos(fx) * Math.sin(fy) * Math.cos(fz);
+    const fineY = fine * 8.7 / h * Math.sin(fx) * Math.cos(fy) * Math.cos(fz);
+    const fineZ = -fine * 10.1 / r * Math.sin(fx) * Math.sin(fy) * Math.sin(fz);
     // Curl of (Zp, 0, -Xp), with a wandering centre. The broad updraft
     // reaches the copper surface; the return flow runs along the glass.
     const bend = 0.14 + heat * 0.14;
@@ -107,13 +115,13 @@ export class VelocityField {
     const czY = -bend * 1.1 * Math.sin(phaseZ) / h;
     const U = X - cx, V = Z - cz, radial2 = U * U + V * V;
     const strength = 0.00022 + this.contributions.gas * 0.0006
-      + heat * 0.001 + this.contrast * 0.002 + this.contributions.bubbles * 0.0003;
+      + heat * 0.00135 + this.contrast * 0.002 + this.contributions.bubbles * 0.0003;
     const plume = strength * Math.exp(-0.65 * radial2);
     const plumeY = plume * 1.3 * (U * cxY + V * czY);
     const accel = this.contributions.acceleration;
-    const vx = -0.8 * dSdy - 0.7 * dSdz - U * plumeY + cxY * plume - accel.x * 0.0001 / h;
-    const vy = dSdz + 0.8 * dSdx + plume * (2 - 1.3 * radial2);
-    const vz = 0.7 * dSdx - dSdy - V * plumeY + czY * plume + accel.z * 0.0001 / r;
+    const vx = -0.8 * dSdy - 0.7 * dSdz - fineY - fineZ - U * plumeY + cxY * plume - accel.x * 0.0001 / h;
+    const vy = dSdz + 0.8 * dSdx + fineZ + fineX + plume * (2 - 1.3 * radial2);
+    const vz = 0.7 * dSdx - dSdy + fineX - fineY - V * plumeY + czY * plume + accel.z * 0.0001 / r;
     const g = this.gravityUp;
     this.result[0] = vx + vy * g.x;
     this.result[1] = vy * g.y;
@@ -138,6 +146,12 @@ export class TubeVolumeField {
   private readonly facesX: Int32Array;
   private readonly facesY: Int32Array;
   private readonly facesZ: Int32Array;
+  private readonly leftX: Int32Array;
+  private readonly leftY: Int32Array;
+  private readonly leftZ: Int32Array;
+  private readonly rightX: Int32Array;
+  private readonly rightY: Int32Array;
+  private readonly rightZ: Int32Array;
   private countX = 0;
   private countY = 0;
   private countZ = 0;
@@ -146,10 +160,11 @@ export class TubeVolumeField {
   private readonly fluxZ: Float64Array;
   private readonly outgoing: Float64Array;
   private readonly nextValues: Float64Array;
-  private readonly injectionWeights: Float64Array;
+  private readonly injectionWeights: Float64Array[];
   private readonly nearest: Int32Array;
   private readonly queue: Int32Array;
-  private injectionTotal = 0;
+  private readonly injectionTotals = new Float64Array(4);
+  private readonly pulseScales = new Float64Array(4);
   private injectionDirty = true;
   private readonly injectionPoint = new THREE.Vector3();
   private readonly fallbackSource = new THREE.Vector3();
@@ -168,10 +183,12 @@ export class TubeVolumeField {
   private pending = 0;
   private lastProgress = 0;
   private readonly step: number;
+  private readonly useMuscl: boolean;
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     sources: readonly THREE.Vector3[]) {
     const low = quality === "LOW";
+    this.useMuscl = !low;
     this.step = 1 / 20;
     this.mask = new LiquidMask(low ? 16 : 22, low ? 32 : 44, low ? 16 : 22, radius, bottom, height);
     this.species = { "Cu2+": new SpeciesField("Cu2+", this.mask) };
@@ -180,9 +197,11 @@ export class TubeVolumeField {
     const n = this.mask.data.length;
     this.faceX = new Float32Array(n); this.faceY = new Float32Array(n); this.faceZ = new Float32Array(n);
     this.facesX = new Int32Array(n); this.facesY = new Int32Array(n); this.facesZ = new Int32Array(n);
+    this.leftX = new Int32Array(n); this.leftY = new Int32Array(n); this.leftZ = new Int32Array(n);
+    this.rightX = new Int32Array(n); this.rightY = new Int32Array(n); this.rightZ = new Int32Array(n);
     this.fluxX = new Float64Array(n); this.fluxY = new Float64Array(n); this.fluxZ = new Float64Array(n);
     this.outgoing = new Float64Array(n); this.nextValues = new Float64Array(n);
-    this.injectionWeights = new Float64Array(n);
+    this.injectionWeights = Array.from({ length: 4 }, () => new Float64Array(n));
     this.nearest = new Int32Array(n); this.queue = new Int32Array(n);
     this.prevPixels = new Float32Array(n); this.pixels = new Float32Array(n);
     const texture = (pixels: Float32Array) => {
@@ -262,9 +281,25 @@ export class TubeVolumeField {
     this.countX = this.countY = this.countZ = 0;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
-      if (i % m.nx + 1 < m.nx && m.data[i + 1]) this.facesX[this.countX++] = i;
-      if (Math.floor(i / m.nx) % m.ny + 1 < m.ny && m.data[i + m.nx]) this.facesY[this.countY++] = i;
-      if (i + slice < m.data.length && m.data[i + slice]) this.facesZ[this.countZ++] = i;
+      const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / slice);
+      if (x + 1 < m.nx && m.data[i + 1]) {
+        const k = this.countX++;
+        this.facesX[k] = i;
+        this.leftX[k] = x > 0 && m.data[i - 1] ? i - 1 : i;
+        this.rightX[k] = x + 2 < m.nx && m.data[i + 2] ? i + 2 : i + 1;
+      }
+      if (y + 1 < m.ny && m.data[i + m.nx]) {
+        const k = this.countY++;
+        this.facesY[k] = i;
+        this.leftY[k] = y > 0 && m.data[i - m.nx] ? i - m.nx : i;
+        this.rightY[k] = y + 2 < m.ny && m.data[i + 2 * m.nx] ? i + 2 * m.nx : i + m.nx;
+      }
+      if (z + 1 < m.nz && m.data[i + slice]) {
+        const k = this.countZ++;
+        this.facesZ[k] = i;
+        this.leftZ[k] = z > 0 && m.data[i - slice] ? i - slice : i;
+        this.rightZ[k] = z + 2 < m.nz && m.data[i + 2 * slice] ? i + 2 * slice : i + slice;
+      }
     }
   }
 
@@ -298,8 +333,9 @@ export class TubeVolumeField {
   private transport(dt: number) {
     const m = this.mask, values = this.species["Cu2+"].values;
     const dx = 2 * m.radius / m.nx, dy = m.height / m.ny, dz = 2 * m.radius / m.nz;
-    const diffusivity = 0.00002 + this.velocity.contributions.buoyancy * 0.000035
-      + this.velocity.contributions.gas * 0.000015;
+    const completion = clamp((this.reaction.extent - 0.68) / 0.27, 0, 1);
+    const diffusivity = 0.00000025 + this.velocity.contributions.buoyancy * 0.00000025
+      + this.velocity.contributions.gas * 0.0000001 + completion * completion * 0.00002;
     const { fluxX, fluxY, fluxZ, outgoing, nextValues } = this;
     outgoing.fill(0);
     nextValues.set(values);
@@ -307,6 +343,8 @@ export class TubeVolumeField {
       const faces = axis === 0 ? this.facesX : axis === 1 ? this.facesY : this.facesZ;
       const speeds = axis === 0 ? this.faceX : axis === 1 ? this.faceY : this.faceZ;
       const fluxes = axis === 0 ? fluxX : axis === 1 ? fluxY : fluxZ;
+      const lefts = axis === 0 ? this.leftX : axis === 1 ? this.leftY : this.leftZ;
+      const rights = axis === 0 ? this.rightX : axis === 1 ? this.rightY : this.rightZ;
       const count = axis === 0 ? this.countX : axis === 1 ? this.countY : this.countZ;
       const offset = axis === 0 ? 1 : axis === 1 ? m.nx : m.nx * m.ny;
       const spacing = axis === 0 ? dx : axis === 1 ? dy : dz;
@@ -314,7 +352,15 @@ export class TubeVolumeField {
       for (let k = 0; k < count; k++) {
         const a = faces[k], b = a + offset;
         const fraction = Math.max(-0.2, Math.min(0.2, speeds[a] * cfl));
-        const raw = (fraction >= 0 ? values[a] : values[b]) * fraction + (values[a] - values[b]) * mix;
+        let reconstructed = fraction >= 0 ? values[a] : values[b];
+        if (this.useMuscl) {
+          const left = values[lefts[k]], right = values[rights[k]];
+          const slopeA = this.minmod(values[a] - left, values[b] - values[a]);
+          const slopeB = this.minmod(values[b] - values[a], right - values[b]);
+          reconstructed = fraction >= 0 ? values[a] + 0.5 * (1 - fraction) * slopeA
+            : values[b] - 0.5 * (1 + fraction) * slopeB;
+        }
+        const raw = reconstructed * fraction + (values[a] - values[b]) * mix;
         fluxes[a] = raw;
         if (raw > 0) outgoing[a] += raw;
         else outgoing[b] -= raw;
@@ -334,6 +380,20 @@ export class TubeVolumeField {
       }
     }
     values.set(nextValues);
+    const lateMix = clamp((this.reaction.extent - 0.68) / 0.28, 0, 1) * dt * 0.24;
+    if (lateMix > 0 && m.activeCount > 0) {
+      let total = 0;
+      for (let a = 0; a < m.activeCount; a++) total += values[m.active[a]];
+      const mean = total / m.activeCount;
+      for (let a = 0; a < m.activeCount; a++) {
+        const i = m.active[a];
+        values[i] += lateMix * (mean - values[i]);
+      }
+    }
+  }
+
+  private minmod(a: number, b: number) {
+    return a > 0 && b > 0 ? Math.min(a, b) : a < 0 && b < 0 ? Math.max(a, b) : 0;
   }
 
   private updateVelocities() {
@@ -365,36 +425,47 @@ export class TubeVolumeField {
     const zoneCount = Math.min(zones.length, this.kernelX.length);
     const weights = this.injectionWeights;
     if (this.injectionDirty) {
+      for (const group of weights) group.fill(0);
+      this.injectionTotals.fill(0);
       for (let s = 0; s < zoneCount; s++) {
         const source = zones[s];
         const angle = s * 2.399;
-        this.kernelX[s] = source.x + Math.cos(angle) * m.radius * 0.15;
+        this.kernelX[s] = source.x + Math.cos(angle) * m.radius * 0.08;
         this.kernelY[s] = source.y;
-        this.kernelZ[s] = source.z + Math.sin(angle) * m.radius * 0.15;
+        this.kernelZ[s] = source.z + Math.sin(angle) * m.radius * 0.08;
         this.kernelWeight[s] = 0.25 + 0.75 * Math.sin(s * 7.1) ** 2;
       }
-      let total = 0;
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a];
         const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
         const q = m.point(x, y, z, this.injectionPoint);
-        let w = 0;
         for (let s = 0; s < zoneCount; s++) {
-          const r2 = ((q.x - this.kernelX[s]) / (m.radius * 0.22)) ** 2
-            + ((q.y - this.kernelY[s]) / (m.radius * 0.18)) ** 2
-            + ((q.z - this.kernelZ[s]) / (m.radius * 0.22)) ** 2;
-          w += this.kernelWeight[s] * Math.exp(-r2 * 2.8);
+          const r2 = ((q.x - this.kernelX[s]) / (m.radius * 0.16)) ** 2
+            + ((q.y - this.kernelY[s]) / (m.radius * 0.14)) ** 2
+            + ((q.z - this.kernelZ[s]) / (m.radius * 0.16)) ** 2;
+          const w = this.kernelWeight[s] * Math.exp(-r2 * 2.8);
+          if (w > 1e-6) weights[s % 4][i] += w;
         }
-        weights[i] = w > 1e-6 ? w : 0;
-        total += weights[i];
+        for (let group = 0; group < 4; group++) this.injectionTotals[group] += weights[group][i];
       }
-      this.injectionTotal = total;
       this.injectionDirty = false;
     }
-    if (this.injectionTotal === 0) return;
-    const scale = 3 * d / this.injectionTotal;
+    // Four phase-shifted microzones breathe independently. Normalize each
+    // pulse so its summed stoichiometric product is still exactly 3 d.
+    const pulses = this.pulseScales;
+    let pulseTotal = 0;
+    for (let group = 0; group < 4; group++) {
+      pulses[group] = this.injectionTotals[group] > 0
+        ? 0.18 + Math.pow(Math.max(0, Math.sin(this.time * 3.1 + group * 1.57)), 2) : 0;
+      pulseTotal += pulses[group];
+    }
+    if (pulseTotal === 0) return;
+    for (let group = 0; group < 4; group++) pulses[group] = pulses[group] > 0
+      ? 3 * d * pulses[group] / (pulseTotal * this.injectionTotals[group]) : 0;
     for (let a = 0; a < m.activeCount; a++) {
-      const i = m.active[a]; values[i] += scale * weights[i];
+      const i = m.active[a];
+      values[i] += pulses[0] * weights[0][i] + pulses[1] * weights[1][i]
+        + pulses[2] * weights[2][i] + pulses[3] * weights[3][i];
     }
   }
 
@@ -402,7 +473,24 @@ export class TubeVolumeField {
     const m = this.mask, v = this.species["Cu2+"].values;
     // Normalize by a whole-tube amount, not by max voxel, so hue preserves mass.
     const scale = m.data.length * 0.018;
-    for (let i = 0; i < v.length; i++) this.pixels[i] = m.data[i] ? Math.max(0, finite(v[i]) * scale) : 0;
+    const opticalSmoothing = clamp((this.reaction.extent - 0.8) / 0.17, 0, 1) * 0.65;
+    const slice = m.nx * m.ny;
+    for (let i = 0; i < v.length; i++) {
+      if (!m.data[i]) { this.pixels[i] = 0; continue; }
+      let value = v[i];
+      if (opticalSmoothing > 0) {
+        let sum = value, count = 1;
+        const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
+        if (x > 0 && m.data[i - 1]) { sum += v[i - 1]; count++; }
+        if (x + 1 < m.nx && m.data[i + 1]) { sum += v[i + 1]; count++; }
+        if (y > 0 && m.data[i - m.nx]) { sum += v[i - m.nx]; count++; }
+        if (y + 1 < m.ny && m.data[i + m.nx]) { sum += v[i + m.nx]; count++; }
+        if (i >= slice && m.data[i - slice]) { sum += v[i - slice]; count++; }
+        if (i + slice < v.length && m.data[i + slice]) { sum += v[i + slice]; count++; }
+        value += opticalSmoothing * (sum / count - value);
+      }
+      this.pixels[i] = Math.max(0, finite(value) * scale);
+    }
     this.current.needsUpdate = true;
   }
   dispose() { this.previous.dispose(); this.current.dispose(); }

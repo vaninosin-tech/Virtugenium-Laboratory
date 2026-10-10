@@ -59,6 +59,8 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uCuPrevious: { value: null as THREE.Data3DTexture | null },
       uCuCurrent: { value: null as THREE.Data3DTexture | null },
       uCuBlend: { value: 0 },
+      uCuCompletion: { value: 0 },
+      uCuTime: { value: 0 },
       uCuBoundsMin: { value: new THREE.Vector3() },
       uCuBoundsSize: { value: new THREE.Vector3(1, 1, 1) },
     });

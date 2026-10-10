@@ -88,6 +88,24 @@ try {
   await capture("reheating-2");
   await page.waitForTimeout(3000);
   await capture("reheating-5");
+  await page.waitForFunction(() => {
+    const index = window.__bunsenStandStore.getState().attachedTubeSlotIndex;
+    const tube = index === null ? null : window.__testTubeStorageStore.getState().fumeHoodTestTubes[index];
+    return tube && window.__tubeReactionStore.getState().chemistryById[tube.instanceId]?.progress >= 0.98;
+  }, null, { timeout: 90000 });
+  await capture("end");
+  const fps = await page.evaluate(() => new Promise(resolve => {
+    let frames = 0;
+    const start = performance.now();
+    const tick = () => {
+      frames++;
+      const elapsed = performance.now() - start;
+      if (elapsed >= 4000) resolve(frames * 1000 / elapsed);
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }));
+  console.log("copper cycle FPS", fps.toFixed(1));
 } finally {
   await browser.close();
 }
