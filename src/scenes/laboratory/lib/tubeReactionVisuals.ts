@@ -7,7 +7,9 @@ import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
 import { TubeVolumeField } from "./tubeVolumeField";
 import { testTubeLiquidFill } from "./testTubeContents";
-import type { ReactionKind, TubeChemistry } from "./tubeReactions";
+import { useTubeReactionStore, type ReactionKind, type TubeChemistry } from "./tubeReactions";
+import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
+import { useTestTubeStorageStore } from "./useTestTubeStorageStore";
 import { useRuntimeQualityStore, type RuntimeQuality } from "./useRuntimeQualityStore";
 
 export const TUBE_VISUALS = {
@@ -804,6 +806,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   const copperField = kind === "copper-nitric" && hasLiquid
     ? new TubeVolumeField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, size.y, copperPoints) : null;
+  const tubeWorldPosition = new THREE.Vector3();
   const source = new THREE.Vector3();
   const bubblePoint = new THREE.Vector3();
   const causticRay = new THREE.Raycaster();
@@ -884,7 +887,18 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           }
         });
         copperField.setSources(sourcePoints, sourceCount);
-        copperField.advance(Math.min(elapsed, 0.25), reactionProgress ?? p, up.value, level.value, rate, temperature);
+        volume.getWorldPosition(tubeWorldPosition);
+        const stand = useBunsenStandStorageStore.getState();
+        const tubes = useTestTubeStorageStore.getState();
+        const index = stand.attachedTubeSlotIndex;
+        const attached = index === null ? undefined
+          : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[index];
+        // The UI smooths scalar chemistry for display. Read the attached
+        // tube's spatial field directly so its hot side reaches convection.
+        const spatialHeat = options.activeSurface && attached
+          ? useTubeReactionStore.getState().chemistryById[attached.instanceId]?.temperatureField : undefined;
+        copperField.advance(Math.min(elapsed, 0.25), reactionProgress ?? p, up.value, level.value,
+          rate, temperature, spatialHeat, tubeWorldPosition);
       }
       if (backdrop && backdropWall && backdropCap) {
         backdrop.up.value.copy(up.value);

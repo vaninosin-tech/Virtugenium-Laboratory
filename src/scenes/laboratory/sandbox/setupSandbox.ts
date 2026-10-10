@@ -15,6 +15,7 @@ import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useTubeReactionStore } from "../lib/tubeReactions";
+import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
 
 const FUME_HOOD_ID = "fume-hood";
 
@@ -102,4 +103,46 @@ export function replaceSandboxTube(): void {
   useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
   useHeatingStore.getState().reset();
   useTubeReactionStore.getState().reset();
+}
+
+/** What goes in first, and the reagent poured last — the one that starts the reaction. */
+const EXPERIMENT_SHOWCASE: Record<1 | 2 | 3 | 4, { first: ReagentId[]; last: ReagentId; hot?: boolean }> = {
+  1: { first: ["cu"], last: "hno3", hot: true },
+  2: { first: ["agno3"], last: "nacl" },
+  3: { first: ["bacl2"], last: "k2so4" },
+  4: { first: ["na2so3", "h2so4"], last: "kmno4" },
+};
+
+let showcaseTimers: number[] = [];
+
+/**
+ * Shows one experiment close up: a clean tube with the first reagents, the
+ * camera at the tube, then the last reagent a moment later so the start of the
+ * reaction is seen. Experiment 1 is kept hot instead of being heated by hand.
+ */
+export function showExperiment(experiment: 1 | 2 | 3 | 4): void {
+  for (const timer of showcaseTimers) {
+    window.clearTimeout(timer);
+    window.clearInterval(timer);
+  }
+  showcaseTimers = [];
+  replaceSandboxTube();
+  const { first, last, hot } = EXPERIMENT_SHOWCASE[experiment];
+  const tubes = useTestTubeStorageStore.getState();
+  for (const id of first) tubes.addTubeContents("fumeHood", 0, id);
+  // The showcase starts warming the contents while the last reagent is poured.
+  // The tube field owns the heat-up and keeps its local gradient.
+  if (hot) {
+    const id = useTestTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId;
+    if (id) useTubeReactionStore.getState().setExternalHeat(id, 1);
+  }
+  useSceneInteractionStore.getState().requestFocus(FUME_HOOD_ID);
+
+  showcaseTimers.push(
+    window.setTimeout(() => {
+      useTestTubeStorageStore.getState().addTubeContents("fumeHood", 0, last);
+      // The close-up needs the reacting tube to have claimed the focus point first.
+      showcaseTimers.push(window.setTimeout(() => useTubeCloseUpStore.getState().open(), 150));
+    }, 1500),
+  );
 }

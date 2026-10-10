@@ -6,7 +6,7 @@ import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStor
 import { reactionKindFor, reactionTriggerFor, useTubeReactionStore, type ReactionKind } from "../lib/tubeReactions";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
-import { replaceSandboxTube } from "./setupSandbox";
+import { replaceSandboxTube, showExperiment } from "./setupSandbox";
 
 const REACTION_NAMES: Record<ReactionKind, string> = {
   "copper-nitric": "Cu + HNO₃ (разб.) — голубой раствор, NO → бурый NO₂",
@@ -56,6 +56,15 @@ export function SandboxPanel() {
         </span>
       ) : null}
       <span style={hintStyle}>Температура содержимого: {Math.round(20 + temperature * 80)} °C</span>
+
+      <span style={hintStyle}>Показать опыт вблизи (Q или Esc — отойти):</span>
+      <div style={rowStyle}>
+        {([1, 2, 3, 4] as const).map((experiment) => (
+          <button key={experiment} type="button" style={buttonStyle} onClick={() => showExperiment(experiment)}>
+            Опыт {experiment}
+          </button>
+        ))}
+      </div>
 
       <div style={rowStyle}>
         <button type="button" style={buttonStyle} onClick={replaceSandboxTube}>

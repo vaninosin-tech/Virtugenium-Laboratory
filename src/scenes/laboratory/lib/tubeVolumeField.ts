@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { copperReactionState, type CopperReactionState } from "./tubeReactions";
+import type { TemperatureField } from "./tubeTemperatureField";
 
 export type SpeciesId = "Cu2+" | (string & {});
 export type ReactionState = CopperReactionState;
@@ -75,6 +76,10 @@ export interface VelocityContributions {
 /** Curl of an analytic vector potential; face samples have no volume source. */
 export class VelocityField {
   private readonly result = new Float64Array(3);
+  readonly gravityUp = new THREE.Vector3(0, 1, 0);
+  heatX = 0;
+  heatZ = 0;
+  contrast = 0;
   readonly contributions: VelocityContributions = {
     gas: 0, buoyancy: 0, bubbles: 0, acceleration: new THREE.Vector3(),
   };
@@ -96,18 +101,23 @@ export class VelocityField {
     const bend = 0.14 + heat * 0.14;
     const phaseX = 1.4 * Y - time * 0.67 * motion;
     const phaseZ = 1.1 * Y + time * 0.51 * motion;
-    const cx = bend * Math.sin(phaseX), cz = bend * Math.cos(phaseZ);
+    const cx = bend * Math.sin(phaseX) + this.heatX * 0.42;
+    const cz = bend * Math.cos(phaseZ) + this.heatZ * 0.42;
     const cxY = bend * 1.4 * Math.cos(phaseX) / h;
     const czY = -bend * 1.1 * Math.sin(phaseZ) / h;
     const U = X - cx, V = Z - cz, radial2 = U * U + V * V;
     const strength = 0.00022 + this.contributions.gas * 0.0006
-      + heat * 0.001 + this.contributions.bubbles * 0.0003;
+      + heat * 0.001 + this.contrast * 0.002 + this.contributions.bubbles * 0.0003;
     const plume = strength * Math.exp(-0.65 * radial2);
     const plumeY = plume * 1.3 * (U * cxY + V * czY);
     const accel = this.contributions.acceleration;
-    this.result[0] = -0.8 * dSdy - 0.7 * dSdz - U * plumeY + cxY * plume - accel.x * 0.0001 / h;
-    this.result[1] = dSdz + 0.8 * dSdx + plume * (2 - 1.3 * radial2);
-    this.result[2] = 0.7 * dSdx - dSdy - V * plumeY + czY * plume + accel.z * 0.0001 / r;
+    const vx = -0.8 * dSdy - 0.7 * dSdz - U * plumeY + cxY * plume - accel.x * 0.0001 / h;
+    const vy = dSdz + 0.8 * dSdx + plume * (2 - 1.3 * radial2);
+    const vz = 0.7 * dSdx - dSdy - V * plumeY + czY * plume + accel.z * 0.0001 / r;
+    const g = this.gravityUp;
+    this.result[0] = vx + vy * g.x;
+    this.result[1] = vy * g.y;
+    this.result[2] = vz + vy * g.z;
     return this.result;
   }
 }
@@ -149,6 +159,9 @@ export class TubeVolumeField {
   private readonly kernelWeight = new Float64Array(32);
   private velocityAge = Infinity;
   private readonly priorUp = new THREE.Vector3(Infinity, Infinity, Infinity);
+  private readonly priorPosition = new THREE.Vector3();
+  private readonly positionDelta = new THREE.Vector3();
+  private positionReady = false;
   private priorLevel = Infinity;
   private accumulator = 0;
   private time = 0;
@@ -199,13 +212,28 @@ export class TubeVolumeField {
     this.sources.length = count;
   }
   /** The controller owns ξ. This only integrates positive increments of its progress. */
-  advance(dt: number, progress: number, up: THREE.Vector3, level: number, gasDrive = 0, temperature = 0) {
+  advance(dt: number, progress: number, up: THREE.Vector3, level: number, gasDrive = 0,
+    temperature = 0, temperatureField?: TemperatureField, worldPosition?: THREE.Vector3) {
     const p = clamp(finite(progress), 0, 1);
     const delta = Math.max(0, p - this.lastProgress);
     this.lastProgress = p;
     this.pending += delta;
     this.velocity.contributions.gas = clamp(finite(gasDrive), 0, 1);
-    this.velocity.contributions.buoyancy = clamp(finite(temperature), 0, 1);
+    this.velocity.contributions.buoyancy = clamp(finite(temperatureField?.mean ?? temperature), 0, 1);
+    this.velocity.heatX = temperatureField?.hotX ?? 0;
+    this.velocity.heatZ = temperatureField?.hotZ ?? 0;
+    this.velocity.contrast = temperatureField?.contrast ?? 0;
+    const acceleration = this.velocity.contributions.acceleration;
+    acceleration.multiplyScalar(0.85).add(up).sub(this.velocity.gravityUp);
+    if (worldPosition) {
+      if (this.positionReady && dt > 0)
+        acceleration.addScaledVector(this.positionDelta.subVectors(worldPosition, this.priorPosition),
+          0.8 / Math.max(0.01, dt));
+      this.priorPosition.copy(worldPosition);
+      this.positionReady = true;
+    }
+    acceleration.clampLength(0, 1);
+    this.velocity.gravityUp.copy(up);
     this.accumulator = Math.min(this.step * 2, this.accumulator + clamp(finite(dt), 0, 0.25));
     let steps = 0;
     while (this.accumulator + 1e-10 >= this.step && steps++ < 2) {

@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { TemperatureField } from "./tubeTemperatureField";
+import { useHeatingStore } from "./useHeatingStore";
 
 export type ReactionKind = "copper-nitric" | "silver-chloride" | "barium-sulfate" | "permanganate-redox";
 
@@ -76,6 +78,10 @@ export interface TubeChemistry {
   readonly rate: number;
   /** 0..1, contents temperature: 0 room, 1 near boiling. */
   readonly temperature: number;
+  /** Persistent spatial temperature; its mean is `temperature`. */
+  readonly temperatureField?: TemperatureField;
+  /** External heat contact for a scripted tube; absent means only the live flame can heat it. */
+  readonly externalHeat?: { readonly power: number; readonly side: number };
   /** Seconds since the tube's reagents first made a reaction — for `holdSeconds`. */
   readonly age?: number;
 }
@@ -124,27 +130,34 @@ export const advanceChemistry = (
   deltaSeconds: number,
   inFlame: boolean,
 ): TubeChemistry => {
-  const temperature = clamp01(
-    state.temperature +
-      (inFlame ? deltaSeconds / TEMPERATURE_RISE_SECONDS : -deltaSeconds / TEMPERATURE_COOL_SECONDS),
-  );
+  const temperatureField = state.temperatureField ?? new TemperatureField(state.temperature);
+  const heating = useHeatingStore.getState();
+  // The caller has already checked the target, lamp and bottom contact.
+  const external = state.externalHeat;
+  const power = Math.max(inFlame ? 1 : 0, external?.power ?? 0);
+  const side = inFlame ? (heating.sweep < 0 ? -1 : 1) : external?.side ?? 0;
+  temperatureField.advance(deltaSeconds, power, side,
+    TEMPERATURE_RISE_SECONDS, TEMPERATURE_COOL_SECONDS);
+  const temperature = clamp01(temperatureField.mean);
   const reaction = findReaction(contents);
-  if (!reaction) return { progress: 0, rate: 0, temperature, age: 0 };
+  if (!reaction) return { progress: 0, rate: 0, temperature, temperatureField, externalHeat: external, age: 0 };
 
   const age = (state.age ?? 0) + deltaSeconds;
-  if (age < (reaction.holdSeconds ?? 0)) return { progress: 0, rate: 0, temperature, age };
+  if (age < (reaction.holdSeconds ?? 0)) return { progress: 0, rate: 0, temperature, temperatureField, externalHeat: external, age };
 
   const drive = reaction.coldRate + (1 - reaction.coldRate) * temperature;
   const remaining = 1 - state.progress;
   const rate = reaction.trigger === "heat" ? drive * Math.sqrt(remaining) : remaining > 0 ? drive : 0;
   const progress = clamp01(state.progress + (rate * deltaSeconds) / reaction.seconds);
-  return { progress, rate: progress >= 1 ? 0 : rate, temperature, age };
+  return { progress, rate: progress >= 1 ? 0 : rate, temperature, temperatureField, externalHeat: external, age };
 };
 
 interface TubeReactionState {
   /** Per tube `instanceId`. Absent means a tube at room temperature with nothing reacting. */
   readonly chemistryById: Readonly<Record<string, TubeChemistry>>;
   setChemistry: (instanceId: string, chemistry: TubeChemistry) => void;
+  /** Feed 0..1 flame-equivalent heat into a tube's bottom; side defaults to centre. */
+  setExternalHeat: (instanceId: string, power: number, side?: number) => void;
   clear: (instanceId: string) => void;
   reset: () => void;
 }
@@ -158,6 +171,13 @@ export const useTubeReactionStore = create<TubeReactionState>((set) => ({
   chemistryById: {},
   setChemistry: (instanceId, chemistry) =>
     set((state) => ({ chemistryById: { ...state.chemistryById, [instanceId]: chemistry } })),
+  setExternalHeat: (instanceId, power, side = 0) =>
+    set((state) => {
+      const current = state.chemistryById[instanceId] ?? ROOM_TEMPERATURE_CHEMISTRY;
+      const externalHeat = { power: clamp01(Number.isFinite(power) ? power : 0),
+        side: Math.max(-1, Math.min(1, Number.isFinite(side) ? side : 0)) };
+      return { chemistryById: { ...state.chemistryById, [instanceId]: { ...current, externalHeat } } };
+    }),
   clear: (instanceId) =>
     set((state) => {
       if (!(instanceId in state.chemistryById)) return state;
