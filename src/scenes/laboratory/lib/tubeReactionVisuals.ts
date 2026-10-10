@@ -7,7 +7,7 @@ import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
 import { TubeVolumeField } from "./tubeVolumeField";
 import { testTubeLiquidFill } from "./testTubeContents";
-import { useTubeReactionStore, type ReactionKind, type TubeChemistry } from "./tubeReactions";
+import { copperGranuleRadiusScale, useTubeReactionStore, type ReactionKind, type TubeChemistry } from "./tubeReactions";
 import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
 import { useTestTubeStorageStore } from "./useTestTubeStorageStore";
 import { useRuntimeQualityStore, type RuntimeQuality } from "./useRuntimeQualityStore";
@@ -802,7 +802,29 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       Math.hypot(positions.getX(i), positions.getY(i), positions.getZ(i)));
     return bound;
   }) ?? [];
-  const sourcePoints = Array.from({ length: (copper?.children.length ?? 0) * 4 }, () => new THREE.Vector3());
+  // Five actual surface vertices per grain. The enclosing sphere used for
+  // placement is larger than the irregular copper and left a clear gap.
+  const copperSourceVertices = copper?.children.flatMap((child, i) => {
+    if (!(child instanceof THREE.Mesh)) return [];
+    const positions = child.geometry.getAttribute("position");
+    const candidates: THREE.Vector3[] = [];
+    const vertex = new THREE.Vector3();
+    for (let k = 0; k < 5; k++) {
+      const angle = (k - 1) * Math.PI * 0.5 + i * 1.7;
+      const direction = k === 0 ? new THREE.Vector3(0, 1, 0)
+        : new THREE.Vector3(Math.cos(angle) * 0.55, 0.83, Math.sin(angle) * 0.55);
+      let best = -Infinity;
+      let selected = new THREE.Vector3();
+      for (let j = 0; j < positions.count; j++) {
+        vertex.fromBufferAttribute(positions, j);
+        const score = vertex.clone().applyQuaternion(child.quaternion).dot(direction);
+        if (score > best) { best = score; selected = vertex.clone(); }
+      }
+      candidates.push(selected);
+    }
+    return candidates;
+  }) ?? [];
+  const sourcePoints = Array.from({ length: (copper?.children.length ?? 0) * 5 }, () => new THREE.Vector3());
   const copperField = kind === "copper-nitric" && hasLiquid
     ? new TubeVolumeField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, size.y, copperPoints) : null;
@@ -874,16 +896,44 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       }
       up.value.set(-slope.x, 1, -slope.y).normalize();
       level.value = up.value.x * center.x + up.value.y * (box.min.y + size.y * fill) + up.value.z * center.z;
+      gravity.set(0, 1, 0).transformDirection(inverse.copy(volume.matrixWorld).invert());
+      if (copper) {
+        const shrink = copperGranuleRadiusScale(p);
+        copper.children.forEach((child, i) => {
+          const etch = THREE.MathUtils.smoothstep(p * (0.8 + random(i + 150) * 0.38), 0.02, 0.9);
+          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
+            child.material.color.set("#d58b68").lerp(new THREE.Color("#bd785b"), etch * 0.45);
+            child.material.roughness = THREE.MathUtils.lerp(0.32, 0.68, etch);
+            child.material.metalness = THREE.MathUtils.lerp(0.62, 0.40, etch);
+          }
+          // A bounding sphere encloses every rotated, irregular grain. Fit
+          // that sphere inside the bowl instead of trusting its drop target.
+          const fit = Math.min(1, radius * 0.86 / Math.max(copperBounds[i], 0.000001));
+          child.scale.setScalar(shrink * fit * (1 - etch * random(i + 173) * 0.24));
+          child.visible = shrink > 0.03;
+          child.position.copy(copperPoints[i]);
+          child.position.y = box.min.y + (child.position.y - box.min.y) * shrink;
+          const clearance = Math.max(0, radius * 0.98 - copperBounds[i] * shrink * fit);
+          child.position.x = center.x + (child.position.x - center.x) * shrink - gravity.x * clearance;
+          child.position.z = center.z + (child.position.z - center.z) * shrink - gravity.z * clearance;
+          const radial = Math.hypot(child.position.x - center.x, child.position.z - center.z);
+          if (radial > clearance * 0.98) {
+            const factor = clearance * 0.98 / Math.max(radial, 0.000001);
+            child.position.x = center.x + (child.position.x - center.x) * factor;
+            child.position.z = center.z + (child.position.z - center.z) * factor;
+          }
+          const offsetSq = (child.position.x - center.x) ** 2 + (child.position.z - center.z) ** 2;
+          child.position.y = Math.max(child.position.y,
+            box.min.y + radius - Math.sqrt(Math.max(0, clearance * clearance - offsetSq)));
+        });
+      }
       if (copperField && cameraPosition) {
         let sourceCount = 0;
         copper?.children.forEach((child, i) => {
           if (!(child instanceof THREE.Mesh) || !child.visible) return;
-          const bound = copperBounds[i] * child.scale.x;
-          for (let k = 0; k < 4; k++) {
-            const angle = k * Math.PI * 0.5 + i * 1.7;
-            sourcePoints[sourceCount++].set(child.position.x + Math.cos(angle) * bound * 0.95,
-              child.position.y + bound * (0.55 + 0.08 * k),
-              child.position.z + Math.sin(angle) * bound * 0.95);
+          child.updateMatrix();
+          for (let k = 0; k < 5; k++) {
+            sourcePoints[sourceCount++].copy(copperSourceVertices[i * 5 + k]).applyMatrix4(child.matrix);
           }
         });
         copperField.setSources(sourcePoints, sourceCount);
@@ -1157,36 +1207,6 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       condensate.count = Math.floor(count / 3);
       dropletMaterial.opacity = (0.15 + temperature * 0.25)
         * THREE.MathUtils.smoothstep(temperature, 0.45, 0.72);
-      if (copper) {
-        const shrink = Math.cbrt(Math.max(0, 1 - p));
-        copper.children.forEach((child, i) => {
-          const etch = THREE.MathUtils.smoothstep(p * (0.8 + random(i + 150) * 0.38), 0.02, 0.9);
-          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-            child.material.color.set("#d58b68").lerp(new THREE.Color("#bd785b"), etch * 0.45);
-            child.material.roughness = THREE.MathUtils.lerp(0.32, 0.68, etch);
-            child.material.metalness = THREE.MathUtils.lerp(0.62, 0.40, etch);
-          }
-          // A bounding sphere encloses every rotated, irregular grain. Fit
-          // that sphere inside the bowl instead of trusting its drop target.
-          const fit = Math.min(1, radius * 0.86 / Math.max(copperBounds[i], 0.000001));
-          child.scale.setScalar(shrink * fit * (1 - etch * random(i + 173) * 0.24));
-          child.visible = shrink > 0.03;
-          child.position.copy(copperPoints[i]);
-          child.position.y = box.min.y + (child.position.y - box.min.y) * shrink;
-          const clearance = Math.max(0, radius * 0.98 - copperBounds[i] * shrink * fit);
-          child.position.x = center.x + (child.position.x - center.x) * shrink - gravity.x * clearance;
-          child.position.z = center.z + (child.position.z - center.z) * shrink - gravity.z * clearance;
-          const radial = Math.hypot(child.position.x - center.x, child.position.z - center.z);
-          if (radial > clearance * 0.98) {
-            const factor = clearance * 0.98 / Math.max(radial, 0.000001);
-            child.position.x = center.x + (child.position.x - center.x) * factor;
-            child.position.z = center.z + (child.position.z - center.z) * factor;
-          }
-          const offsetSq = (child.position.x - center.x) ** 2 + (child.position.z - center.z) ** 2;
-          child.position.y = Math.max(child.position.y,
-            box.min.y + radius - Math.sqrt(Math.max(0, clearance * clearance - offsetSq)));
-        });
-      }
       const copperGrain = copper?.children[0];
       if (producingBubbles) attachedBubbles.visible = attachedBubbles.visible && copperGrain instanceof THREE.Mesh && copperGrain.visible;
       if (attachedBubbles.visible && producingBubbles && copperGrain instanceof THREE.Mesh) {

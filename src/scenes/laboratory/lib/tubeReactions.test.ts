@@ -4,6 +4,8 @@ import {
   ROOM_TEMPERATURE_CHEMISTRY,
   TEMPERATURE_RISE_SECONDS,
   advanceChemistry,
+  copperReactionState,
+  copperWettedArea,
   reactionKindFor,
   reactionTriggerFor,
   type TubeChemistry,
@@ -46,6 +48,18 @@ const run = (contents: string[], seconds: number, inFlame: boolean, from: TubeCh
 describe("advanceChemistry", () => {
   const COPPER = ["cu", "hno3"];
 
+  it("produces Cu(II) faster from more copper surface and slows as the granule shrinks", () => {
+    expect(copperWettedArea(0.5)).toBeCloseTo(Math.pow(0.5, 2 / 3));
+    const small = advanceChemistry(COPPER, { ...ROOM_TEMPERATURE_CHEMISTRY, copperArea: 0.5 }, 0.1, false);
+    const large = advanceChemistry(COPPER, { ...ROOM_TEMPERATURE_CHEMISTRY, copperArea: 1.5 }, 0.1, false);
+    expect(large.progress).toBeCloseTo(small.progress * 3);
+    const early = advanceChemistry(COPPER, { ...ROOM_TEMPERATURE_CHEMISTRY, progress: 0.1 }, 0.1, false);
+    const late = advanceChemistry(COPPER, { ...ROOM_TEMPERATURE_CHEMISTRY, progress: 0.8 }, 0.1, false);
+    expect(early.rate).toBeGreaterThan(late.rate);
+    expect(copperReactionState(late.progress).copperII - copperReactionState(0.8).copperII)
+      .toBeLessThan(copperReactionState(early.progress).copperII - copperReactionState(0.1).copperII);
+  });
+
   it("cold copper and dilute acid react slowly but visibly, finishing in about two minutes", () => {
     const minute = run(COPPER, 60, false);
     expect(minute.progress).toBeGreaterThan(0.5);
@@ -59,7 +73,7 @@ describe("advanceChemistry", () => {
     expect(hot.temperature).toBe(1);
     expect(hot.rate).toBeGreaterThan(0.5);
     const cold = run(COPPER, TEMPERATURE_RISE_SECONDS + 5, false);
-    expect(hot.rate).toBeGreaterThan(cold.rate * 2.5);
+    expect(hot.rate).toBeGreaterThan(cold.rate * 1.7);
     expect(hot.progress).toBeGreaterThan(cold.progress * 1.5);
   });
 

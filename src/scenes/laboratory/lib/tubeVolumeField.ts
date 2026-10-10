@@ -79,6 +79,8 @@ export class VelocityField {
   readonly gravityUp = new THREE.Vector3(0, 1, 0);
   heatX = 0;
   heatZ = 0;
+  sourceX = 0;
+  sourceZ = 0;
   contrast = 0;
   readonly contributions: VelocityContributions = {
     gas: 0, buoyancy: 0, bubbles: 0, acceleration: new THREE.Vector3(),
@@ -109,19 +111,26 @@ export class VelocityField {
     const bend = 0.14 + heat * 0.14;
     const phaseX = 1.4 * Y - time * 0.67 * motion;
     const phaseZ = 1.1 * Y + time * 0.51 * motion;
-    const cx = bend * Math.sin(phaseX) + this.heatX * 0.42;
-    const cz = bend * Math.cos(phaseZ) + this.heatZ * 0.42;
-    const cxY = bend * 1.4 * Math.cos(phaseX) / h;
-    const czY = -bend * 1.1 * Math.sin(phaseZ) / h;
+    const anchor = Math.exp(-0.3 * Y);
+    const driftX = bend * Math.sin(phaseX) + this.heatX * 0.42;
+    const driftZ = bend * Math.cos(phaseZ) + this.heatZ * 0.42;
+    const cx = this.sourceX * anchor + driftX * (1 - anchor);
+    const cz = this.sourceZ * anchor + driftZ * (1 - anchor);
+    const cxY = (1 - anchor) * bend * 1.4 * Math.cos(phaseX) / h
+      + 0.3 * anchor * (driftX - this.sourceX) / h;
+    const czY = -(1 - anchor) * bend * 1.1 * Math.sin(phaseZ) / h
+      + 0.3 * anchor * (driftZ - this.sourceZ) / h;
     const U = X - cx, V = Z - cz, radial2 = U * U + V * V;
     const strength = 0.00022 + this.contributions.gas * 0.0006
       + heat * 0.00135 + this.contrast * 0.002 + this.contributions.bubbles * 0.0003;
     const plume = strength * Math.exp(-0.65 * radial2);
     const plumeY = plume * 1.3 * (U * cxY + V * czY);
     const accel = this.contributions.acceleration;
-    const vx = -0.8 * dSdy - 0.7 * dSdz - fineY - fineZ - U * plumeY + cxY * plume - accel.x * 0.0001 / h;
+    const vx = -0.8 * dSdy - 0.7 * dSdz - fineY - fineZ - U * plumeY + cxY * plume
+      + (this.sourceX - X) * 0.006 * anchor - accel.x * 0.0001 / h;
     const vy = dSdz + 0.8 * dSdx + fineZ + fineX + plume * (2 - 1.3 * radial2);
-    const vz = 0.7 * dSdx - dSdy + fineX - fineY - V * plumeY + czY * plume + accel.z * 0.0001 / r;
+    const vz = 0.7 * dSdx - dSdy + fineX - fineY - V * plumeY + czY * plume
+      + (this.sourceZ - Z) * 0.006 * anchor + accel.z * 0.0001 / r;
     const g = this.gravityUp;
     this.result[0] = vx + vy * g.x;
     this.result[1] = vy * g.y;
@@ -181,6 +190,7 @@ export class TubeVolumeField {
   private accumulator = 0;
   private time = 0;
   private pending = 0;
+  private sourceActivity = 0;
   private lastProgress = 0;
   private readonly step: number;
   private readonly useMuscl: boolean;
@@ -223,12 +233,20 @@ export class TubeVolumeField {
     const tolerance = Math.min(2 * this.mask.radius / this.mask.nx,
       this.mask.height / this.mask.ny) * 0.25;
     for (let i = 0; i < count; i++) {
-      if (this.sources[i]) {
-        if (this.sources[i].distanceToSquared(points[i]) > tolerance * tolerance) this.injectionDirty = true;
-        if (this.injectionDirty) this.sources[i].copy(points[i]);
-      } else { this.sources[i] = points[i].clone(); this.injectionDirty = true; }
+      if (!this.sources[i] || this.sources[i].distanceToSquared(points[i]) > tolerance * tolerance)
+        this.injectionDirty = true;
+    }
+    if (this.injectionDirty) for (let i = 0; i < count; i++) {
+      if (this.sources[i]) this.sources[i].copy(points[i]);
+      else this.sources[i] = points[i].clone();
     }
     this.sources.length = count;
+    if (count > 0) {
+      let x = 0, z = 0;
+      for (let i = 0; i < count; i++) { x += points[i].x; z += points[i].z; }
+      this.velocity.sourceX = x / (count * this.mask.radius);
+      this.velocity.sourceZ = z / (count * this.mask.radius);
+    }
   }
   /** The controller owns ξ. This only integrates positive increments of its progress. */
   advance(dt: number, progress: number, up: THREE.Vector3, level: number, gasDrive = 0,
@@ -237,6 +255,8 @@ export class TubeVolumeField {
     const delta = Math.max(0, p - this.lastProgress);
     this.lastProgress = p;
     this.pending += delta;
+    this.sourceActivity = clamp(finite(gasDrive), 0, 1)
+      * clamp(p * 30, 0, 1) * clamp((1 - p) * 8, 0, 1);
     this.velocity.contributions.gas = clamp(finite(gasDrive), 0, 1);
     this.velocity.contributions.buoyancy = clamp(finite(temperatureField?.mean ?? temperature), 0, 1);
     this.velocity.heatX = temperatureField?.hotX ?? 0;
@@ -429,10 +449,9 @@ export class TubeVolumeField {
       this.injectionTotals.fill(0);
       for (let s = 0; s < zoneCount; s++) {
         const source = zones[s];
-        const angle = s * 2.399;
-        this.kernelX[s] = source.x + Math.cos(angle) * m.radius * 0.08;
+        this.kernelX[s] = source.x;
         this.kernelY[s] = source.y;
-        this.kernelZ[s] = source.z + Math.sin(angle) * m.radius * 0.08;
+        this.kernelZ[s] = source.z;
         this.kernelWeight[s] = 0.25 + 0.75 * Math.sin(s * 7.1) ** 2;
       }
       for (let a = 0; a < m.activeCount; a++) {
@@ -440,10 +459,10 @@ export class TubeVolumeField {
         const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
         const q = m.point(x, y, z, this.injectionPoint);
         for (let s = 0; s < zoneCount; s++) {
-          const r2 = ((q.x - this.kernelX[s]) / (m.radius * 0.16)) ** 2
-            + ((q.y - this.kernelY[s]) / (m.radius * 0.14)) ** 2
-            + ((q.z - this.kernelZ[s]) / (m.radius * 0.16)) ** 2;
-          const w = this.kernelWeight[s] * Math.exp(-r2 * 2.8);
+          const r2 = ((q.x - this.kernelX[s]) / (m.radius * 0.22)) ** 2
+            + ((q.y - this.kernelY[s]) / (m.radius * 0.2)) ** 2
+            + ((q.z - this.kernelZ[s]) / (m.radius * 0.22)) ** 2;
+          const w = this.kernelWeight[s] * Math.exp(-r2 * 1.4);
           if (w > 1e-6) weights[s % 4][i] += w;
         }
         for (let group = 0; group < 4; group++) this.injectionTotals[group] += weights[group][i];
@@ -489,7 +508,13 @@ export class TubeVolumeField {
         if (i + slice < v.length && m.data[i + slice]) { sum += v[i + slice]; count++; }
         value += opticalSmoothing * (sum / count - value);
       }
-      this.pixels[i] = Math.max(0, finite(value) * scale);
+      // Keep the reaction's optical core on the exact surface source. The
+      // coarse voxel interpolation otherwise puts its first visible sample
+      // outside the irregular mesh and leaves a transparent seam.
+      const core = this.sourceActivity * 1.4 * Math.min(1,
+        this.injectionWeights[0][i] + this.injectionWeights[1][i]
+        + this.injectionWeights[2][i] + this.injectionWeights[3][i]);
+      this.pixels[i] = Math.max(core, Math.max(0, finite(value) * scale));
     }
     this.current.needsUpdate = true;
   }

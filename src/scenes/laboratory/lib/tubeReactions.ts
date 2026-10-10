@@ -33,7 +33,7 @@ interface ReactionDef {
 }
 
 const REACTIONS: readonly ReactionDef[] = [
-  // dp/dt ∝ √(1 − p) (see `advanceChemistry`) finishes in 2·seconds/drive:
+  // dp/dt ∝ (1 − p)^(2/3) (see `advanceChemistry`) finishes in 2·seconds/drive:
   // about half a minute on a hot tube, about two minutes cold.
   { kind: "copper-nitric", reagents: ["cu", "hno3"], trigger: "heat", seconds: 15, coldRate: 0.25 },
   // Precipitation is instant; what takes time is the settling, which the
@@ -74,7 +74,7 @@ export const reactionTriggerFor = (contents: readonly string[]): "heat" | "mix" 
 export interface TubeChemistry {
   /** 0..1, how much of the reaction has happened — drives colour and precipitate. */
   readonly progress: number;
-  /** 0..1, how vigorously it is happening right now — drives bubbles and gas. */
+  /** Relative reaction speed; may exceed 1 for an enlarged copper surface. Drives bubbles and gas. */
   readonly rate: number;
   /** 0..1, contents temperature: 0 room, 1 near boiling. */
   readonly temperature: number;
@@ -84,6 +84,8 @@ export interface TubeChemistry {
   readonly externalHeat?: { readonly power: number; readonly side: number };
   /** Seconds since the tube's reagents first made a reaction — for `holdSeconds`. */
   readonly age?: number;
+  /** Initial wetted copper area relative to the default granule. */
+  readonly copperArea?: number;
 }
 
 export const ROOM_TEMPERATURE_CHEMISTRY: TubeChemistry = { progress: 0, rate: 0, temperature: 0, age: 0 };
@@ -114,12 +116,22 @@ export const copperReactionState = (progress: number): CopperReactionState => {
     copperII: 3 * extent, nitricOxide: 2 * extent };
 };
 
+/** The visible granule radius shrinks with the cube root of its remaining mass. */
+export const copperGranuleRadiusScale = (progress: number): number =>
+  Math.cbrt(1 - clamp01(Number.isFinite(progress) ? progress : 0));
+
+export const copperWettedArea = (progress: number, initialArea = 1): number =>
+  Math.max(0, Number.isFinite(initialArea) ? initialArea : 1)
+  * copperGranuleRadiusScale(progress) ** 2;
+
 /**
  * One step of a tube's chemistry. `inFlame` is whether the flame is heating
  * the contents right now. Temperature is tracked for every tube, reacting or
  * not, so contents heated first and mixed after still react hot.
  *
- * The rate falls as the reagents run out (√(1 − p) for copper, which reads
+ * The copper rate follows its shrinking wetted surface. The factor 1.5 keeps
+ * the default hot completion time at about 30 seconds.
+ * The rate falls as the reagents run out, which reads
  * as a reaction dying down rather than stopping dead), and copper keeps
  * reacting while the tube cools after heating — slower and slower, not cut
  * off the moment the tube leaves the flame.
@@ -140,16 +152,21 @@ export const advanceChemistry = (
     TEMPERATURE_RISE_SECONDS, TEMPERATURE_COOL_SECONDS);
   const temperature = clamp01(temperatureField.mean);
   const reaction = findReaction(contents);
-  if (!reaction) return { progress: 0, rate: 0, temperature, temperatureField, externalHeat: external, age: 0 };
+  if (!reaction) return { progress: 0, rate: 0, temperature, temperatureField, externalHeat: external,
+    age: 0, copperArea: state.copperArea };
 
   const age = (state.age ?? 0) + deltaSeconds;
-  if (age < (reaction.holdSeconds ?? 0)) return { progress: 0, rate: 0, temperature, temperatureField, externalHeat: external, age };
+  if (age < (reaction.holdSeconds ?? 0)) return { progress: 0, rate: 0, temperature, temperatureField,
+    externalHeat: external, age, copperArea: state.copperArea };
 
   const drive = reaction.coldRate + (1 - reaction.coldRate) * temperature;
   const remaining = 1 - state.progress;
-  const rate = reaction.trigger === "heat" ? drive * Math.sqrt(remaining) : remaining > 0 ? drive : 0;
+  const rate = reaction.trigger === "heat"
+    ? drive * 1.5 * copperWettedArea(state.progress, state.copperArea)
+    : remaining > 0 ? drive : 0;
   const progress = clamp01(state.progress + (rate * deltaSeconds) / reaction.seconds);
-  return { progress, rate: progress >= 1 ? 0 : rate, temperature, temperatureField, externalHeat: external, age };
+  return { progress, rate: progress >= 1 ? 0 : rate, temperature, temperatureField, externalHeat: external, age,
+    copperArea: state.copperArea };
 };
 
 interface TubeReactionState {
