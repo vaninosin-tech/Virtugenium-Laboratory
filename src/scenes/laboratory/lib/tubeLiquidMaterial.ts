@@ -193,7 +193,7 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   localMix = cloud;
 } else if (uReactionKind > 3.5) {
   vec2 dyeUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x, 0.0, 1.0), h);
-  dyeCloud = uMnActive > 0.5 ? permanganateVolume(vTubePoint)
+  dyeCloud = uMnActive > 0.5 ? clamp(permanganateVolume(vTubePoint), 0.0, 1.0)
     : permanganateTongue(uTransport, dyeUv, uTransportAge);
   dyeHalo = 0.0;
   localMix = 1.0 - dyeCloud;

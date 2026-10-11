@@ -96,11 +96,11 @@ describe("advanceChemistry", () => {
     expect(run(["agno3", "nacl"], 12.5, false).progress).toBe(1);
     // Until the R3 field supplies an extent, the timer must not invent one.
     expect(run(["bacl2", "k2so4"], 12.5, false).progress).toBe(0);
-    // R4 progress comes from the spatial field, not this temperature runtime.
+    // R4 falls back to scalar kinetics while the spatial field is absent.
     const redox = ["kmno4", "h2so4", "na2so3"];
-    expect(run(redox, 2.5, false).progress).toBe(0);
+    expect(run(redox, 2.5, false).progress).toBeGreaterThan(0);
     expect(advanceChemistry(redox, { ...ROOM_TEMPERATURE_CHEMISTRY,
-      progress: 0.3, rate: 0.2 }, 0.1, false).progress).toBe(0.3);
+      progress: 0.3, rate: 0.2, fieldUpdatedAt: Date.now() }, 0.1, false).progress).toBe(0.3);
   });
 
   it("uses R3 field progress and resumes scalar kinetics after a one-second stall", () => {

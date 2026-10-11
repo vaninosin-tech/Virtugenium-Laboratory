@@ -15,17 +15,18 @@ const run = (fps: number, reacting = true) => {
 
 describe("closed 3D Cu(II) field", () => {
   it("uses R1 bookkeeping and no product from heat alone or after completion", () => {
-    expect(copperReactionState(0.25)).toEqual({ extent: 0.25, copper: 2.25, acid: 6,
-      copperII: 0.75, nitricOxide: 0.5 });
+    expect(copperReactionState(0.25).copper).toBeCloseTo(2.5875);
+    expect(copperReactionState(0.25).acid).toBeCloseTo(3.3);
+    expect(copperReactionState(0.25).copperII).toBeCloseTo(0.4125);
     const field = make();
     field.advance(1, 0, up, 2.8, 1);
     expect(field.copperII).toBe(0);
     for (let i = 0; i < 30; i++) field.advance(1 / 30, 1, up, 2.8, 1);
-    expect(field.copperII).toBeCloseTo(3, 10);
+    expect(field.copperII).toBeCloseTo(1.65, 10);
     const produced = field.copperII;
     field.advance(1, 1, up, 2.8, 1);
     expect(field.copperII).toBeCloseTo(produced, 10);
-    expect(field.reaction.nitricOxide).toBe(2);
+    expect(field.reaction.nitricOxide).toBeCloseTo(1.1);
     field.dispose();
   });
 
@@ -33,7 +34,7 @@ describe("closed 3D Cu(II) field", () => {
     const field = make();
     field.advance(0.25, 0.2, up, 2.8, 0.7);
     expect(Reflect.get(field, "time")).toBeCloseTo(0.1, 10);
-    expect(field.copperII).toBeCloseTo(0.6, 10);
+    expect(field.copperII).toBeCloseTo(0.33, 10);
     field.advance(0, 0.2, up, 2.8, 0.7);
     expect(Reflect.get(field, "time")).toBeCloseTo(0.1, 10);
     field.dispose();
@@ -56,7 +57,7 @@ describe("closed 3D Cu(II) field", () => {
 
   it("integrates the same amount at 30, 60 and 144 display FPS", () => {
     const fields = [30, 60, 144].map(fps => run(fps));
-    for (const field of fields) expect(field.copperII).toBeCloseTo(1.44, 8);
+    for (const field of fields) expect(field.copperII).toBeCloseTo(0.792, 8);
     const a = fields[0].species["Cu2+"].values;
     for (const field of fields.slice(1)) {
       const b = field.species["Cu2+"].values;
@@ -80,11 +81,11 @@ describe("closed 3D Cu(II) field", () => {
       bands[Math.min(3, Math.floor(y / field.mask.ny * 4))] += value;
       if (field.mask.bottom + (y + 0.5) / field.mask.ny * field.mask.height > level * 0.55) upper += value;
     });
-    expect(field.copperII).toBeCloseTo(3, 8);
-    expect(bands[0]).toBeGreaterThan(0.35);
-    expect(bands[2]).toBeGreaterThan(0.6);
-    expect(bands[3]).toBeGreaterThan(0.5);
-    expect(upper).toBeGreaterThan(1);
+    expect(field.copperII).toBeCloseTo(1.65, 8);
+    expect(bands[0]).toBeGreaterThan(0.19);
+    expect(bands[2]).toBeGreaterThan(0.33);
+    expect(bands[3]).toBeGreaterThan(0.27);
+    expect(upper).toBeGreaterThan(0.55);
     field.dispose();
   });
 

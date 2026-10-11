@@ -447,7 +447,7 @@ export class TubeVolumeField {
   }
 
   private inject(dXi: number) {
-    const d = Math.min(dXi, this.reaction.copper / 3, this.reaction.acid / 8);
+    const d = Math.min(dXi, this.reaction.copper / 1.65, this.reaction.acid / 4.4);
     if (d <= 0) return;
     Object.assign(this.reaction, copperReactionState(this.reaction.extent + d));
     const values = this.species["Cu2+"].values, m = this.mask;
@@ -492,7 +492,7 @@ export class TubeVolumeField {
     }
     if (pulseTotal === 0) return;
     for (let group = 0; group < 4; group++) pulses[group] = pulses[group] > 0
-      ? 3 * d * pulses[group] / (pulseTotal * this.injectionTotals[group]) : 0;
+      ? 1.65 * d * pulses[group] / (pulseTotal * this.injectionTotals[group]) : 0;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
       values[i] += pulses[0] * weights[0][i] + pulses[1] * weights[1][i]

@@ -1,8 +1,13 @@
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
 import { CLAMP_TUBE_MOUTH, POUR_MS, useStandMotionStore } from "../lib/useStandMotionStore";
+import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
+import { useReagentStorageStore } from "../lib/useReagentStorageStore";
+import { pourFraction, pouredMl, publishTubePourImpact } from "../lib/tubePourImpact";
+import { seedTubeAmounts } from "../lib/tubeAmounts";
 
 const RINGS = 13;
 const SIDES = 8;
@@ -103,6 +108,27 @@ export function PourStream({
   const mesh = useRef<THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>>(null);
   const lipDrop = useRef<THREE.Mesh>(null);
   const fallingDrops = useRef<THREE.Mesh[]>([]);
+  const delivery = useRef({ serial: -1, ml: 0 });
+  useEffect(() => useStandMotionStore.subscribe((state, previous) => {
+    const finished = previous.pour;
+    if (!finished || finished.instanceId !== instanceId || state.pour?.at === finished.at) return;
+    const priorMl = delivery.current.serial === finished.at ? delivery.current.ml : 0;
+    if (priorMl >= 1) return;
+    const stand = useBunsenStandStorageStore.getState();
+    const tubes = useTestTubeStorageStore.getState();
+    const targetTube = stand.attachedTubeSlotIndex === null ? undefined
+      : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[stand.attachedTubeSlotIndex];
+    const reagents = useReagentStorageStore.getState();
+    const reagentId = [...reagents.workbenchItems, ...reagents.fumeHoodItems, ...reagents.trayItems]
+      .find(item => item.instanceId === instanceId)?.reagentId;
+    if (targetTube && reagentId) {
+      seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
+      publishTubePourImpact(targetTube.instanceId, reagentId,
+        CLAMP_TUBE_MOUTH.point.clone().add(new THREE.Vector3(0, -0.026, 0)),
+        new THREE.Vector3(0, -1, 0), 0, 1 - priorMl, finished.at);
+      delivery.current = { serial: finished.at, ml: 1 };
+    }
+  }), [instanceId]);
   const dyed = /(?:^|-)kmno4$/.test(instanceId);
   const geometry = useMemo(streamGeometry, []);
   const material = useMemo(() => streamMaterial(dyed), [dyed]);
@@ -124,7 +150,7 @@ export function PourStream({
     const measure = mouth.current;
     const pour = useStandMotionStore.getState().pour;
     const k = pour?.instanceId === instanceId ? (Date.now() - pour.at) / POUR_MS : -1;
-    if (!bottle || !measure || !measure.cap || !CLAMP_TUBE_MOUTH.valid || k < STREAM_START || k > 0.88) {
+    if (!bottle || !measure || !measure.cap || !CLAMP_TUBE_MOUTH.valid || k < STREAM_START || k > 1) {
       geometry.setDrawRange(0, 0);
       if (lipDrop.current) lipDrop.current.visible = false;
       fallingDrops.current.forEach((drop) => { if (drop) drop.visible = false; });
@@ -145,6 +171,26 @@ export function PourStream({
     scratch.target.copy(CLAMP_TUBE_MOUTH.point)
       .addScaledVector(scratch.side, 0.0065)
       .addScaledVector(UP, -0.026);
+
+    const stand = useBunsenStandStorageStore.getState();
+    const tubes = useTestTubeStorageStore.getState();
+    const targetTube = stand.attachedTubeSlotIndex === null ? undefined
+      : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[stand.attachedTubeSlotIndex];
+    const reagents = useReagentStorageStore.getState();
+    const reagentId = [...reagents.workbenchItems, ...reagents.fumeHoodItems, ...reagents.trayItems]
+      .find(item => item.instanceId === instanceId)?.reagentId;
+    if (targetTube && reagentId && pour) {
+      if (delivery.current.serial !== pour.at) delivery.current = { serial: pour.at, ml: 0 };
+      const total = pouredMl(k);
+      const increment = Math.max(0, total - delivery.current.ml);
+      if (increment > 0) {
+        seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
+        publishTubePourImpact(targetTube.instanceId, reagentId, scratch.target,
+          scratch.point.subVectors(scratch.target, scratch.lip).normalize(),
+          pourFraction(k) ** 2 * 4, increment, pour.at);
+        delivery.current.ml = total;
+      }
+    }
 
     const rise = THREE.MathUtils.smoothstep(k, STREAM_START, 0.44);
     const fade = 1 - THREE.MathUtils.smoothstep(k, 0.69, STREAM_END);

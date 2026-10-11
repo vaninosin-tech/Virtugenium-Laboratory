@@ -29,6 +29,9 @@ describe("acidic permanganate R4", () => {
       expect(value).toBeGreaterThanOrEqual(0);
     }
     expect(field.pixels.some(value => value > 0)).toBe(true);
+    for (const value of field.pixels) expect(Number.isFinite(value)).toBe(true);
+    for (const parameter of [field.delivered, field.extent, field.progress])
+      expect(Number.isFinite(parameter)).toBe(true);
     field.dispose();
   });
 

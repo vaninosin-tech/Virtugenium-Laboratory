@@ -52,6 +52,9 @@ describe("BaSO4 R3 field", () => {
       expect(field.species["SO4(2-)"].total + field.extent).toBeCloseTo(field.delivered, 5);
       for (const values of [...field.suspension, ...Object.values(field.species).map(s => s.values)])
         for (const amount of values) expect(Number.isFinite(amount) && amount >= 0).toBe(true);
+      for (const value of field.pixels) expect(Number.isFinite(value)).toBe(true);
+      for (const parameter of [field.delivered, field.extent, field.progress])
+        expect(Number.isFinite(parameter)).toBe(true);
     };
     assertBalance();
     for (let i = 0; i < 100; i++) field.advance(0.05, up, 0.038, inlet, 1);

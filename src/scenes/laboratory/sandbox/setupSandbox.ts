@@ -16,6 +16,11 @@ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useTubeReactionStore } from "../lib/tubeReactions";
 import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
+import { prewarmBariumLiquidShader } from "../lib/tubeReactionVisuals";
+import { clearTubeAmount, resetTubeAmounts, seedTubeAmounts } from "../lib/tubeAmounts";
+import { clearTubePourImpact, publishTubePourImpact } from "../lib/tubePourImpact";
+import { CLAMP_TUBE_MOUTH } from "../lib/useStandMotionStore";
+import * as THREE from "three";
 
 const FUME_HOOD_ID = "fume-hood";
 
@@ -78,6 +83,7 @@ export function setupSandbox(): void {
   useBurnerStore.getState().setLit(true);
   useHeatingStore.getState().reset();
   useTubeReactionStore.getState().reset();
+  resetTubeAmounts();
   useSceneInteractionStore.getState().requestFocus(FUME_HOOD_ID);
 }
 
@@ -94,11 +100,14 @@ export function teardownSandbox(): void {
   useBurnerStore.getState().setLit(false);
   useHeatingStore.getState().reset();
   useTubeReactionStore.getState().reset();
+  resetTubeAmounts();
   useLaboratoryStore.setState({ inventoryItemIds: [] });
 }
 
 /** Swaps the clamped tube for a clean one — the sandbox's only way to start another combination. */
 export function replaceSandboxTube(): void {
+  const old = useTestTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId;
+  if (old) { clearTubeAmount(old); clearTubePourImpact(old); }
   useTestTubeStorageStore.setState({ fumeHoodTestTubes: [freshTube()] });
   useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
   useHeatingStore.getState().reset();
@@ -114,13 +123,16 @@ const EXPERIMENT_SHOWCASE: Record<1 | 2 | 3 | 4, { first: ReagentId[]; last: Rea
 };
 
 let showcaseTimers: number[] = [];
+let showcaseGeneration = 0;
 
 /**
  * Shows one experiment close up: a clean tube with the first reagents, the
  * camera at the tube, then the last reagent a moment later so the start of the
  * reaction is seen. Experiment 1 is kept hot instead of being heated by hand.
  */
-export function showExperiment(experiment: 1 | 2 | 3 | 4): void {
+export function showExperiment(experiment: 1 | 2 | 3 | 4,
+  point: "left" | "center" | "right" = "right", speed: "slow" | "fast" = "slow"): void {
+  const generation = ++showcaseGeneration;
   for (const timer of showcaseTimers) {
     window.clearTimeout(timer);
     window.clearInterval(timer);
@@ -130,6 +142,8 @@ export function showExperiment(experiment: 1 | 2 | 3 | 4): void {
   const { first, last, hot } = EXPERIMENT_SHOWCASE[experiment];
   const tubes = useTestTubeStorageStore.getState();
   for (const id of first) tubes.addTubeContents("fumeHood", 0, id);
+  const tubeId = useTestTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId;
+  if (tubeId) seedTubeAmounts(tubeId, first);
   // The showcase starts warming the contents while the last reagent is poured.
   // The tube field owns the heat-up and keeps its local gradient.
   if (hot) {
@@ -138,11 +152,41 @@ export function showExperiment(experiment: 1 | 2 | 3 | 4): void {
   }
   useSceneInteractionStore.getState().requestFocus(FUME_HOOD_ID);
 
-  showcaseTimers.push(
-    window.setTimeout(() => {
+  const pour = () => {
+      if (generation !== showcaseGeneration) return;
       useTestTubeStorageStore.getState().addTubeContents("fumeHood", 0, last);
+      if (tubeId) {
+        const serial = Date.now();
+        const duration = speed === "fast" ? 450 : 1300;
+        const started = performance.now();
+        let prior = 0;
+        const timer = window.setInterval(() => {
+          if (generation !== showcaseGeneration) { window.clearInterval(timer); return; }
+          const fraction = Math.min(1, (performance.now() - started) / duration);
+          const side = point === "left" ? -1 : point === "right" ? 1 : 0;
+          const target = CLAMP_TUBE_MOUTH.point.clone().add(new THREE.Vector3(side * 0.006, -0.026, 0));
+          publishTubePourImpact(tubeId, last, target, new THREE.Vector3(0, -1, 0),
+            speed === "fast" ? 2.2 : 0.77, fraction - prior, serial);
+          prior = fraction;
+          if (fraction >= 1) window.clearInterval(timer);
+        }, 40);
+        showcaseTimers.push(timer);
+      }
       // The close-up needs the reacting tube to have claimed the focus point first.
       showcaseTimers.push(window.setTimeout(() => useTubeCloseUpStore.getState().open(), 150));
-    }, 1500),
-  );
+  };
+  if (experiment === 3 || experiment === 4) {
+    const three = (window as unknown as { __three?: { gl: THREE.WebGLRenderer;
+      scene: THREE.Scene; camera: THREE.Camera } }).__three;
+    if (three) {
+      const started = Date.now();
+      void prewarmBariumLiquidShader(three.gl, three.scene, three.camera,
+        experiment === 3 ? "barium-sulfate" : "permanganate-redox")
+        .catch(error => { if (import.meta.env.DEV) console.warn("Reaction shader warmup failed", error); })
+        .then(() => showcaseTimers.push(window.setTimeout(pour,
+          Math.max(0, 1500 - (Date.now() - started)))));
+      return;
+    }
+  }
+  showcaseTimers.push(window.setTimeout(pour, 1500));
 }

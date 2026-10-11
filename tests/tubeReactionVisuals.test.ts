@@ -334,7 +334,7 @@ describe("tube reaction rendering contract", () => {
     expect(liquid(f).uniforms.uOpacity.value).toBeLessThan(0.5);
   });
 
-  it("shrinks copper monotonically, hides consumed grains and restores them on seek", () => {
+  it("shrinks copper monotonically, retains the unreacted grain and restores it on seek", () => {
     const f = fixture("copper-nitric", true);
     f.update(chemistry(0));
     const grains = f.copper!.children;
@@ -348,7 +348,11 @@ describe("tube reaction rendering contract", () => {
       expect(grain.visible).toBe(true);
     });
     f.update(chemistry(1));
-    grains.forEach(grain => expect(grain.visible).toBe(false));
+    grains.forEach((grain, i) => {
+      expect(grain.visible).toBe(true);
+      expect(grain.scale.x / initial[i].scale).toBeGreaterThan(0.7);
+      expect(grain.scale.x / initial[i].scale).toBeLessThan(0.8);
+    });
     f.update(chemistry(0));
     grains.forEach((grain, i) => {
       expect(grain.scale.x).toBe(initial[i].scale);

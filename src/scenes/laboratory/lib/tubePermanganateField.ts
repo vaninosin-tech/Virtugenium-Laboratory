@@ -29,12 +29,14 @@ export class TubePermanganateField {
   private readonly next: Float64Array;
   private readonly flow: Float32Array;
   private readonly inlet = new THREE.Vector3();
+  private jetStrength = 1;
   private readonly priorUp = new THREE.Vector3(Infinity, Infinity, Infinity);
   private priorLevel = Infinity;
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     readonly sulfiteAmount = 6, readonly acidAmount = 7.2, readonly relativeDensity = 1) {
-    const size = quality === "LOW" ? TUBE_SIMULATION.field.LOW : TUBE_SIMULATION.field.HIGH;
+    const size = quality === "LOW" ? TUBE_SIMULATION.field.LOW
+      : { width: 16, height: 32, depth: 16 };
     this.mask = new LiquidMask(size.width, size.height, size.depth, radius, bottom, height);
     this.velocity = new VelocityField(this.mask);
     this.species = Object.fromEntries(["MnO4-", "SO3(2-)", "H+", "SO4(2-)", "Mn2+"]
@@ -51,9 +53,11 @@ export class TubePermanganateField {
 
   get progress() { return Math.min(1, this.extent / Math.min(1, this.sulfiteAmount / 5, this.acidAmount / 6)); }
 
-  advance(dt: number, up: THREE.Vector3, level: number, inlet: THREE.Vector3, delivered: number) {
+  advance(dt: number, up: THREE.Vector3, level: number, inlet: THREE.Vector3,
+    delivered: number, jetStrength = 1) {
     const m = this.mask;
     this.inlet.copy(inlet);
+    this.jetStrength = Math.min(3, Math.max(0.4, jetStrength));
     this.velocity.gravityUp.copy(up);
     this.accumulator = Math.min(0.1, this.accumulator + Math.max(0, Math.min(0.25, dt)));
     while (this.accumulator + 1e-10 >= TUBE_SIMULATION.field.stepSeconds) {
@@ -134,7 +138,7 @@ export class TubePermanganateField {
       const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
       const p = m.point(x, y, z, this.scratch);
       const depth = Math.max(0, inlet.y - p.y);
-      const reach = m.radius * (0.45 + 2.6 * Math.min(1, this.age / 0.9));
+      const reach = m.radius * (0.45 + 2.6 * Math.min(1, this.age / 0.9)) * this.jetStrength;
       const along = depth / reach;
       let weight = 0;
       if (p.y <= inlet.y + m.radius * 0.2 && along < 1.1) for (let branch = 0; branch < 3; branch++) {
@@ -183,7 +187,7 @@ export class TubePermanganateField {
       const spread = m.radius * (0.23 + 0.06 * bend);
       const jetMask = Math.exp(-((p.x - centreX) ** 2 + (p.z - centreZ) ** 2)
         / (spread * spread)) * Math.exp(-depth / (m.height * 0.8));
-      const jet = 0.017 * jetMask * jetDecay;
+      const jet = 0.017 * this.jetStrength * jetMask * jetDecay;
       const curl = 0.0032 * jetMask * curlDecay;
       const phase = bend * 2.7 + this.age * 4.3 + p.z / m.radius * 3.1;
       flow[i * 3] = v[0] - jet * up.x + curl * Math.sin(phase);

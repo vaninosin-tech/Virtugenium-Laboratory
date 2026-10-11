@@ -34,7 +34,7 @@ export class TubeBariumField {
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     readonly bariumAmount = 1.1) {
     const size = quality === "LOW" ? { width: 12, height: 24, depth: 12 }
-      : { width: 16, height: 32, depth: 16 };
+      : { width: 14, height: 28, depth: 14 };
     this.mask = new LiquidMask(size.width, size.height, size.depth, radius, bottom, height);
     this.velocity = new VelocityField(this.mask);
     this.species = { "Ba2+": new SpeciesField("Ba2+", this.mask),
@@ -75,7 +75,7 @@ export class TubeBariumField {
   }
 
   advance(dt: number, up: THREE.Vector3, level: number, inlet: THREE.Vector3,
-    delivery: number, agitation = 0) {
+    delivery: number, agitation = 0, jetStrength = 1) {
     const m = this.mask;
     this.velocity.gravityUp.copy(up);
     this.accumulator = Math.min(0.5, this.accumulator + Math.max(0, dt));
@@ -110,7 +110,8 @@ export class TubeBariumField {
           this.species["Ba2+"].values[m.active[a]] = this.bariumAmount / m.activeCount;
         this.initialized = true;
       }
-      this.inject(inlet, Math.max(0, Math.min(1, delivery) - this.delivered));
+      this.inject(inlet, Math.max(0, Math.min(1, delivery) - this.delivered), jetStrength);
+      let kinetic = 0;
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
         const z = Math.floor(i / (m.nx * m.ny));
@@ -121,7 +122,7 @@ export class TubeBariumField {
         const cx = inlet.x + m.radius * 0.18 * Math.sin(bend * 1.5 + this.age * 2);
         const cz = inlet.z + m.radius * 0.16 * Math.cos(bend * 1.2 - this.age * 1.7);
         const width = m.radius * (0.24 + 0.045 * bend);
-        const jet = 0.09 * Math.exp(-((p.x - cx) ** 2 + (p.z - cz) ** 2)
+        const jet = 0.09 * Math.min(2.5, Math.max(0.4, jetStrength)) * Math.exp(-((p.x - cx) ** 2 + (p.z - cz) ** 2)
           / (width * width)) * Math.exp(-depth / (m.height * 1.4))
           * (1 - THREE.MathUtils.smoothstep(this.age, 1.5, 5));
         const bottomTurn = 1 - THREE.MathUtils.smoothstep(p.y - m.bottom, m.radius * 0.2, m.radius * 2);
@@ -137,10 +138,13 @@ export class TubeBariumField {
         this.flow[i * 3] = v[0] * 0.25 + (p.x - cx) * roll + swirl * Math.sin(phase) - up.x * jet;
         this.flow[i * 3 + 1] = v[1] * 0.25 - up.y * jet;
         this.flow[i * 3 + 2] = v[2] * 0.25 + (p.z - cz) * roll + swirl * Math.cos(phase) - up.z * jet;
+        kinetic += this.flow[i * 3] ** 2 + this.flow[i * 3 + 1] ** 2 + this.flow[i * 3 + 2] ** 2;
       }
-      const ionMixing = 0.012 + 0.06 * THREE.MathUtils.smoothstep(this.age, 0.35, 1.2);
+      const ionMixing = 0.012 + 0.06 * THREE.MathUtils.smoothstep(this.age, 0.35, 1.2)
+        + agitation * 0.09;
       for (const field of Object.values(this.species)) this.transport(field.values, step, 0, ionMixing);
-      const calm = this.delivered >= 0.999 && agitation < 0.02;
+      const calm = this.delivered >= 0.999 && agitation < 0.02
+        && kinetic / Math.max(1, m.activeCount) < 0.00004;
       const targetBoost = calm ? TUBE_SIMULATION.barium.settlingAcceleration : 1;
       this.settlingBoost += (targetBoost - this.settlingBoost) * (1 - Math.exp(-step / 0.8));
       if (calm) this.sedimentField.settle(step);
@@ -172,7 +176,7 @@ export class TubeBariumField {
     }
   }
 
-  private inject(inlet: THREE.Vector3, amount: number) {
+  private inject(inlet: THREE.Vector3, amount: number, jetStrength: number) {
     if (!amount) return;
     const m = this.mask;
     const weights = this.next;
@@ -184,8 +188,8 @@ export class TubeBariumField {
       const depth = Math.max(0, inlet.y - p.y);
       const dx = p.x - inlet.x;
       const dz = p.z - inlet.z;
-      const width = m.radius * 0.24;
-      const vertical = m.radius * 0.48;
+      const width = m.radius * (0.20 + 0.06 * Math.min(3, jetStrength));
+      const vertical = m.radius * (0.36 + 0.12 * Math.min(3, jetStrength));
       weights[i] = p.y <= inlet.y && depth < vertical * 2
         ? Math.exp(-(dx * dx + dz * dz) / (width * width) - depth * depth / (vertical * vertical)) : 0;
       sum += weights[i];

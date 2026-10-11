@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
@@ -20,6 +20,8 @@ const formula = (id: string) =>
 
 /** TEMP sandbox: what is in the stand's tube, what it is doing, and a way to start over. */
 export function SandboxPanel() {
+  const [pourPoint, setPourPoint] = useState<"left" | "center" | "right">("right");
+  const [pourSpeed, setPourSpeed] = useState<"slow" | "fast">("slow");
   const navigate = useNavigate();
   const sandbox = useLaboratoryStore((state) => state.mode === "sandbox");
   const hoodTubes = useTestTubeStorageStore((state) => state.fumeHoodTestTubes);
@@ -59,8 +61,17 @@ export function SandboxPanel() {
 
       <span style={hintStyle}>Показать опыт вблизи (Q или Esc — отойти):</span>
       <div style={rowStyle}>
+        <label>Попадание <select value={pourPoint} onChange={event => setPourPoint(event.target.value as typeof pourPoint)}>
+          <option value="left">слева</option><option value="center">центр</option><option value="right">справа</option>
+        </select></label>
+        <label>Струя <select value={pourSpeed} onChange={event => setPourSpeed(event.target.value as typeof pourSpeed)}>
+          <option value="slow">медленно</option><option value="fast">быстро</option>
+        </select></label>
+      </div>
+      <div style={rowStyle}>
         {([1, 2, 3, 4] as const).map((experiment) => (
-          <button key={experiment} type="button" style={buttonStyle} onClick={() => showExperiment(experiment)}>
+          <button key={experiment} type="button" style={buttonStyle}
+            onClick={() => showExperiment(experiment, pourPoint, pourSpeed)}>
             Опыт {experiment}
           </button>
         ))}

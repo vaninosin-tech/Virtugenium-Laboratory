@@ -9,6 +9,9 @@ import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
 import { TubeVolumeField } from "./tubeVolumeField";
 import { TubePermanganateField } from "./tubePermanganateField";
+import { tubePourImpact } from "./tubePourImpact";
+import { seedTubeAmounts, syncBariumExtent, syncCopperProgress, syncPermanganateExtent, tubeAmount, tubeVisualFill } from "./tubeAmounts";
+import { TubeMotion } from "./tubeMotion";
 import { CLAMP_TUBE_MOUTH } from "./useStandMotionStore";
 import { testTubeLiquidFill } from "./testTubeContents";
 import { copperGranuleRadiusScale, useTubeReactionStore, type ReactionKind, type TubeChemistry } from "./tubeReactions";
@@ -312,12 +315,14 @@ void main() {
 }
 
 /** Fixed pools survive progress updates, including seeking backwards in F8. */
-const bariumWarmups = new WeakMap<THREE.WebGLRenderer, Promise<void>>();
+const bariumWarmups = new WeakMap<THREE.WebGLRenderer, Map<string, Promise<void>>>();
 
 /** Compile every reaction mesh while the first clear reagent is shown. */
 export function prewarmBariumLiquidShader(renderer: THREE.WebGLRenderer, scene: THREE.Scene,
-  camera: THREE.Camera): Promise<void> {
-  const prior = bariumWarmups.get(renderer);
+  camera: THREE.Camera, kind: "barium-sulfate" | "permanganate-redox" = "barium-sulfate"): Promise<void> {
+  const cache = bariumWarmups.get(renderer) ?? new Map<string, Promise<void>>();
+  bariumWarmups.set(renderer, cache);
+  const prior = cache.get(kind);
   if (prior) return prior;
   const task = (async () => {
     let source: THREE.Object3D | null = null;
@@ -335,12 +340,12 @@ export function prewarmBariumLiquidShader(renderer: THREE.WebGLRenderer, scene: 
       });
       if (!source) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     }
-    if (!source) throw new Error("No filled tube available for BaSO4 shader warmup");
+    if (!source) throw new Error("No filled tube available for reaction shader warmup");
     const preview = (source as THREE.Object3D).clone(true);
     const previous: THREE.Object3D[] = [];
     preview.traverse(object => { if (object.name === "TubeReactionVisuals") previous.push(object); });
     for (const object of previous) object.removeFromParent();
-    const visuals = createTubeReactionVisuals(preview, "barium-sulfate",
+    const visuals = createTubeReactionVisuals(preview, kind,
       { activeSurface: true, pour: true, liquidCount: 2 });
     visuals?.update({ progress: 0, rate: 0, temperature: 0, age: 0 },
       0, useRuntimeQualityStore.getState().quality, 0, false, camera.position);
@@ -371,7 +376,7 @@ export function prewarmBariumLiquidShader(renderer: THREE.WebGLRenderer, scene: 
       target.dispose();
     }
   })();
-  bariumWarmups.set(renderer, task);
+  cache.set(kind, task);
   return task;
 }
 
@@ -459,6 +464,14 @@ outgoingLight *= mix(1.0, 0.80, dyeWindow);`);
     capGeometry.setAttribute("tubeWaveSlope", new THREE.Float32BufferAttribute(new Float32Array(capGeometry.attributes.position.count), 1));
   }
   const hasLiquid = base instanceof TubeLiquidMaterial && volume.visible;
+  if (options.activeSurface) {
+    const stand = useBunsenStandStorageStore.getState();
+    const tubes = useTestTubeStorageStore.getState();
+    const attached = stand.attachedTubeSlotIndex === null ? undefined
+      : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[stand.attachedTubeSlotIndex];
+    if (attached) seedTubeAmounts(attached.instanceId,
+      options.pour ? attached.contents.slice(0, -1) : attached.contents);
+  }
   const targetFill = testTubeLiquidFill(options.liquidCount ?? 1);
   const startFill = options.pour ? testTubeLiquidFill((options.liquidCount ?? 1) - 1) : targetFill;
   let pourAge = 0;
@@ -863,6 +876,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
     ? new TubeBariumField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, size.y) : null;
   const bariumInlet = new THREE.Vector3();
+  const impactPoint = new THREE.Vector3();
+  const tubeMotion = new TubeMotion();
   const permanganateSide = new THREE.Vector3();
   const worldUp = new THREE.Vector3(0, 1, 0);
   const tubeWorldPosition = new THREE.Vector3();
@@ -885,11 +900,23 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
       const dt = Math.min(elapsed, 0.1);
       lastTime = time;
       pourAge += dt;
-      const fill = THREE.MathUtils.lerp(startFill, targetFill,
-        THREE.MathUtils.smoothstep(pourAge, 0, 1.3));
+      const standNow = useBunsenStandStorageStore.getState();
+      const tubesNow = useTestTubeStorageStore.getState();
+      const attachedNow = standNow.attachedTubeSlotIndex === null ? undefined
+        : (standNow.onFumeHood ? tubesNow.fumeHoodTestTubes : tubesNow.workbenchTestTubes)[standNow.attachedTubeSlotIndex];
+      const impact = options.activeSurface && attachedNow ? tubePourImpact(attachedNow.instanceId) : undefined;
+      if (kind === "copper-nitric" && attachedNow && tubeAmount(attachedNow.instanceId).copper > 0)
+        syncCopperProgress(attachedNow.instanceId,
+          useTubeReactionStore.getState().chemistryById[attachedNow.instanceId]?.progress ?? reactionProgress ?? p);
+      const fill = attachedNow && tubeAmount(attachedNow.instanceId).volumeMl > 0
+        ? tubeVisualFill(tubeAmount(attachedNow.instanceId).volumeMl)
+        : THREE.MathUtils.lerp(startFill, targetFill, THREE.MathUtils.smoothstep(pourAge, 0, 1.3));
       transport?.advance(dt, fill);
       waveSurface?.setQuality(quality);
       volume.updateWorldMatrix(true, false);
+      const motion = tubeMotion.sample(volume, dt);
+      for (const field of [copperField, permanganateField, bariumField])
+        if (field) field.velocity.contributions.acceleration.copy(tubeMotion.impulse);
       causticOrigin.set(center.x, box.min.y, center.z).applyMatrix4(volume.matrixWorld);
       if (hasLiquid && quality !== "LOW" && (!causticProbed
         || causticOrigin.distanceToSquared(lastCausticOrigin) > 0.0001)) {
@@ -944,7 +971,7 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
           // A bounding sphere encloses every rotated, irregular grain. Fit
           // that sphere inside the bowl instead of trusting its drop target.
           const fit = Math.min(1, radius * 0.86 / Math.max(copperBounds[i], 0.000001));
-          child.scale.setScalar(shrink * fit * (1 - etch * random(i + 173) * 0.24));
+          child.scale.setScalar(shrink * fit);
           child.visible = shrink > 0.03;
           child.position.copy(copperPoints[i]);
           child.position.y = box.min.y + (child.position.y - box.min.y) * shrink;
@@ -986,7 +1013,9 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
           rate, temperature, spatialHeat, tubeWorldPosition);
       }
       if (permanganateField) {
-        if (CLAMP_TUBE_MOUTH.valid) {
+        if (impact?.reagentId === "kmno4") {
+          permanganateInlet.copy(volume.worldToLocal(impactPoint.copy(impact.point)));
+        } else if (CLAMP_TUBE_MOUTH.valid) {
           permanganateSide.subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);
           if (permanganateSide.lengthSq() < 1e-8) permanganateSide.set(1, 0, 0);
           permanganateSide.normalize();
@@ -1004,7 +1033,9 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         // local R4 and transport can change its colour.
         const priorExtent = permanganateField.extent;
         permanganateField.advance(dt, up.value, level.value, permanganateInlet,
-          2 * THREE.MathUtils.smoothstep(pourAge, 0, 1.3));
+          attachedNow ? (impact?.reagentId === "kmno4" ? 2 * impact.deliveredMl : 0)
+            : 2 * THREE.MathUtils.smoothstep(pourAge, 0, 1.3), impact?.flowMlPerSecond ?? 1);
+        if (attachedNow) syncPermanganateExtent(attachedNow.instanceId, permanganateField.extent);
         if (options.activeSurface) {
           const stand = useBunsenStandStorageStore.getState();
           const tubes = useTestTubeStorageStore.getState();
@@ -1019,12 +1050,15 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
             const fieldRate = dt > 0 ? (permanganateField.extent - priorExtent) / dt : 0;
             if (current && (Math.abs(current.progress - fieldProgress) > 1e-4
               || Math.abs(current.rate - fieldRate) > 1e-3))
-              store.setChemistry(attached.instanceId, { ...current, progress: fieldProgress, rate: fieldRate });
+              store.setChemistry(attached.instanceId, { ...current, progress: fieldProgress, rate: fieldRate,
+                fieldUpdatedAt: Date.now() });
           }
         }
       }
       if (bariumField) {
-        if (CLAMP_TUBE_MOUTH.valid) {
+        if (impact?.reagentId === "k2so4") {
+          bariumInlet.copy(volume.worldToLocal(impactPoint.copy(impact.point)));
+        } else if (CLAMP_TUBE_MOUTH.valid) {
           permanganateSide.subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);
           if (permanganateSide.lengthSq() < 1e-8) permanganateSide.set(1, 0, 0);
           permanganateSide.normalize();
@@ -1040,10 +1074,14 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         bariumInlet.y = (level.value - up.value.x * bariumInlet.x - up.value.z * bariumInlet.z)
           / Math.max(0.2, up.value.y) - 0.0007;
         const previousExtent = bariumField.extent;
-        const agitation = Math.min(1, Math.hypot(slope.x - previousSlopeX, slope.y - previousSlopeZ) * 15);
-        const bariumDelta = Math.min(elapsed, 0.25);
+        const agitation = Math.max(motion,
+          Math.min(1, Math.hypot(slope.x - previousSlopeX, slope.y - previousSlopeZ) * 15));
+        const bariumDelta = Math.min(elapsed, 0.05);
         bariumField.advance(bariumDelta, up.value, level.value, bariumInlet,
-          THREE.MathUtils.smoothstep(bariumField.ageSeconds + bariumDelta, 0, 1.3), agitation);
+          attachedNow ? (impact?.reagentId === "k2so4" ? impact.deliveredMl : 0)
+            : THREE.MathUtils.smoothstep(bariumField.ageSeconds + bariumDelta, 0, 1.3), agitation,
+          impact?.flowMlPerSecond ?? 1);
+        if (attachedNow) syncBariumExtent(attachedNow.instanceId, bariumField.extent);
         if (options.activeSurface) {
           const stand = useBunsenStandStorageStore.getState();
           const tubes = useTestTubeStorageStore.getState();

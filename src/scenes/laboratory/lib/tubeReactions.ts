@@ -103,7 +103,7 @@ export const TEMPERATURE_COOL_SECONDS = 40;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
-/** R1 bookkeeping in normalized game units; ξmax = 1. Progress/rate remain the controller's source of truth. */
+/** R1 progress is the fraction of the available acid consumed. */
 export interface CopperReactionState {
   extent: number;
   copper: number;
@@ -113,17 +113,19 @@ export interface CopperReactionState {
 }
 export const copperReactionState = (progress: number): CopperReactionState => {
   const extent = clamp01(Number.isFinite(progress) ? progress : 0);
-  return { extent, copper: 3 * (1 - extent), acid: 8 * (1 - extent),
-    copperII: 3 * extent, nitricOxide: 2 * extent };
+  const acid = 4.4 * extent;
+  const reactedCopper = acid * 3 / 8;
+  return { extent, copper: 3 - reactedCopper, acid: 4.4 - acid,
+    copperII: reactedCopper, nitricOxide: acid / 4 };
 };
 
 /** The visible granule radius shrinks with the cube root of its remaining mass. */
 export const copperGranuleRadiusScale = (progress: number): number =>
-  Math.cbrt(1 - clamp01(Number.isFinite(progress) ? progress : 0));
+  Math.cbrt(1 - 0.55 * clamp01(Number.isFinite(progress) ? progress : 0));
 
 export const copperWettedArea = (progress: number, initialArea = 1): number =>
   Math.max(0, Number.isFinite(initialArea) ? initialArea : 1)
-  * copperGranuleRadiusScale(progress) ** 2;
+  * (1 - clamp01(Number.isFinite(progress) ? progress : 0)) ** (2 / 3);
 
 /**
  * One step of a tube's chemistry. `inFlame` is whether the flame is heating
@@ -160,7 +162,8 @@ export const advanceChemistry = (
   if (reaction.kind === "permanganate-redox") {
     // The 3D R4 field owns progress and rate. The runtime only updates heat;
     // a second scalar kinetic clock would contradict the visible MnO4- mass.
-    return { ...state, temperature, temperatureField, externalHeat: external, age };
+    if (state.fieldUpdatedAt !== undefined && Date.now() - state.fieldUpdatedAt <= 1000)
+      return { ...state, temperature, temperatureField, externalHeat: external, age };
   }
   if (reaction.kind === "barium-sulfate") {
     if (state.fieldUpdatedAt === undefined)
