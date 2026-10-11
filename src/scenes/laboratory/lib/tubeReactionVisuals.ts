@@ -10,6 +10,7 @@ import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMater
 import { TubeVolumeField } from "./tubeVolumeField";
 import { TubePermanganateField } from "./tubePermanganateField";
 import { tubePourImpact } from "./tubePourImpact";
+import { updateTubeFlowDebug } from "./tubeFlowDebug";
 import { seedTubeAmounts, syncBariumExtent, syncCopperProgress, syncPermanganateExtent, tubeAmount, tubeVisualFill } from "./tubeAmounts";
 import { TubeMotion } from "./tubeMotion";
 import { CLAMP_TUBE_MOUTH } from "./useStandMotionStore";
@@ -877,6 +878,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
       radius, box.min.y, size.y) : null;
   const bariumInlet = new THREE.Vector3();
   const impactPoint = new THREE.Vector3();
+  const impactDirection = new THREE.Vector3();
+  const impactQuaternion = new THREE.Quaternion();
   const tubeMotion = new TubeMotion();
   const permanganateSide = new THREE.Vector3();
   const worldUp = new THREE.Vector3(0, 1, 0);
@@ -1034,7 +1037,11 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         const priorExtent = permanganateField.extent;
         permanganateField.advance(dt, up.value, level.value, permanganateInlet,
           attachedNow ? (impact?.reagentId === "kmno4" ? 2 * impact.deliveredMl : 0)
-            : 2 * THREE.MathUtils.smoothstep(pourAge, 0, 1.3), impact?.flowMlPerSecond ?? 1);
+            : 2 * THREE.MathUtils.smoothstep(pourAge, 0, 1.3), impact?.flowMlPerSecond ?? 1,
+          impact?.reagentId === "kmno4" ? impactDirection.copy(impact.direction)
+            .applyQuaternion(volume.getWorldQuaternion(impactQuaternion).invert()) : undefined);
+        updateTubeFlowDebug("KMnO4", permanganateField.solver, permanganateField.tracer,
+          permanganateField.species["MnO4-"].values);
         if (attachedNow) syncPermanganateExtent(attachedNow.instanceId, permanganateField.extent);
         if (options.activeSurface) {
           const stand = useBunsenStandStorageStore.getState();
@@ -1080,7 +1087,12 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         bariumField.advance(bariumDelta, up.value, level.value, bariumInlet,
           attachedNow ? (impact?.reagentId === "k2so4" ? impact.deliveredMl : 0)
             : THREE.MathUtils.smoothstep(bariumField.ageSeconds + bariumDelta, 0, 1.3), agitation,
-          impact?.flowMlPerSecond ?? 1);
+          impact?.flowMlPerSecond ?? 1,
+          impact?.reagentId === "k2so4" ? impactDirection.copy(impact.direction)
+            .applyQuaternion(volume.getWorldQuaternion(impactQuaternion).invert()) : undefined);
+        updateTubeFlowDebug("BaSO4", bariumField.solver, bariumField.tracer,
+          bariumField.species["SO4(2-)"].values, bariumField.pixels, bariumField.sedimentMass,
+          () => ({ suspensionMass: bariumField.suspensionMass, formed: bariumField.extent }));
         if (attachedNow) syncBariumExtent(attachedNow.instanceId, bariumField.extent);
         if (options.activeSurface) {
           const stand = useBunsenStandStorageStore.getState();

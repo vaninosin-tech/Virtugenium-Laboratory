@@ -37,12 +37,12 @@ describe("acidic permanganate R4", () => {
 
   it("uses the sulfite reserve to consume the standard charge", () => {
     const field = new TubePermanganateField("LOW", 0.007, 0, 0.055);
-    for (let i = 0; i < 80; i++) {
-      field.advance(1 / 20, up, 0.045, inlet, 2);
+    for (let i = 0; i < 600; i++) {
+      field.advance(1 / 20, up, 0.045, inlet, 2 * Math.min(1, i / 20));
       if (field.species["MnO4-"].total > 0.1)
         expect(field.progress).toBeLessThan(0.95);
     }
     expect(field.species["MnO4-"].total).toBeLessThan(0.1);
     field.dispose();
-  });
+  }, 15000);
 });

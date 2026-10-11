@@ -1,5 +1,13 @@
 /** Shared tuning for the copper reaction and its three-dimensional liquid render. */
 export const TUBE_SIMULATION = {
+  jetFlow: {
+    LOW: { width: 8, height: 18, depth: 8 },
+    HIGH: { width: 12, height: 24, depth: 12 },
+    pressureIterations: 6,
+    viscousDamping: 0.26,
+    molecularDiffusivity: 0.0000002,
+    eddyDiffusivity: 0.00003,
+  },
   field: {
     LOW: { width: 16, height: 32, depth: 16 },
     HIGH: { width: 22, height: 44, depth: 22 },
@@ -20,6 +28,6 @@ export const TUBE_SIMULATION = {
     // Artistic acceleration of size-dependent settling; chemistry stays local.
     settlingAcceleration: 4,
     settlingSpeeds: [0.0003, 0.00065, 0.0014],
-    suspensionOpticalScale: 2.8,
+    suspensionOpticalScale: 4.5,
   },
 } as const;

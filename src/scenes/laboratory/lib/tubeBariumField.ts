@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { LiquidMask, SpeciesField, VelocityField } from "./tubeVolumeField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { BariumSedimentField } from "./tubeBariumSediment";
+import { TubeFlowSolver } from "./tubeFlowSolver";
 
 /** R3 bookkeeping in normalized amounts. */
 export function reactR3(barium: number, sulfate: number, fraction = 1) {
@@ -14,8 +15,10 @@ export function reactR3(barium: number, sulfate: number, fraction = 1) {
 export class TubeBariumField {
   readonly mask: LiquidMask;
   readonly velocity: VelocityField;
+  readonly solver: TubeFlowSolver;
   readonly species: Record<string, SpeciesField>;
   readonly suspension: Float64Array[];
+  readonly tracer: Float64Array;
   readonly sedimentField: BariumSedimentField;
   readonly pixels: Float32Array;
   readonly texture: THREE.Data3DTexture;
@@ -33,16 +36,17 @@ export class TubeBariumField {
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     readonly bariumAmount = 1.1) {
-    const size = quality === "LOW" ? { width: 12, height: 24, depth: 12 }
-      : { width: 14, height: 28, depth: 14 };
+    const size = quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
     this.mask = new LiquidMask(size.width, size.height, size.depth, radius, bottom, height);
     this.velocity = new VelocityField(this.mask);
+    this.solver = new TubeFlowSolver(this.mask);
     this.species = { "Ba2+": new SpeciesField("Ba2+", this.mask),
       "SO4(2-)": new SpeciesField("SO4(2-)", this.mask) };
     this.suspension = [0, 1, 2].map(() => new Float64Array(this.mask.data.length));
+    this.tracer = new Float64Array(this.mask.data.length);
     this.sedimentField = new BariumSedimentField(this.mask.nx, this.mask.nz);
     this.next = new Float64Array(this.mask.data.length);
-    this.flow = new Float32Array(this.mask.data.length * 3);
+    this.flow = this.solver.flow;
     this.pixels = new Float32Array(this.mask.data.length);
     this.texture = new THREE.Data3DTexture(this.pixels, this.mask.nx, this.mask.ny, this.mask.nz);
     this.texture.format = THREE.RedFormat; this.texture.type = THREE.FloatType;
@@ -71,11 +75,13 @@ export class TubeBariumField {
     return { suspended: this.suspensionMass, settled: this.sedimentMass, formed: this.extent,
       upperTurbidity: upper / Math.max(1, upperCount),
       lowerTurbidity: lower / Math.max(1, lowerCount),
-      meanSpeed: speed / Math.max(1, m.activeCount) };
+      meanSpeed: speed / Math.max(1, m.activeCount),
+      flow: this.solver.diagnostics(), tracer: this.solver.scalarDiagnostics(this.tracer),
+      sulfate: this.solver.scalarDiagnostics(this.species["SO4(2-)"].values) };
   }
 
   advance(dt: number, up: THREE.Vector3, level: number, inlet: THREE.Vector3,
-    delivery: number, agitation = 0, jetStrength = 1) {
+    delivery: number, agitation = 0, jetStrength = 1, jetDirection?: THREE.Vector3) {
     const m = this.mask;
     this.velocity.gravityUp.copy(up);
     this.accumulator = Math.min(0.5, this.accumulator + Math.max(0, dt));
@@ -86,9 +92,10 @@ export class TubeBariumField {
         Math.abs(this.priorLevel - level) > m.height / m.ny * 0.5) {
         const old = m.data.slice();
         m.update(up, level);
+        this.solver.refreshMask();
         this.priorUp.copy(up); this.priorLevel = level;
         // Keep amounts in the closed liquid when a moving meniscus vacates cells.
-        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension]) {
+        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension, this.tracer]) {
           for (let i = 0; i < old.length; i++) {
             if (!old[i] || m.data[i] || values[i] === 0) continue;
             let nearest = -1, distance = Infinity;
@@ -110,46 +117,25 @@ export class TubeBariumField {
           this.species["Ba2+"].values[m.active[a]] = this.bariumAmount / m.activeCount;
         this.initialized = true;
       }
-      this.inject(inlet, Math.max(0, Math.min(1, delivery) - this.delivered), jetStrength);
-      let kinetic = 0;
-      for (let a = 0; a < m.activeCount; a++) {
-        const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
-        const z = Math.floor(i / (m.nx * m.ny));
-        const p = m.point(x, y, z, this.scratch);
-        const v = this.velocity.at(p.x, p.y, p.z, this.age);
-        const depth = Math.max(0, inlet.y - p.y);
-        const bend = depth / Math.max(m.radius, 1e-6);
-        const cx = inlet.x + m.radius * 0.18 * Math.sin(bend * 1.5 + this.age * 2);
-        const cz = inlet.z + m.radius * 0.16 * Math.cos(bend * 1.2 - this.age * 1.7);
-        const width = m.radius * (0.24 + 0.045 * bend);
-        const jet = 0.09 * Math.min(2.5, Math.max(0.4, jetStrength)) * Math.exp(-((p.x - cx) ** 2 + (p.z - cz) ** 2)
-          / (width * width)) * Math.exp(-depth / (m.height * 1.4))
-          * (1 - THREE.MathUtils.smoothstep(this.age, 1.5, 5));
-        const bottomTurn = 1 - THREE.MathUtils.smoothstep(p.y - m.bottom, m.radius * 0.2, m.radius * 2);
-        const spread = 0.018 * bottomTurn * Math.exp(-((p.x - cx) ** 2 + (p.z - cz) ** 2)
-          / (m.radius * m.radius)) * (1 - THREE.MathUtils.smoothstep(this.age, 2, 6));
-        const roll = (jet * (0.3 + 2.7 * THREE.MathUtils.smoothstep(depth,
-          m.radius * 1.5, m.radius * 4)) + spread) / Math.max(m.radius, 1e-6);
-        const swirl = 0.012 * THREE.MathUtils.smoothstep(this.age, 0.2, 0.8)
-          * (1 - THREE.MathUtils.smoothstep(this.age, 2.5, 6))
-          * THREE.MathUtils.smoothstep(depth, 0, m.radius * 2)
-          * Math.exp(-((p.x - cx) ** 2 + (p.z - cz) ** 2) / (m.radius * m.radius));
-        const phase = (p.y - m.bottom) / m.height * 8 + this.age * 2;
-        this.flow[i * 3] = v[0] * 0.25 + (p.x - cx) * roll + swirl * Math.sin(phase) - up.x * jet;
-        this.flow[i * 3 + 1] = v[1] * 0.25 - up.y * jet;
-        this.flow[i * 3 + 2] = v[2] * 0.25 + (p.z - cz) * roll + swirl * Math.cos(phase) - up.z * jet;
-        kinetic += this.flow[i * 3] ** 2 + this.flow[i * 3 + 1] ** 2 + this.flow[i * 3 + 2] ** 2;
-      }
-      const ionMixing = 0.012 + 0.06 * THREE.MathUtils.smoothstep(this.age, 0.35, 1.2)
-        + agitation * 0.09;
-      for (const field of Object.values(this.species)) this.transport(field.values, step, 0, ionMixing);
+      const amount = Math.max(0, Math.min(1, delivery) - this.delivered);
+      this.inject(inlet, amount, jetStrength);
+      this.solver.step(step, inlet, jetDirection ?? up.clone().negate(),
+        amount > 0 ? 0.2 * Math.min(3, Math.max(0.4, jetStrength)) : 0,
+        agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined);
+      const kinetic = this.solver.diagnostics().energy;
+      const ionMixing = 0.000015 + agitation * 0.000001;
+      for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing);
+      this.solver.transport(this.tracer, step, ionMixing);
       const calm = this.delivered >= 0.999 && agitation < 0.02
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
       const targetBoost = calm ? TUBE_SIMULATION.barium.settlingAcceleration : 1;
       this.settlingBoost += (targetBoost - this.settlingBoost) * (1 - Math.exp(-step / 0.8));
       if (calm) this.sedimentField.settle(step);
-      for (let k = 0; k < 3; k++) this.transport(this.suspension[k], step,
-        TUBE_SIMULATION.barium.settlingSpeeds[k] * this.settlingBoost, 0.009);
+      for (let k = 0; k < 3; k++) {
+        this.solver.transport(this.suspension[k], step, 0.000006);
+        this.settle(this.suspension[k], step,
+          TUBE_SIMULATION.barium.settlingSpeeds[k] * this.settlingBoost);
+      }
       const ba = this.species["Ba2+"].values, so = this.species["SO4(2-)"].values;
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a];
@@ -196,12 +182,14 @@ export class TubeBariumField {
     }
     if (sum < 1e-20) return;
     for (let a = 0; a < m.activeCount; a++) {
-      const i = m.active[a]; this.species["SO4(2-)"].values[i] += amount * weights[i] / sum;
+      const i = m.active[a], added = amount * weights[i] / sum;
+      this.species["SO4(2-)"].values[i] += added;
+      this.tracer[i] += added;
     }
     this.delivered += amount;
   }
 
-  private transport(values: Float64Array, dt: number, settling: number, diffusivity: number) {
+  private settle(values: Float64Array, dt: number, settling: number) {
     const m = this.mask, next = this.next;
     next.set(values);
     const stride = [1, m.nx, m.nx * m.ny];
@@ -213,11 +201,10 @@ export class TubeBariumField {
         if (axis === 0 && x + 1 === m.nx || axis === 1 && y + 1 === m.ny || axis === 2 && z + 1 === m.nz) continue;
         const j = i + stride[axis];
         if (!m.data[j]) continue;
-        const speed = this.flow[i * 3 + axis] - settling * this.velocity.gravityUp.getComponent(axis);
+        const speed = -settling * this.velocity.gravityUp.getComponent(axis);
         const fraction = Math.min(0.72, Math.abs(speed) * dt / spacing[axis]);
         const advect = speed > 0 ? values[i] * fraction : -values[j] * fraction;
-        const diffusion = (values[i] - values[j]) * diffusivity;
-        const flux = Math.max(-next[j], Math.min(next[i], advect + diffusion));
+        const flux = Math.max(-next[j], Math.min(next[i], advect));
         next[i] -= flux; next[j] += flux;
       }
       if (settling && y > 0 && !m.data[i - m.nx]) {

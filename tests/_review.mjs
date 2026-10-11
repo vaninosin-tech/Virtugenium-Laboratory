@@ -1,11 +1,16 @@
 import { chromium } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
 const out = process.env.OUT; const exp = Number(process.env.EXP); const times = process.env.TIMES.split(",").map(Number);
+const variants = (process.env.VARIANTS ?? "").split(",").filter(Boolean).map(item => item.split(":"));
 const selectedAngles = (process.env.ANGLES ?? "front,side,top,45").split(",");
+const records = [];
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: false, channel: "chrome", args: ["--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--window-size=1200,900"] });
 try {
-  const page = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
+  const context = await browser.newContext({ viewport: { width: 1200, height: 900 } });
+  if (process.env.QUALITY) await context.addInitScript(quality =>
+    localStorage.setItem("virtugenium.runtime-quality.v1", quality), process.env.QUALITY);
+  const page = await context.newPage();
   page.setDefaultTimeout(120000);
   page.on("pageerror", e => console.log("pageerror", e.message));
   await page.goto("http://127.0.0.1:5173");
@@ -14,6 +19,13 @@ try {
   await page.waitForFunction(() => window.__sceneStore?.getState().cabinetPhase === "inspecting", null, { timeout: 90000 });
   await page.locator(".lab-boot-screen").waitFor({ state: "hidden", timeout: 120000 });
   await page.waitForTimeout(2000);
+  if (process.env.QUALITY) await page.evaluate(async quality => {
+    const { useRuntimeQualityStore } = await import("/src/scenes/laboratory/lib/useRuntimeQualityStore.ts");
+    useRuntimeQualityStore.getState().setMode(quality);
+  }, process.env.QUALITY);
+  if (process.env.IMPACT || variants.length) await page.locator("select").nth(0).selectOption(process.env.IMPACT ?? variants[0][0]);
+  if (process.env.SPEED || variants.length) await page.locator("select").nth(1).selectOption(process.env.SPEED ?? variants[0][1]);
+  if (process.env.DEBUG) await page.evaluate(() => { window.__tubeDebugEnabled = true; });
   // Warm up the module import and a render first: the first shot is otherwise tens of seconds late.
   await page.evaluate(async () => { await import("/node_modules/three/build/three.module.js"); });
   const lastReagent = { 1: "hno3", 2: "nacl", 3: "k2so4", 4: "kmno4" }[exp];
@@ -60,6 +72,10 @@ try {
   let t0 = await page.evaluate(() => window.__reviewPourAt);
   for (const [index, t] of times.entries()) {
     if (process.env.RESET_EACH && index > 0) {
+      if (variants[index]) {
+        await page.locator("select").nth(0).selectOption(variants[index][0]);
+        await page.locator("select").nth(1).selectOption(variants[index][1]);
+      }
       await page.evaluate(() => { window.__reviewPourAt = 0; });
       await page.getByRole("button", { name: process.env.HEATED && exp === 1 ? "Опыт 1, с нагревом" : `Опыт ${exp}`, exact: true }).click();
       await page.waitForFunction(() => window.__reviewPourAt > 0, null,
@@ -72,9 +88,23 @@ try {
       const tube = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0];
       return tube ? window.__tubeReactionStore.getState().chemistryById[tube.instanceId]?.progress : undefined;
     });
+    const label = variants[index] ? `-${variants[index].join("-")}` : "";
+    const diagnostic = process.env.DEBUG ? await page.evaluate(() => {
+      const state = window.__tubeDebug;
+      return state && { kind: state.kind, velocity: state.velocity,
+        tracer: state.tracer, reagent: state.reagent, sedimentMass: state.sedimentMass,
+        suspensionMass: state.suspensionMass, formed: state.formed };
+    }) : null;
+    if (process.env.DEBUG) console.log("diagnostics", t, label, diagnostic);
+    records.push({ target: t, actual, progress: progressAtCapture, variant: label, diagnostic });
     if (process.env.SCREEN) {
       // The game's own close-up camera: no extra shader compilation, so the time is right.
-      await page.screenshot({ path: `${out}/e${exp}-${t}s-screen.png` });
+      if (process.env.DEBUG) {
+        await page.screenshot({ path: `${out}/e${exp}-${t}s${label}-debug.png` });
+        await page.evaluate(() => { const canvas = document.getElementById("tube-flow-debug"); if (canvas) canvas.style.visibility = "hidden"; });
+      }
+      await page.screenshot({ path: `${out}/e${exp}-${t}s${label}-screen.png` });
+      if (process.env.DEBUG) await page.evaluate(() => { const canvas = document.getElementById("tube-flow-debug"); if (canvas) canvas.style.visibility = "visible"; });
       console.log("screen", t, "actual", actual.toFixed(2), "end", ((Date.now() - t0) / 1000).toFixed(2), "progress", progressAtCapture?.toFixed(2));
       continue;
     }
@@ -103,7 +133,7 @@ try {
       return res;
     }, selectedAngles);
     if (!shots) { console.log("no tube", t); continue; }
-    for (const [label, url] of shots) await writeFile(`${out}/e${exp}-${t}s-${label}.png`, Buffer.from(url.split(",")[1], "base64"));
+    for (const [angle, url] of shots) await writeFile(`${out}/e${exp}-${t}s${label}-${angle}.png`, Buffer.from(url.split(",")[1], "base64"));
     console.log("shot", t, "actual", actual.toFixed(2), "end", ((Date.now() - t0) / 1000).toFixed(2), "progress", progressAtCapture?.toFixed(2));
   }
   if (process.env.VIDEO) {
@@ -114,8 +144,9 @@ try {
     }));
     await writeFile(`${out}/e${exp}-onset.webm`, Buffer.from(data.split(",")[1], "base64"));
   }
+  let timing = null;
   if (process.env.FPS) {
-    const timing = await page.evaluate(() => {
+    timing = await page.evaluate(() => {
       const start = window.__reviewPourAt;
       const stamps = window.__reviewFrames.filter(t => t >= start && t <= start + 4000);
       const gaps = stamps.slice(1).map((t, i) => ({ ms: t - stamps[i], at: (t - start) / 1000 }))
@@ -126,4 +157,5 @@ try {
     });
     console.log("fps", timing);
   }
+  await writeFile(`${out}/manifest.json`, JSON.stringify({ exp, quality: process.env.QUALITY ?? "AUTO", records, fps: timing }, null, 2));
 } finally { await browser.close(); }
