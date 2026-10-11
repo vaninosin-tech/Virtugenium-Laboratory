@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 
 export function copperTextureBounds(radius: number, bottom: number, height: number) {
   return { min: new THREE.Vector3(-radius, bottom, -radius),
@@ -26,7 +27,7 @@ float copperField(vec3 p) {
   if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return 0.0;
   if (uCuCompletion > 0.95) {
     float settled = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
-    return 2.05 * settled / (settled + 0.12);
+    return ${TUBE_SIMULATION.render.copperSettledSaturation.toFixed(2)} * settled / (settled + 0.12);
   }
   float density = texture(uCuCurrent, uvw).r;
   float neighbour = texture(uCuCurrent, clamp(uvw + vec3(0.045, 0.0, 0.045), 0.0, 1.0)).r;
@@ -39,10 +40,10 @@ float copperField(vec3 p) {
   vec3 folded = clamp(uvw + bend * warp, 0.0, 1.0);
   density = mix(texture(uCuPrevious, folded).r, texture(uCuCurrent, folded).r, uCuBlend);
   float threshold = mix(0.045, 0.015, smoothstep(0.38, 0.95, uCuCompletion));
-  float flowing = 2.3 * smoothstep(threshold, threshold + 0.32, max(0.0, density));
+  float flowing = ${TUBE_SIMULATION.render.copperSaturation.toFixed(1)} * smoothstep(threshold, threshold + 0.32, max(0.0, density));
   if (uCuCompletion > 0.75) {
     float settled = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
-    return mix(flowing, 2.05 * settled / (settled + 0.12),
+    return mix(flowing, ${TUBE_SIMULATION.render.copperSettledSaturation.toFixed(2)} * settled / (settled + 0.12),
       smoothstep(0.75, 0.95, uCuCompletion));
   }
   return flowing;
@@ -73,7 +74,7 @@ export class TubeAbsorptionMaterial extends THREE.ShaderMaterial {
         uCuBoundsMin: { value: bounds.min },
         uCuBoundsSize: { value: bounds.size },
         uCuSpheres: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) },
-        uCuCount: { value: 0 }, uSteps: { value: 16 },
+        uCuCount: { value: 0 }, uSteps: { value: TUBE_SIMULATION.render.raySteps },
         uTransport: { value: null as THREE.Texture | null }, uTransportAge: { value: 0 },
         uIncomingDyed: { value: 0 },
       },

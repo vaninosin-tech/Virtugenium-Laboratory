@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { copperReactionState, type CopperReactionState } from "./tubeReactions";
 import type { TemperatureField } from "./tubeTemperatureField";
+import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 
 export type SpeciesId = "Cu2+" | (string & {});
 export type ReactionState = CopperReactionState;
@@ -122,7 +123,7 @@ export class VelocityField {
       + 0.3 * anchor * (driftZ - this.sourceZ) / h;
     const U = X - cx, V = Z - cz, radial2 = U * U + V * V;
     const strength = 0.00022 + this.contributions.gas * 0.0006
-      + heat * 0.00135 + this.contrast * 0.002 + this.contributions.bubbles * 0.0003;
+      + heat * TUBE_SIMULATION.field.heatConvection + this.contrast * 0.002 + this.contributions.bubbles * 0.0003;
     const plume = strength * Math.exp(-0.65 * radial2);
     const plumeY = plume * 1.3 * (U * cxY + V * czY);
     const accel = this.contributions.acceleration;
@@ -131,10 +132,10 @@ export class VelocityField {
     // colour pile up in a single top voxel row.
     const surfaceTurn = 1 - 1.9 * THREE.MathUtils.smoothstep(Y, 0.58, 0.78);
     const vx = -0.8 * dSdy - 0.7 * dSdz - fineY - fineZ - U * plumeY + cxY * plume
-      + (this.sourceX - X) * 0.006 * anchor * surfaceTurn - accel.x * 0.0001 / h;
+      + (this.sourceX - X) * 0.0015 * anchor * surfaceTurn - accel.x * 0.0001 / h;
     const vy = dSdz + 0.8 * dSdx + fineZ + fineX + plume * (2 - 1.3 * radial2);
     const vz = 0.7 * dSdx - dSdy + fineX - fineY - V * plumeY + czY * plume
-      + (this.sourceZ - Z) * 0.006 * anchor * surfaceTurn + accel.z * 0.0001 / r;
+      + (this.sourceZ - Z) * 0.0015 * anchor * surfaceTurn + accel.z * 0.0001 / r;
     const g = this.gravityUp;
     this.result[0] = vx + vy * g.x;
     this.result[1] = vy * g.y;
@@ -203,8 +204,9 @@ export class TubeVolumeField {
     sources: readonly THREE.Vector3[]) {
     const low = quality === "LOW";
     this.useMuscl = !low;
-    this.step = 1 / 20;
-    this.mask = new LiquidMask(low ? 16 : 22, low ? 32 : 44, low ? 16 : 22, radius, bottom, height);
+    this.step = TUBE_SIMULATION.field.stepSeconds;
+    const resolution = low ? TUBE_SIMULATION.field.LOW : TUBE_SIMULATION.field.HIGH;
+    this.mask = new LiquidMask(resolution.width, resolution.height, resolution.depth, radius, bottom, height);
     this.species = { "Cu2+": new SpeciesField("Cu2+", this.mask) };
     this.velocity = new VelocityField(this.mask);
     this.sources = sources.map(p => p.clone());
@@ -358,8 +360,10 @@ export class TubeVolumeField {
     const m = this.mask, values = this.species["Cu2+"].values;
     const dx = 2 * m.radius / m.nx, dy = m.height / m.ny, dz = 2 * m.radius / m.nz;
     const completion = clamp((this.reaction.extent - 0.68) / 0.27, 0, 1);
-    const diffusivity = 0.00000025 + this.velocity.contributions.buoyancy * 0.00000025
-      + this.velocity.contributions.gas * 0.0000001 + completion * completion * 0.00002;
+    const diffusivity = TUBE_SIMULATION.field.baseDiffusivity
+      + this.velocity.contributions.buoyancy * TUBE_SIMULATION.field.heatDiffusivity
+      + this.velocity.contributions.gas * TUBE_SIMULATION.field.gasDiffusivity
+      + completion * completion * TUBE_SIMULATION.field.completionDiffusivity;
     const { fluxX, fluxY, fluxZ, outgoing, nextValues } = this;
     outgoing.fill(0);
     nextValues.set(values);
@@ -466,9 +470,10 @@ export class TubeVolumeField {
         const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
         const q = m.point(x, y, z, this.injectionPoint);
         for (let s = 0; s < zoneCount; s++) {
-          const r2 = ((q.x - this.kernelX[s]) / (m.radius * 0.22)) ** 2
+          const width = TUBE_SIMULATION.field.sourceWidths[s % TUBE_SIMULATION.field.sourceWidths.length];
+          const r2 = ((q.x - this.kernelX[s]) / (m.radius * width)) ** 2
             + ((q.y - this.kernelY[s]) / (m.radius * 0.2)) ** 2
-            + ((q.z - this.kernelZ[s]) / (m.radius * 0.22)) ** 2;
+            + ((q.z - this.kernelZ[s]) / (m.radius * width)) ** 2;
           const w = this.kernelWeight[s] * Math.exp(-r2 * 1.4);
           if (w > 1e-6) weights[s % 4][i] += w;
         }
@@ -498,7 +503,7 @@ export class TubeVolumeField {
   private writeTexture() {
     const m = this.mask, v = this.species["Cu2+"].values;
     // Normalize by a whole-tube amount, not by max voxel, so hue preserves mass.
-    const scale = m.data.length * 0.018;
+    const scale = m.data.length * TUBE_SIMULATION.field.opticalDensityScale;
     const opticalSmoothing = clamp((this.reaction.extent - 0.8) / 0.17, 0, 1) * 0.65;
     const slice = m.nx * m.ny;
     for (let i = 0; i < v.length; i++) {

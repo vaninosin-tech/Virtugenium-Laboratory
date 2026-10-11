@@ -1,12 +1,13 @@
 import * as THREE from "three";
 import type { VelocityField } from "./tubeVolumeField";
+import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 
 const rand = (seed: number) => {
   const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 };
 
-export const NO_BUBBLE_CAPACITY = 384;
+export const NO_BUBBLE_CAPACITY = TUBE_SIMULATION.bubbles.capacity;
 
 /** A fixed pool of visible samples of the NO flux, stepped in elapsed time. */
 export class TubeNOBubbles {
@@ -39,7 +40,7 @@ export class TubeNOBubbles {
     const boundedDt = Math.max(0, Math.min(dt, 0.25));
     // Visible events sample chemical flux, with area modulating the number
     // of active surface sites. The fractional remainder survives frame splits.
-    this.accumulator += Math.max(0, noSource) * 1800 * Math.sqrt(Math.max(0, wettedArea));
+    this.accumulator += Math.max(0, noSource) * TUBE_SIMULATION.bubbles.samplesPerNO * Math.sqrt(Math.max(0, wettedArea));
     const births = Math.min(32, Math.floor(this.accumulator + 1e-9));
     this.accumulator = Math.max(0, this.accumulator - births);
     for (let b = 0; b < births && sources.length; b++) {
@@ -55,9 +56,8 @@ export class TubeNOBubbles {
       this.state[slot] = 1; this.site[slot] = site;
       this.x[slot] = p.x; this.y[slot] = p.y; this.z[slot] = p.z;
       this.size[slot] = radius * (0.05 + Math.pow(rand(serial + 47), 2.5) * 0.08);
-      this.growTime[slot] = rand(serial + 83) < 0.25
-        ? 0.2 + rand(serial + 61) * 0.35
-        : 0.75 + rand(serial + 61) * 1.05;
+      this.growTime[slot] = TUBE_SIMULATION.bubbles.attachedSeconds[0]
+        + rand(serial + 61) * (TUBE_SIMULATION.bubbles.attachedSeconds[1] - TUBE_SIMULATION.bubbles.attachedSeconds[0]);
       this.age[slot] = 0; this.born++;
     }
     this.activeRising = 0;

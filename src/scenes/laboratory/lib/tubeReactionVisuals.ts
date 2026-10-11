@@ -9,6 +9,7 @@ import { TubeVolumeField } from "./tubeVolumeField";
 import { testTubeLiquidFill } from "./testTubeContents";
 import { copperGranuleRadiusScale, useTubeReactionStore, type ReactionKind, type TubeChemistry } from "./tubeReactions";
 import { GasState, readDeveloperOxygen } from "./tubeGasState";
+import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { NO_BUBBLE_CAPACITY, TubeNOBubbles } from "./tubeNOBubbles";
 import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
 import { useTestTubeStorageStore } from "./useTestTubeStorageStore";
@@ -778,17 +779,16 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       Math.hypot(positions.getX(i), positions.getY(i), positions.getZ(i)));
     return bound;
   }) ?? [];
-  // Five actual surface vertices per grain. The enclosing sphere used for
+  // Three separated actual surface vertices per grain. The enclosing sphere used for
   // placement is larger than the irregular copper and left a clear gap.
   const copperSourceVertices = copper?.children.flatMap((child, i) => {
     if (!(child instanceof THREE.Mesh)) return [];
     const positions = child.geometry.getAttribute("position");
     const candidates: THREE.Vector3[] = [];
     const vertex = new THREE.Vector3();
-    for (let k = 0; k < 5; k++) {
-      const angle = (k - 1) * Math.PI * 0.5 + i * 1.7;
-      const direction = k === 0 ? new THREE.Vector3(0, 1, 0)
-        : new THREE.Vector3(Math.cos(angle) * 0.55, 0.83, Math.sin(angle) * 0.55);
+    for (let k = 0; k < 3; k++) {
+      const angle = [0, Math.PI / 2, Math.PI][k] + i * 1.7;
+      const direction = new THREE.Vector3(Math.cos(angle) * 0.8, 0.6, Math.sin(angle) * 0.8);
       let best = -Infinity;
       let selected = new THREE.Vector3();
       for (let j = 0; j < positions.count; j++) {
@@ -800,7 +800,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
     }
     return candidates;
   }) ?? [];
-  const sourcePoints = Array.from({ length: (copper?.children.length ?? 0) * 5 }, () => new THREE.Vector3());
+  const sourcePoints = Array.from({ length: (copper?.children.length ?? 0) * 3 }, () => new THREE.Vector3());
   const bubbleSites = Array.from({ length: NO_BUBBLE_CAPACITY }, () => new THREE.Vector3());
   const wettedSites: THREE.Vector3[] = [];
   const bubbleSiteVertex = new THREE.Vector3();
@@ -913,8 +913,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         copper?.children.forEach((child, i) => {
           if (!(child instanceof THREE.Mesh) || !child.visible) return;
           child.updateMatrix();
-          for (let k = 0; k < 5; k++) {
-            sourcePoints[sourceCount++].copy(copperSourceVertices[i * 5 + k]).applyMatrix4(child.matrix);
+          for (let k = 0; k < 3; k++) {
+            sourcePoints[sourceCount++].copy(copperSourceVertices[i * 3 + k]).applyMatrix4(child.matrix);
           }
         });
         copperField.setSources(sourcePoints, sourceCount);
@@ -955,7 +955,6 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           absorption.uniforms.uCuBlend.value = copperField.alpha;
           absorption.uniforms.uCuCompletion.value = p;
           absorption.uniforms.uCuTime.value = time;
-          absorption.uniforms.uSteps.value = 12;
           const spheres = absorption.uniforms.uCuSpheres.value as THREE.Vector4[];
           let count = 0;
           copper?.children.forEach((child, i) => {
@@ -1081,7 +1080,11 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           if (!(child instanceof THREE.Mesh) || !child.visible) continue;
           const vertices = child.geometry.getAttribute("position");
           if (!vertices?.count) continue;
-          const vertex = Math.floor(random(i * 17 + 571) * vertices.count);
+          let vertex = Math.floor(random(i * 17 + 571) * vertices.count);
+          // The underside rests against the rounded glass floor. Prefer
+          // exposed metal so attached bubbles remain visible on the granule.
+          for (let attempt = 0; attempt < 8 && vertices.getY(vertex) < -copperBounds[i % copperBounds.length] * 0.12; attempt++)
+            vertex = (vertex + 17) % vertices.count;
           child.updateMatrix();
           bubbleSiteVertex.fromBufferAttribute(vertices, vertex).applyMatrix4(child.matrix);
           if (bubbleSiteVertex.dot(up.value) > level.value - radius * 0.015) continue;
@@ -1141,7 +1144,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           ? 1 - THREE.MathUtils.smoothstep(transport.age, 8, 12) : 0;
         material.uniforms.uTransportDye.value = options.incomingDyed ? 1 : 0;
         material.uniforms.uTransportAge.value = precipitate ? pourAge : transport.age;
-        material.uniforms.uTransportQuality.value = quality === "LOW" ? 6 : 16;
+        material.uniforms.uTransportQuality.value = quality === "LOW"
+          ? TUBE_SIMULATION.render.transportStepsLow : TUBE_SIMULATION.render.transportStepsHigh;
         material.uniforms.uCameraLocal.value.copy(cameraLocal);
       }
       if (liquid) {
@@ -1190,15 +1194,15 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         const state = noBubbles.state[i];
         if (!state) continue;
         const growth = state === 1 ? THREE.MathUtils.smoothstep(noBubbles.age[i], 0, noBubbles.growTime[i]) : 1;
-        const bubbleSize = noBubbles.size[i] * (0.35 + 0.65 * growth);
+        const bubbleSize = noBubbles.size[i] * (0.55 + 0.45 * growth);
         if (state === 1) {
           const grain = copper?.children[0];
           attachedNormal.set(noBubbles.x[i] - (grain?.position.x ?? center.x),
             noBubbles.y[i] - (grain?.position.y ?? box.min.y),
             noBubbles.z[i] - (grain?.position.z ?? center.z)).normalize();
-          place(attachedBubbles, attachedCount++, noBubbles.x[i] + attachedNormal.x * bubbleSize * 0.55,
-            noBubbles.y[i] + attachedNormal.y * bubbleSize * 0.55,
-            noBubbles.z[i] + attachedNormal.z * bubbleSize * 0.55,
+          place(attachedBubbles, attachedCount++, noBubbles.x[i] + attachedNormal.x * bubbleSize * 0.95,
+            noBubbles.y[i] + attachedNormal.y * bubbleSize * 0.95,
+            noBubbles.z[i] + attachedNormal.z * bubbleSize * 0.95,
             bubbleSize, bubbleSize, bubbleSize);
         }
         else place(bubbles, freeCount++, noBubbles.x[i], noBubbles.y[i], noBubbles.z[i],
