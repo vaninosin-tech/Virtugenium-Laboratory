@@ -97,11 +97,11 @@ describe("advanceChemistry", () => {
     // BaSO₄'s fine suspension settles far slower than AgCl's curds.
     expect(run(["bacl2", "k2so4"], 12.5, false).progress).toBeLessThan(0.35);
     expect(run(["bacl2", "k2so4"], 45.5, false).progress).toBe(1);
-    // Permanganate in acid: the raspberry holds 1.5 s, then fades over ~3 s.
+    // R4 progress comes from the spatial field, not this temperature runtime.
     const redox = ["kmno4", "h2so4", "na2so3"];
-    expect(run(redox, 1.4, false).progress).toBe(0);
-    expect(run(redox, 2.5, false).progress).toBeGreaterThan(0.2);
-    expect(run(redox, 4.6, false).progress).toBe(1);
+    expect(run(redox, 2.5, false).progress).toBe(0);
+    expect(advanceChemistry(redox, { ...ROOM_TEMPERATURE_CHEMISTRY,
+      progress: 0.3, rate: 0.2 }, 0.1, false).progress).toBe(0.3);
   });
 
   it("tracks temperature even with nothing reacting", () => {

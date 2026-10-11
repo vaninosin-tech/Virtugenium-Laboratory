@@ -51,7 +51,6 @@ const REACTIONS: readonly ReactionDef[] = [
     trigger: "mix",
     seconds: 3,
     coldRate: 1,
-    holdSeconds: 1.5,
   },
 ];
 
@@ -156,6 +155,11 @@ export const advanceChemistry = (
     age: 0, copperArea: state.copperArea };
 
   const age = (state.age ?? 0) + deltaSeconds;
+  if (reaction.kind === "permanganate-redox") {
+    // The 3D R4 field owns progress and rate. The runtime only updates heat;
+    // a second scalar kinetic clock would contradict the visible MnO4- mass.
+    return { ...state, temperature, temperatureField, externalHeat: external, age };
+  }
   if (age < (reaction.holdSeconds ?? 0)) return { progress: 0, rate: 0, temperature, temperatureField,
     externalHeat: external, age, copperArea: state.copperArea };
 

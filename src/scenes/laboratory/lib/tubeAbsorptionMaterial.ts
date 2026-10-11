@@ -54,6 +54,22 @@ float permanganateTongue(sampler2D field, vec2 uv, float age) {
   return texture(field, clamp(uv, vec2(0.0), vec2(1.0))).r;
 }`;
 
+/** Sub-voxel folds only change where the remaining MnO4- field is sampled. */
+export const permanganateVolumeGLSL = `
+uniform sampler3D uMnField;
+float permanganateVolume(vec3 p) {
+  vec3 uvw = (p - uCuBoundsMin) / uCuBoundsSize;
+  if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return 0.0;
+  float centre = texture(uMnField, uvw).r;
+  float adjacent = texture(uMnField, clamp(uvw + vec3(0.05, 0.025, -0.04), 0.0, 1.0)).r;
+  float edge = smoothstep(0.012, 0.20, abs(centre - adjacent));
+  vec3 fold = vec3(
+    0.05 * sin(uvw.y * 23.0 + uvw.z * 13.0 + uCuTime * 1.6),
+    0.012 * sin(uvw.x * 19.0 - uvw.z * 16.0 + uCuTime * 1.1),
+    0.05 * cos(uvw.y * 27.0 - uvw.x * 12.0 - uCuTime * 1.3));
+  return max(0.0, texture(uMnField, clamp(uvw + fold * edge, 0.0, 1.0)).r);
+}`;
+
 /** Multiplies the scene by transmitted light through the liquid volume. */
 export class TubeAbsorptionMaterial extends THREE.ShaderMaterial {
   constructor(radius: number, bottom: number, height: number) {
@@ -69,6 +85,7 @@ export class TubeAbsorptionMaterial extends THREE.ShaderMaterial {
         uCameraLocal: { value: new THREE.Vector3() }, uKind: { value: 0 }, uProgress: { value: 0 },
         uCuPrevious: { value: null as THREE.Data3DTexture | null },
         uCuCurrent: { value: null as THREE.Data3DTexture | null }, uCuBlend: { value: 0 },
+        uMnField: { value: null as THREE.Data3DTexture | null },
         uCuCompletion: { value: 0 },
         uCuTime: { value: 0 },
         uCuBoundsMin: { value: bounds.min },
@@ -94,6 +111,7 @@ uniform sampler2D uTransport; uniform vec4 uCuSpheres[8]; uniform int uCuCount;
 in vec3 vPoint; in float vCap; out vec4 outColor;
 ${copperFieldGLSL}
 ${permanganateTongueGLSL}
+${permanganateVolumeGLSL}
 void main() {
   float radius = ${radius.toFixed(7)}, bottom = ${bottom.toFixed(7)}, height = ${height.toFixed(7)};
   float surface = dot(uUp, vPoint) - uLevel;
@@ -126,6 +144,10 @@ void main() {
     if (uKind < 1.5) {
       opticalDepth += mix(vec3(1.0, 0.26, 0.008), vec3(0.95, 0.20, 0.07),
         smoothstep(0.65, 0.95, uCuCompletion)) * max(0.0, copperField(q)) * distance / (uSteps * radius);
+    } else if (uKind > 2.5) {
+      float c = permanganateVolume(q);
+      // Beer-Lambert: retained dissolved MnO4- alone determines transmission.
+      opticalDepth += vec3(0.17, 1.12, 0.43) * max(0.0, c) * distance / (uSteps * radius);
     } else {
       float c = 1.0 - smoothstep(0.02, 0.98, uProgress);
       if (uIncomingDyed > 0.5) {

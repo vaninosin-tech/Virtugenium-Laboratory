@@ -6,6 +6,8 @@ import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
 import { TubeVolumeField } from "./tubeVolumeField";
+import { TubePermanganateField } from "./tubePermanganateField";
+import { CLAMP_TUBE_MOUTH } from "./useStandMotionStore";
 import { testTubeLiquidFill } from "./testTubeContents";
 import { copperGranuleRadiusScale, useTubeReactionStore, type ReactionKind, type TubeChemistry } from "./tubeReactions";
 import { GasState, readDeveloperOxygen } from "./tubeGasState";
@@ -811,6 +813,12 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   const copperField = kind === "copper-nitric" && hasLiquid
     ? new TubeVolumeField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, size.y, copperPoints) : null;
+  const permanganateField = kind === "permanganate-redox" && hasLiquid
+    ? new TubePermanganateField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
+      radius, box.min.y, size.y) : null;
+  const permanganateInlet = new THREE.Vector3();
+  const permanganateSide = new THREE.Vector3();
+  const worldUp = new THREE.Vector3(0, 1, 0);
   const tubeWorldPosition = new THREE.Vector3();
   const causticRay = new THREE.Raycaster();
   const causticOrigin = new THREE.Vector3();
@@ -931,6 +939,44 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         copperField.advance(Math.min(elapsed, 0.25), reactionProgress ?? p, up.value, level.value,
           rate, temperature, spatialHeat, tubeWorldPosition);
       }
+      if (permanganateField) {
+        if (CLAMP_TUBE_MOUTH.valid) {
+          permanganateSide.subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);
+          if (permanganateSide.lengthSq() < 1e-8) permanganateSide.set(1, 0, 0);
+          permanganateSide.normalize();
+          // PourStream targets this near-wall side, 26 mm below the mouth.
+          permanganateInlet.copy(CLAMP_TUBE_MOUTH.point)
+            .addScaledVector(permanganateSide, 0.0065).addScaledVector(worldUp, -0.026);
+          volume.worldToLocal(permanganateInlet);
+        } else permanganateInlet.set(radius * 0.7, level.value, 0);
+        const radial = Math.hypot(permanganateInlet.x, permanganateInlet.z);
+        if (radial > radius * 0.82) permanganateInlet.multiplyScalar(radius * 0.82 / radial);
+        // The actual liquid interface follows the meniscus as the tube tilts.
+        permanganateInlet.y = (level.value - up.value.x * permanganateInlet.x
+          - up.value.z * permanganateInlet.z) / Math.max(0.2, up.value.y) - 0.0007;
+        // The incoming charge is delivered during the pour. Once added, only
+        // local R4 and transport can change its colour.
+        const priorExtent = permanganateField.extent;
+        permanganateField.advance(dt, up.value, level.value, permanganateInlet,
+          2 * THREE.MathUtils.smoothstep(pourAge, 0, 1.3));
+        if (options.activeSurface) {
+          const stand = useBunsenStandStorageStore.getState();
+          const tubes = useTestTubeStorageStore.getState();
+          const index = stand.attachedTubeSlotIndex;
+          const attached = index === null ? undefined
+            : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[index];
+          if (attached?.contents.includes("kmno4") && attached.contents.includes("na2so3")
+            && attached.contents.includes("h2so4")) {
+            const store = useTubeReactionStore.getState();
+            const current = store.chemistryById[attached.instanceId];
+            const fieldProgress = permanganateField.progress;
+            const fieldRate = dt > 0 ? (permanganateField.extent - priorExtent) / dt : 0;
+            if (current && (Math.abs(current.progress - fieldProgress) > 1e-4
+              || Math.abs(current.rate - fieldRate) > 1e-3))
+              store.setChemistry(attached.instanceId, { ...current, progress: fieldProgress, rate: fieldRate });
+          }
+        }
+      }
       if (backdrop && backdropWall && backdropCap) {
         backdrop.up.value.copy(up.value);
         backdrop.level.value = level.value;
@@ -947,7 +993,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         absorption.uniforms.uUp.value.copy(up.value);
         absorption.uniforms.uLevel.value = level.value;
         absorption.uniforms.uCameraLocal.value.copy(cameraLocal);
-        absorption.uniforms.uKind.value = kind === "copper-nitric" ? 1 : 2;
+        absorption.uniforms.uKind.value = kind === "copper-nitric" ? 1 : permanganateField ? 3 : 2;
         absorption.uniforms.uProgress.value = p;
         if (copperField) {
           absorption.uniforms.uCuPrevious.value = copperField.previous;
@@ -965,13 +1011,14 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           });
           absorption.uniforms.uCuCount.value = count;
         }
+        if (permanganateField) {
+          absorption.uniforms.uMnField.value = permanganateField.texture;
+          absorption.uniforms.uCuTime.value = time;
+        }
         absorption.uniforms.uTransport.value = transport?.texture ?? null;
         absorption.uniforms.uTransportAge.value = transport?.age ?? 0;
         absorption.uniforms.uIncomingDyed.value = kind === "permanganate-redox" && options.incomingDyed ? 1 : 0;
-        absorptionWall.visible = hasLiquid && (standalonePermanganate
-          || (kind === "permanganate-redox"
-            ? options.incomingDyed ? (transport?.age ?? 0) < 3.1 : p < 0.999
-            : p > 0.001));
+        absorptionWall.visible = hasLiquid && (standalonePermanganate || !!permanganateField || p > 0.001);
         absorptionCap.visible = absorptionWall.visible;
       }
       immersion.uniforms.uImmersionWorldToLocal.value.copy(inverse);
@@ -1136,6 +1183,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
           activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
         }
+        if (permanganateField) {
+          activeLiquid.uniforms.uMnField.value = permanganateField.texture;
+          activeLiquid.uniforms.uMnActive.value = 1;
+          activeLiquid.uniforms.uCuTime.value = time;
+          activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
+          activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
+        }
       }
       if (transport) for (const material of [base, liquid]) {
         if (!(material instanceof TubeLiquidMaterial)) continue;
@@ -1160,7 +1214,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         liquid.uniforms.uWallFilm.value = kind === "barium-sulfate"
           ? THREE.MathUtils.smoothstep(p, 0.33, 0.95) : 0;
         liquid.uniforms.uOpacity.value = precipitate ? 0.3
-          : kind === "permanganate-redox" ? THREE.MathUtils.lerp(baseOpacity, 0.14, p)
+          : kind === "permanganate-redox" ? 0.14
             : THREE.MathUtils.lerp(baseOpacity, 0.42, p);
         liquid.uniforms.uQualityNoise.value = quality === "LOW" ? 0 : 1;
       }
@@ -1176,7 +1230,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         material.uniforms.uTint.value.set(causticTint);
         material.uniforms.uStrength.value = causticStrength * scale
           * (kind === "permanganate-redox"
-            ? 1 - THREE.MathUtils.smoothstep(transport?.age ?? 0, 0.6, 3) : 1)
+            ? THREE.MathUtils.clamp((permanganateField?.species["MnO4-"].total ?? 0) / 2, 0, 1) : 1)
           * (mesh === standCaustic ? causticSurfaceStrength : 1);
         material.uniforms.uWave.value = surfaceActivity;
         material.uniforms.uTime.value = time;
@@ -1335,6 +1389,7 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       detachImmersion.forEach(detach => detach());
       immersion.dispose();
       copperField?.dispose();
+      permanganateField?.dispose();
       group.removeFromParent();
       deferDispose(group, () => {
         geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();

@@ -475,7 +475,8 @@ describe("tube reaction rendering contract", () => {
     expect(liquid(f).uniforms.uReactionColor.value.getHexString()).toBe("ffffff");
     expect(liquid(f).uniforms.uOpacity.value).toBeCloseTo(0.14);
     for (const o of f.root.getObjectByName("TubeReactionVisuals")!.children) {
-      expect(o.visible).toBe(["TubeLiquidSurface", "TubeBottomCaustic", "TubeStandCaustic"].includes(o.name));
+      expect(o.visible).toBe(["TubeLiquidSurface", "TubeBottomCaustic", "TubeStandCaustic",
+        "TubeAbsorptionWall", "TubeAbsorptionSurface"].includes(o.name));
     }
   });
 
@@ -491,7 +492,7 @@ describe("tube reaction rendering contract", () => {
     expect(active.depthWrite).toBe(f.baseline.depthWrite);
     expect(active.roughness).toBe(f.baseline.roughness);
     expect(active.ior).toBe(f.baseline.ior);
-    expect(active.uniforms.uOpacity.value).toBeCloseTo(f.baseline.uniforms.uOpacity.value, 3);
+    expect(active.uniforms.uOpacity.value).toBeCloseTo(0.14, 3);
   });
 
   it("leaves unrecognized contents unchanged and expires a splash after one second", () => {

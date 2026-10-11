@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { LiquidMaterial, type LiquidOptions } from "./reagentMaterials";
-import { copperFieldGLSL, permanganateTongueGLSL } from "./tubeAbsorptionMaterial";
+import { copperFieldGLSL, permanganateTongueGLSL, permanganateVolumeGLSL } from "./tubeAbsorptionMaterial";
 
 export const TUBE_LIQUID = { clearAlpha: 0.17, edgeAlpha: 0.42, meniscusAlpha: 0.22, clearHighlight: 0.30 };
 // Shared by the surface and the backdrop pass so a cloud has one silhouette.
@@ -58,6 +58,8 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uCameraLocal: { value: new THREE.Vector3(0, 0, 1) },
       uCuPrevious: { value: null as THREE.Data3DTexture | null },
       uCuCurrent: { value: null as THREE.Data3DTexture | null },
+      uMnField: { value: null as THREE.Data3DTexture | null },
+      uMnActive: { value: 0 },
       uCuBlend: { value: 0 },
       uCuCompletion: { value: 0 },
       uCuTime: { value: 0 },
@@ -94,11 +96,12 @@ uniform float uClearAlpha; uniform float uEdgeAlpha; uniform float uMeniscusAlph
 uniform vec3 uUp; uniform float uLevel; uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
 uniform float uReactionKind; uniform float uRate; uniform float uTemperature; uniform float uTime;
 uniform float uResidualHaze; uniform float uWallFilm;
-uniform sampler2D uTransport; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality; uniform float uTransportAge;
+uniform sampler2D uTransport; uniform float uMnActive; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality; uniform float uTransportAge;
 uniform vec3 uCameraLocal;
 varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
 ${copperFieldGLSL}
 ${permanganateTongueGLSL}
+${permanganateVolumeGLSL}
 ${bariumCloudGLSL}
 vec2 transported(vec3 point) {
   vec3 center = uBoundsMin + uBoundsSize * 0.5;
@@ -175,15 +178,10 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   cloud *= mix(shape, 1.0,
     smoothstep(2.5, 3.3, uTransportAge));
 } else if (uReactionKind > 3.5) {
-  // The inlet transport alone sets the dyed region. A shared multiscale warp
-  // softens and tears its outline; no regular spatial oscillation is added.
   vec2 dyeUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x, 0.0, 1.0), h);
-  dyeCloud = permanganateTongue(uTransport, dyeUv, uTransportAge);
-  dyeHalo = permanganateTongue(uTransport, dyeUv + vec2(0.035, 0.0), uTransportAge) * 0.12;
-  // The excess acidified sulfite bleaches each incoming fold within seconds.
-  float dyeFade = 1.0 - smoothstep(0.65, 3.0, uTransportAge);
-  dyeCloud *= dyeFade;
-  dyeHalo *= dyeFade;
+  dyeCloud = uMnActive > 0.5 ? permanganateVolume(vTubePoint)
+    : permanganateTongue(uTransport, dyeUv, uTransportAge);
+  dyeHalo = 0.0;
   localMix = 1.0 - dyeCloud;
 }
 if (p <= 0.0 && uReactionKind < 3.5) { localMix = 0.0; cloud = 0.0; }
