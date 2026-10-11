@@ -85,6 +85,8 @@ export interface TubeChemistry {
   readonly age?: number;
   /** Initial wetted copper area relative to the default granule. */
   readonly copperArea?: number;
+  /** Wall clock of the last visible R3 field update. */
+  readonly fieldUpdatedAt?: number;
 }
 
 export const ROOM_TEMPERATURE_CHEMISTRY: TubeChemistry = { progress: 0, rate: 0, temperature: 0, age: 0 };
@@ -159,6 +161,13 @@ export const advanceChemistry = (
     // The 3D R4 field owns progress and rate. The runtime only updates heat;
     // a second scalar kinetic clock would contradict the visible MnO4- mass.
     return { ...state, temperature, temperatureField, externalHeat: external, age };
+  }
+  if (reaction.kind === "barium-sulfate") {
+    if (state.fieldUpdatedAt === undefined)
+      return { ...state, progress: 0, rate: 0, fieldUpdatedAt: Date.now(),
+        temperature, temperatureField, externalHeat: external, age };
+    if (Date.now() - state.fieldUpdatedAt <= 1000)
+      return { ...state, temperature, temperatureField, externalHeat: external, age };
   }
   if (age < (reaction.holdSeconds ?? 0)) return { progress: 0, rate: 0, temperature, temperatureField,
     externalHeat: external, age, copperArea: state.copperArea };

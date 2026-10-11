@@ -188,7 +188,7 @@ describe("tube reaction rendering contract", () => {
     const f = fixture(kind, false, false, true);
     f.update(chemistry(0));
     const held = f.volume.material;
-    expect(held === f.baseline).toBe(kind !== "permanganate-redox");
+    expect(held === f.baseline).toBe(kind !== "permanganate-redox" && kind !== "barium-sulfate");
     const group = f.root.getObjectByName("TubeReactionVisuals")!;
     const meshes = group.children as THREE.Mesh[];
     const resources = meshes.map(mesh => ({ mesh, geometry: mesh.geometry, material: mesh.material,
@@ -386,7 +386,7 @@ describe("tube reaction rendering contract", () => {
     const barium = fixture("barium-sulfate");
     for (const f of [silver, barium]) {
       f.update(chemistry(1), "LOW");
-      expect(f.get("TubeSediment").visible).toBe(f === barium);
+      expect(f.get("TubeSediment").visible).toBe(false);
       expect(f.get("TubePrecipitate").visible).toBe(f === silver);
       expect(f.get("TubeBaCrystals")).toBeUndefined();
       expect(f.get("TubeNO2").visible).toBe(false);
@@ -399,7 +399,7 @@ describe("tube reaction rendering contract", () => {
     expect(silverTop).toBeGreaterThan(0.055 * 0.10);
     expect(silverTop).toBeLessThan(0.055 * 0.36);
     expect(barium.get("TubePrecipitate").visible).toBe(false);
-    expect(bariumBed.visible).toBe(true);
+    expect(bariumBed.visible).toBe(false);
     expect((bariumBed.material as THREE.MeshStandardMaterial).roughness).toBe(1);
     expect((bariumBed.material as THREE.MeshStandardMaterial).metalness).toBe(0);
     expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
@@ -445,29 +445,22 @@ describe("tube reaction rendering contract", () => {
     expect(barium.get("TubeSediment").visible).toBe(false);
     barium.update(chemistry(25 / 45));
     expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);
-    expect(barium.get("TubeSediment").visible).toBe(true);
+    expect(barium.get("TubeSediment").visible).toBe(false);
     barium.update(chemistry(35 / 45));
     expect(liquid(barium).uniforms.uCloudiness.value).toBeCloseTo(1);
     barium.update(chemistry(1));
-    expect(barium.get("TubeSediment").visible).toBe(true);
+    expect(barium.get("TubeSediment").visible).toBe(false);
   });
 
-  it("keeps a faint BaSO4 opalescence above the settled powder, then clears it", () => {
+  it("uses the suspension field instead of a timed wall haze", () => {
     const barium = fixture("barium-sulfate");
     barium.update(chemistry(1));
     const material = liquid(barium);
-    expect(material.uniforms.uWallFilm.value).toBeCloseTo(1);
-    expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0.035);
-    barium.advance(45, chemistry(1));
-    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.03);
-    barium.advance(90, chemistry(1));
-    expect(material.uniforms.uResidualHaze.value).toBeGreaterThan(0.005);
-    expect(material.uniforms.uResidualHaze.value).toBeLessThan(0.02);
-    barium.advance(65, chemistry(1));
+    expect(material.uniforms.uBaActive.value).toBe(1);
+    expect(material.uniforms.uBaField.value).toBeTruthy();
     expect(material.uniforms.uResidualHaze.value).toBeCloseTo(0);
-    expect(material.uniforms.uWallFilm.value).toBeCloseTo(1);
-  // Simulates minutes of settling step by step; slow on a loaded machine.
-  }, 30000);
+    expect(material.uniforms.uWallFilm.value).toBeCloseTo(0);
+  });
 
   it("decolorizes permanganate while keeping its water surface visible", () => {
     const f = fixture("permanganate-redox", false, false, true);

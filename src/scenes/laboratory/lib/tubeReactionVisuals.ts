@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { REAGENTS } from "../../../entities/laboratory/reagents";
 import { deferDispose } from "./deferredDispose";
 import { TubeLiquidMaterial, bariumCloudGLSL } from "./tubeLiquidMaterial";
+import { TubeBariumField } from "./tubeBariumField";
+import { BariumSedimentGeometry } from "./tubeBariumSediment";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
@@ -201,6 +203,8 @@ function createWaterBackdropMaterial(radius: number, minY: number, height: numbe
     shader.uniforms.uOpticalCloud = optics.uniforms.uCloudiness;
     shader.uniforms.uOpticalHaze = optics.uniforms.uResidualHaze;
     shader.uniforms.uOpticalAge = optics.uniforms.uTransportAge;
+    shader.uniforms.uBaField = optics.uniforms.uBaField;
+    shader.uniforms.uBaActive = optics.uniforms.uBaActive;
     shader.vertexShader = `attribute float tubeSurface; attribute float tubeWave; attribute float tubeWaveSlope;
 uniform vec3 uBackdropUp; uniform float uBackdropLevel;
 varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
@@ -215,6 +219,7 @@ vBackdropPoint = transformed;`);
 uniform sampler2D uTracer; uniform float uTracerStrength;
 uniform vec3 uOpticalCamera;
 uniform float uOpticalKind, uOpticalProgress, uOpticalCloud, uOpticalHaze, uOpticalAge;
+uniform sampler3D uBaField; uniform float uBaActive;
 varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
 ${bariumCloudGLSL}
 vec3 transmitThroughTube(vec3 background) {
@@ -243,17 +248,10 @@ vec3 transmitThroughTube(vec3 background) {
       concentration = mix(concentration, 1.0, smoothstep(0.72, 1.0, uOpticalProgress));
       transmission *= exp(-mix(vec3(0.75, 0.30, 0.32), vec3(3.6, 1.15, 0.28), smoothstep(0.55, 1.0, uOpticalProgress)) * concentration * distance / (6.0 * radius));
     } else if (uOpticalKind > 2.5) {
-      float fill = max(0.001, uBackdropLevel - bottom);
-      float liquidH = clamp((dot(uBackdropUp, q) - bottom) / fill, 0.0, 1.0);
-      float clearing = smoothstep(0.42, 0.98, uOpticalProgress)
-        * smoothstep(15.0, 40.0, uOpticalAge);
-      float front = mix(1.06, -0.06, clearing);
-      float cloud = uOpticalCloud * (1.0 - smoothstep(front - 0.055, front + 0.055, liquidH));
-      float shape = bariumCloud(vec2(q.x / radius, h), uOpticalAge,
-        clamp(fill / ${height.toFixed(7)}, 0.05, 1.0));
-      cloud *= mix(shape, 1.0,
-        smoothstep(2.5, 3.3, uOpticalAge));
-      scattering += clamp(cloud + uOpticalHaze, 0.0, 1.0) * distance / (6.0 * radius) * 3.0;
+      vec3 uvw = clamp(vec3((q.x + radius) / (2.0 * radius), h,
+        (q.z + radius) / (2.0 * radius)), 0.0, 1.0);
+      float density = uBaActive > 0.5 ? texture(uBaField, uvw).r : 0.0;
+      scattering += density * distance / (6.0 * radius) * 3.0;
     }
   }
   return mix(background * transmission, vec3(0.94), 1.0 - exp(-scattering));
@@ -279,7 +277,7 @@ backdrop = mix(straight, backdrop, edgeSoft);
 backdrop = transmitThroughTube(backdrop);
 gl_FragColor = vec4(backdrop, 1.0);`);
   };
-  material.customProgramCacheKey = () => "tube-water-backdrop-v6-barium-cloud";
+  material.customProgramCacheKey = () => "tube-water-backdrop-v7-barium-field";
   return { material, up, level, tracerStrength };
 }
 
@@ -314,6 +312,69 @@ void main() {
 }
 
 /** Fixed pools survive progress updates, including seeking backwards in F8. */
+const bariumWarmups = new WeakMap<THREE.WebGLRenderer, Promise<void>>();
+
+/** Compile every reaction mesh while the first clear reagent is shown. */
+export function prewarmBariumLiquidShader(renderer: THREE.WebGLRenderer, scene: THREE.Scene,
+  camera: THREE.Camera): Promise<void> {
+  const prior = bariumWarmups.get(renderer);
+  if (prior) return prior;
+  const task = (async () => {
+    let source: THREE.Object3D | null = null;
+    // React mounts the replacement tube after the sandbox click handler exits.
+    // Wait for its filled mesh before preparing the expensive reaction variants.
+    for (let frame = 0; frame < 90 && !source; frame++) {
+      let nearest = Infinity;
+      scene.traverse(object => {
+        if (object.name !== "TubeReactionVisuals" || !object.parent) return;
+        const cavity = object.parent.children.find(child => child.name.startsWith("ContentsVolume"));
+        if (!(cavity instanceof THREE.Mesh) || !cavity.visible) return;
+        const distance = CLAMP_TUBE_MOUTH.valid
+          ? object.getWorldPosition(new THREE.Vector3()).distanceToSquared(CLAMP_TUBE_MOUTH.point) : 0;
+        if (distance < nearest) { source = object.parent; nearest = distance; }
+      });
+      if (!source) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    }
+    if (!source) throw new Error("No filled tube available for BaSO4 shader warmup");
+    const preview = (source as THREE.Object3D).clone(true);
+    const previous: THREE.Object3D[] = [];
+    preview.traverse(object => { if (object.name === "TubeReactionVisuals") previous.push(object); });
+    for (const object of previous) object.removeFromParent();
+    const visuals = createTubeReactionVisuals(preview, "barium-sulfate",
+      { activeSurface: true, pour: true, liquidCount: 2 });
+    visuals?.update({ progress: 0, rate: 0, temperature: 0, age: 0 },
+      0, useRuntimeQualityStore.getState().quality, 0, false, camera.position);
+    preview.traverse(object => { if (object instanceof THREE.Mesh) object.visible = true; });
+    // Shadow depth and transmission variants are created only by a real render.
+    // Draw the prospective reacting tube offscreen while the clear reagent is
+    // present, then keep its programs cached for the actual pour.
+    const parent = (source as THREE.Object3D).parent;
+    if (!parent) return;
+    parent.add(preview);
+    const target = new THREE.WebGLRenderTarget(16, 16);
+    const previousTarget = renderer.getRenderTarget();
+    const hidden: THREE.Mesh[] = [];
+    try {
+      await renderer.compileAsync(preview, camera, scene);
+      scene.traverse(object => {
+        if (!(object instanceof THREE.Mesh) || !object.visible) return;
+        let ancestor: THREE.Object3D | null = object;
+        while (ancestor && ancestor !== preview) ancestor = ancestor.parent;
+        if (!ancestor) { object.visible = false; hidden.push(object); }
+      });
+      renderer.setRenderTarget(target);
+      renderer.render(scene, camera);
+    } finally {
+      for (const mesh of hidden) mesh.visible = true;
+      renderer.setRenderTarget(previousTarget);
+      preview.removeFromParent();
+      target.dispose();
+    }
+  })();
+  bariumWarmups.set(renderer, task);
+  return task;
+}
+
 export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKind | null,
   options: { activeSurface?: boolean; pour?: boolean; liquidCount?: number; incomingDyed?: boolean } = {}) {
   let cavity: THREE.Mesh | undefined;
@@ -404,8 +465,7 @@ outgoingLight *= mix(1.0, 0.80, dyeWindow);`);
   const transportDisabled = import.meta.env.DEV && typeof window !== "undefined"
     && new URLSearchParams(window.location.search).has("noTubeTransport");
   const transport = options.pour && hasLiquid && !transportDisabled ? new TubeMixingField() : null;
-  transport?.start(!!options.incomingDyed, kind === "silver-chloride" ? "silver"
-    : kind === "barium-sulfate" ? "barium" : null);
+  transport?.start(!!options.incomingDyed, kind === "silver-chloride" ? "silver" : null);
   if (hasLiquid) volume.geometry = wallGeometry;
 
   const group = new THREE.Group();
@@ -693,29 +753,12 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   foam.name = "TubeSurfaceFoam";
   // The measured cavity is a radius-7 mm hemisphere at its base. Truncate
   // the top, preserving the bowl profile instead of flattening the hemisphere.
-  const bedMaterial = white.clone();
-  const sedimentLevel = { value: box.min.y };
-  const sedimentGravity = { value: new THREE.Vector3(0, 1, 0) };
-  const sedimentDrift = { value: 0 };
-  bedMaterial.onBeforeCompile = (shader, renderer) => {
-    white.onBeforeCompile(shader, renderer);
-    shader.uniforms.uSedimentLevel = sedimentLevel;
-    shader.uniforms.uSedimentUp = up;
-    shader.uniforms.uSedimentGravity = sedimentGravity;
-    shader.uniforms.uSedimentDrift = sedimentDrift;
-    shader.vertexShader = `uniform float uSedimentLevel; uniform vec3 uSedimentUp;
-uniform vec3 uSedimentGravity; uniform float uSedimentDrift;
-uniform float uSedimentBottom; uniform float uSedimentRadius; uniform vec3 uSedimentCenter;
-${shader.vertexShader}`.replace("#include <beginnormal_vertex>", `#include <beginnormal_vertex>
-if (position.y > uSedimentLevel) objectNormal = uSedimentUp;`).replace("#include <begin_vertex>", `#include <begin_vertex>
-transformed.y = min(position.y, uSedimentLevel - dot(uSedimentUp.xz, position.xz - uSedimentCenter.xz) / max(0.3, uSedimentUp.y));
-float h = clamp(transformed.y - uSedimentBottom, 0.0, uSedimentRadius);
-float availableRadius = sqrt(max(0.0, h * (2.0 * uSedimentRadius - h)));
-vec2 radial = position.xz - uSedimentCenter.xz - uSedimentGravity.xz * uSedimentDrift;
-transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(length(radial), 0.000001));`);
-  };
-  const bed = new THREE.Mesh(originalGeometry, bedMaterial);
-  bed.renderOrder = 1;
+  const bedGeometry = new BariumSedimentGeometry(radius, box.min.y);
+  const bedMaterial = new THREE.MeshStandardMaterial({ color: "#f3f2ef", roughness: 1,
+    emissive: "#575757", side: THREE.DoubleSide, depthWrite: true });
+  const bed = new THREE.Mesh(bedGeometry, bedMaterial);
+  bed.renderOrder = 5;
+  bed.frustumCulled = false;
   bed.name = "TubeSediment";
   bed.visible = false;
   bed.raycast = () => {};
@@ -737,7 +780,6 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
   const noBubbles = new TubeNOBubbles();
   let lastGasProgress = 0;
   let surfaceActivity = 0;
-  let bariumCompletionAge = 0;
   let pendingPour = !!options.pour;
   let heatPulseAge = 0;
   let motionReady = false;
@@ -817,6 +859,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
     ? new TubePermanganateField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, size.y) : null;
   const permanganateInlet = new THREE.Vector3();
+  const bariumField = kind === "barium-sulfate" && hasLiquid
+    ? new TubeBariumField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
+      radius, box.min.y, size.y) : null;
+  const bariumInlet = new THREE.Vector3();
   const permanganateSide = new THREE.Vector3();
   const worldUp = new THREE.Vector3(0, 1, 0);
   const tubeWorldPosition = new THREE.Vector3();
@@ -977,6 +1023,46 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           }
         }
       }
+      if (bariumField) {
+        if (CLAMP_TUBE_MOUTH.valid) {
+          permanganateSide.subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);
+          if (permanganateSide.lengthSq() < 1e-8) permanganateSide.set(1, 0, 0);
+          permanganateSide.normalize();
+          bariumInlet.copy(CLAMP_TUBE_MOUTH.point)
+            .addScaledVector(permanganateSide, 0.0065).addScaledVector(worldUp, -0.026);
+          volume.worldToLocal(bariumInlet);
+        } else bariumInlet.set(radius * 0.7, level.value, 0);
+        const radial = Math.hypot(bariumInlet.x, bariumInlet.z);
+        if (radial > radius * 0.82) {
+          bariumInlet.x *= radius * 0.82 / radial;
+          bariumInlet.z *= radius * 0.82 / radial;
+        }
+        bariumInlet.y = (level.value - up.value.x * bariumInlet.x - up.value.z * bariumInlet.z)
+          / Math.max(0.2, up.value.y) - 0.0007;
+        const previousExtent = bariumField.extent;
+        const agitation = Math.min(1, Math.hypot(slope.x - previousSlopeX, slope.y - previousSlopeZ) * 15);
+        const bariumDelta = Math.min(elapsed, 0.25);
+        bariumField.advance(bariumDelta, up.value, level.value, bariumInlet,
+          THREE.MathUtils.smoothstep(bariumField.ageSeconds + bariumDelta, 0, 1.3), agitation);
+        if (options.activeSurface) {
+          const stand = useBunsenStandStorageStore.getState();
+          const tubes = useTestTubeStorageStore.getState();
+          const index = stand.attachedTubeSlotIndex;
+          const attached = index === null ? undefined
+            : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[index];
+          if (attached?.contents.includes("bacl2") && attached.contents.includes("k2so4")) {
+            const store = useTubeReactionStore.getState();
+            const current = store.chemistryById[attached.instanceId];
+            const fieldProgress = bariumField.progress;
+            const fieldRate = dt > 0 ? (bariumField.extent - previousExtent) / dt : 0;
+            if (current && (Math.abs(current.progress - fieldProgress) > 1e-4
+              || Math.abs(current.rate - fieldRate) > 1e-3
+              || Date.now() - (current.fieldUpdatedAt ?? 0) > 300))
+              store.setChemistry(attached.instanceId, { ...current, progress: fieldProgress,
+                rate: fieldRate, fieldUpdatedAt: Date.now() });
+          }
+        }
+      }
       if (backdrop && backdropWall && backdropCap) {
         backdrop.up.value.copy(up.value);
         backdrop.level.value = level.value;
@@ -1041,12 +1127,10 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       immersion.uniforms.uImmersionDyeActive.value = transport?.running ? 1 : 0;
       if (transport) immersion.uniforms.uImmersionDye.value = transport.texture;
       gravity.set(0, 1, 0).transformDirection(inverse);
-      sedimentGravity.value.copy(gravity);
       // A visual reservoir outlives the instantaneous chemical rate. Seeking
       // backwards resets it; wall residue clears over several minutes.
       if (reverseTime) {
         gasState.reset(); noBubbles.reset(); lastGasProgress = 0; surfaceActivity = 0;
-        bariumCompletionAge = 0;
         heatPulseAge = 0; waveSurface?.reset();
       }
       if (waveSurface && hasLiquid) {
@@ -1159,11 +1243,9 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           THREE.MathUtils.smoothstep(pourAge, 2.2, 4.5))
         : THREE.MathUtils.smoothstep(curdProgress, curds ? 0.3 : 0.42,
           curds ? 0.82 : 0.98) : 0;
-      if (kind === "barium-sulfate") bariumCompletionAge = p >= 0.999
-        ? bariumCompletionAge + dt : 0;
       // The permanganate hold stays at p=0; its vivid reaction material must
       // already be visible before the decolorization front starts moving.
-      const reactionLiquidActive = !!liquid && (p > 0 || kind === "permanganate-redox");
+      const reactionLiquidActive = !!liquid && (p > 0 || !!bariumField || kind === "permanganate-redox");
       volume.material = reactionLiquidActive ? liquid : baseline;
       cap.material = volume.material;
       const activeLiquid = reactionLiquidActive ? liquid : base instanceof TubeLiquidMaterial ? base : null;
@@ -1190,6 +1272,12 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
           activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
           activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
         }
+        if (bariumField) {
+          activeLiquid.uniforms.uBaField.value = bariumField.texture;
+          activeLiquid.uniforms.uBaActive.value = 1;
+          activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
+          activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
+        }
       }
       if (transport) for (const material of [base, liquid]) {
         if (!(material instanceof TubeLiquidMaterial)) continue;
@@ -1206,13 +1294,9 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         liquid.uniforms.uTime.value = time;
         liquid.uniforms.uReactionProgress.value = curdProgress;
         liquid.uniforms.uReactionKind.value = kind === "copper-nitric" ? 1 : curds ? 2 : kind === "barium-sulfate" ? 3 : 4;
-        liquid.uniforms.uCloudiness.value = curds ? onset
-          : kind === "barium-sulfate" ? onset : 0;
-        liquid.uniforms.uResidualHaze.value = kind === "barium-sulfate"
-          ? 0.035 * THREE.MathUtils.smoothstep(p, 0.90, 1)
-            * (1 - THREE.MathUtils.smoothstep(bariumCompletionAge, 45, 195)) : 0;
-        liquid.uniforms.uWallFilm.value = kind === "barium-sulfate"
-          ? THREE.MathUtils.smoothstep(p, 0.33, 0.95) : 0;
+        liquid.uniforms.uCloudiness.value = curds ? onset : bariumField ? 1 : 0;
+        liquid.uniforms.uResidualHaze.value = 0;
+        liquid.uniforms.uWallFilm.value = 0;
         liquid.uniforms.uOpacity.value = precipitate ? 0.3
           : kind === "permanganate-redox" ? 0.14
             : THREE.MathUtils.lerp(baseOpacity, 0.42, p);
@@ -1236,11 +1320,8 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
         material.uniforms.uTime.value = time;
       }
       // AgCl's deposit is made by the same settling flocs, never a smooth cap.
-      bed.visible = kind === "barium-sulfate" && settled > 0;
-      sedimentLevel.value = box.min.y + (curds ? size.y * settled * 0.155
-        : Math.sqrt(settled) * Math.min(0.003, size.y * 0.06));
-      sedimentDrift.value = radius * settled * 0.55;
-      flakes.visible = curds && p > 0;
+      bed.visible = !!bariumField && bariumField.sedimentMass > 0.02;
+      if (bed.visible && bariumField) bedGeometry.update(bariumField.sedimentField);      flakes.visible = curds && p > 0;
       flakes.count = count;
       let freeCount = 0, attachedCount = 0;
       const bubbleLimit = noBubbles.capacity;
@@ -1390,12 +1471,13 @@ transformed.xz = uSedimentCenter.xz + radial * min(1.0, availableRadius / max(le
       immersion.dispose();
       copperField?.dispose();
       permanganateField?.dispose();
+      bariumField?.dispose();
       group.removeFromParent();
       deferDispose(group, () => {
         geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();
         wallGeometry.dispose(); capGeometry.dispose(); headGeometry.dispose(); headMaterial.dispose(); dropletMaterial.dispose(); splashMaterial.dispose();
         filmGeometry.dispose(); filmMaterial.dispose(); transport?.dispose();
-        gasGeometry.dispose(); bedMaterial.dispose(); bottomCausticGeometry.dispose(); standCausticGeometry.dispose();
+        gasGeometry.dispose(); bedGeometry.dispose(); bedMaterial.dispose(); bottomCausticGeometry.dispose(); standCausticGeometry.dispose();
         bottomCausticMaterial.dispose(); standCausticMaterial.dispose();
         curdGeometry.dispose();
         white.dispose(); bubbleMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();

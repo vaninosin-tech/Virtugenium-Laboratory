@@ -60,6 +60,8 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uCuCurrent: { value: null as THREE.Data3DTexture | null },
       uMnField: { value: null as THREE.Data3DTexture | null },
       uMnActive: { value: 0 },
+      uBaField: { value: null as THREE.Data3DTexture | null },
+      uBaActive: { value: 0 },
       uCuBlend: { value: 0 },
       uCuCompletion: { value: 0 },
       uCuTime: { value: 0 },
@@ -98,6 +100,7 @@ uniform float uReactionKind; uniform float uRate; uniform float uTemperature; un
 uniform float uResidualHaze; uniform float uWallFilm;
 uniform sampler2D uTransport; uniform float uMnActive; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality; uniform float uTransportAge;
 uniform vec3 uCameraLocal;
+uniform sampler3D uBaField; uniform float uBaActive;
 varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
 ${copperFieldGLSL}
 ${permanganateTongueGLSL}
@@ -165,18 +168,29 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   cloud *= 1.0 - clearFront;
   cloud *= 0.82 + 0.30 * n;
 } else if (uReactionKind > 2.5 && uReactionKind < 3.5) {
-  // Fine BaSO4 stays evenly milky longer; its clearing front descends slowly.
-  float clearing = smoothstep(0.42, 0.98, p)
-    * smoothstep(15.0, 40.0, uTransportAge);
-  float liquidH = clamp((dot(uUp, vTubePoint) - uBoundsMin.y)
-    / max(0.001, uLevel - uBoundsMin.y), 0.0, 1.0);
-  float front = mix(1.06, -0.06, clearing);
-  float clearFront = smoothstep(front - 0.055, front + 0.055, liquidH);
-  cloud *= 1.0 - clearFront;
+  vec3 ray = normalize(vTubePoint - uCameraLocal);
+  vec2 edge = vTubePoint.xz;
+  float a = max(dot(ray.xz, ray.xz), 0.000001);
+  float b = dot(edge, ray.xz);
+  float radius = uCuBoundsSize.x * 0.5;
+  float distance = max(0.0, (-b + sqrt(max(0.0, b * b + a *
+    (radius * radius - dot(edge, edge))))) / a);
+  if (ray.y < -0.00001) distance = min(distance,
+    max(0.0, (uCuBoundsMin.y - vTubePoint.y) / ray.y));
+  float upRay = dot(uUp, ray);
+  if (upRay > 0.00001) distance = min(distance,
+    max(0.0, (uLevel - dot(uUp, vTubePoint)) / upRay));
+  float opticalDepth = 0.0;
+  for (int k = 0; k < 8; k++) {
+    vec3 q = vTubePoint + ray * distance * (float(k) + 0.5) / 8.0;
+    vec3 uvw = clamp((q - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);
+    opticalDepth += (uBaActive > 0.5 ? texture(uBaField, uvw).r : 0.0)
+      * distance / (8.0 * radius);
+  }
   float liquidHeight = clamp((uLevel - uBoundsMin.y) / uBoundsSize.y, 0.05, 1.0);
-  float shape = bariumCloud(vec2(radial.x * 2.0, h), uTransportAge, liquidHeight);
-  cloud *= mix(shape, 1.0,
-    smoothstep(2.5, 3.3, uTransportAge));
+  float fibers = bariumCloud(vec2(radial.x * 2.0, h), uTransportAge, liquidHeight);
+  cloud = 1.0 - exp(-opticalDepth * (0.65 + 0.35 * fibers) * 1.5);
+  localMix = cloud;
 } else if (uReactionKind > 3.5) {
   vec2 dyeUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x, 0.0, 1.0), h);
   dyeCloud = uMnActive > 0.5 ? permanganateVolume(vTubePoint)
@@ -184,7 +198,7 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   dyeHalo = 0.0;
   localMix = 1.0 - dyeCloud;
 }
-if (p <= 0.0 && uReactionKind < 3.5) { localMix = 0.0; cloud = 0.0; }
+if (p <= 0.0 && uReactionKind < 2.5) { localMix = 0.0; cloud = 0.0; }
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 reactionTint = uReactionColor;
 if (uReactionKind > 0.5 && uReactionKind < 1.5)
@@ -218,7 +232,7 @@ float film = uWallFilm * (1.0 - smoothstep(0.28, 0.54, h))
 diffuseColor.a = clamp(waterAlpha + pigment * (0.05 + 0.70 * uOpacity * uOpacity
   + (uReactionKind > 0.5 && uReactionKind < 1.5
     ? 0.48 + 0.38 * smoothstep(0.70, 1.0, p) : 0.0))
-  + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 1.70, milk))
+  + cloud * (uReactionKind > 1.5 && uReactionKind < 2.5 ? 1.65 : mix(1.25, 0.85, milk))
   + raspberry * 0.88 + dyeHalo * 0.06 + film * 0.60
   + vCap * clamp(abs(vTubeWaveSlope) * 10.0, 0.0, 1.0) * 0.55, 0.0, 0.995);`)
         .replace("#include <opaque_fragment>", `
@@ -285,5 +299,5 @@ if (uReactionKind > 2.5 && uReactionKind < 3.5) {
 }`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v25-barium-cloud"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v26-barium-field"; }
 }

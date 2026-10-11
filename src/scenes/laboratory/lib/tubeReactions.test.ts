@@ -94,14 +94,23 @@ describe("advanceChemistry", () => {
   it("the ionic reactions run on mixing alone, in their own time", () => {
     expect(run(["agno3", "nacl"], 6, false).progress).toBeCloseTo(0.5, 1);
     expect(run(["agno3", "nacl"], 12.5, false).progress).toBe(1);
-    // BaSO₄'s fine suspension settles far slower than AgCl's curds.
-    expect(run(["bacl2", "k2so4"], 12.5, false).progress).toBeLessThan(0.35);
-    expect(run(["bacl2", "k2so4"], 45.5, false).progress).toBe(1);
+    // Until the R3 field supplies an extent, the timer must not invent one.
+    expect(run(["bacl2", "k2so4"], 12.5, false).progress).toBe(0);
     // R4 progress comes from the spatial field, not this temperature runtime.
     const redox = ["kmno4", "h2so4", "na2so3"];
     expect(run(redox, 2.5, false).progress).toBe(0);
     expect(advanceChemistry(redox, { ...ROOM_TEMPERATURE_CHEMISTRY,
       progress: 0.3, rate: 0.2 }, 0.1, false).progress).toBe(0.3);
+  });
+
+  it("uses R3 field progress and resumes scalar kinetics after a one-second stall", () => {
+    const contents = ["bacl2", "k2so4"];
+    const field = { ...ROOM_TEMPERATURE_CHEMISTRY, progress: 0.4, rate: 0.2,
+      fieldUpdatedAt: Date.now() };
+    expect(advanceChemistry(contents, field, 0.1, false).progress).toBe(0.4);
+    const stalled = advanceChemistry(contents, { ...field,
+      fieldUpdatedAt: Date.now() - 1200 }, 0.1, false);
+    expect(stalled.progress).toBeGreaterThan(0.4);
   });
 
   it("tracks temperature even with nothing reacting", () => {

@@ -6,17 +6,78 @@ await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: false, channel: "chrome", args: ["--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--window-size=1200,900"] });
 try {
   const page = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
+  page.setDefaultTimeout(120000);
   page.on("pageerror", e => console.log("pageerror", e.message));
   await page.goto("http://127.0.0.1:5173");
   await page.getByText("Играть", { exact: true }).click();
   await page.getByText("Песочница (временно)").click();
   await page.waitForFunction(() => window.__sceneStore?.getState().cabinetPhase === "inspecting", null, { timeout: 90000 });
+  await page.locator(".lab-boot-screen").waitFor({ state: "hidden", timeout: 120000 });
   await page.waitForTimeout(2000);
+  // Warm up the module import and a render first: the first shot is otherwise tens of seconds late.
+  await page.evaluate(async () => { await import("/node_modules/three/build/three.module.js"); });
+  const lastReagent = { 1: "hno3", 2: "nacl", 3: "k2so4", 4: "kmno4" }[exp];
+  if (process.env.VIDEO) await page.evaluate(() => {
+    window.__reviewVideo = new Promise(resolve => {
+      window.__startReviewVideo = () => {
+        const stream = window.__three.gl.domElement.captureStream(20);
+        const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
+          ? "video/webm;codecs=vp8" : "video/webm";
+        const recorder = new MediaRecorder(stream, { mimeType: mime });
+        const parts = [];
+        recorder.ondataavailable = event => { if (event.data.size) parts.push(event.data); };
+        recorder.onstop = () => {
+          stream.getTracks().forEach(track => track.stop());
+          resolve(new Blob(parts, { type: mime }));
+        };
+        recorder.start();
+        setTimeout(() => recorder.stop(), 4500);
+        window.__startReviewVideo = null;
+      };
+    });
+  });
+  await page.evaluate(id => {
+    window.__reviewPourAt = 0;
+    window.__reviewFrames = [];
+    if (window.__reviewFrameLoop) cancelAnimationFrame(window.__reviewFrameLoop);
+    const tick = () => {
+      window.__reviewFrames.push(Date.now());
+      window.__reviewFrameLoop = requestAnimationFrame(tick);
+    };
+    window.__reviewFrameLoop = requestAnimationFrame(tick);
+    window.__reviewUnsubscribe?.();
+    window.__reviewUnsubscribe = window.__testTubeStorageStore.subscribe(state => {
+      if (!window.__reviewPourAt && (state.fumeHoodTestTubes[0]?.contents ?? []).includes(id)) {
+        window.__reviewPourAt = Date.now();
+        window.__startReviewVideo?.();
+      }
+    });
+  }, lastReagent);
   await page.getByRole("button", { name: `Опыт ${exp}` }).click();
-  let previousTime = 0;
-  for (const t of times) {
-    await page.waitForTimeout(Math.max(0, t - previousTime) * 1000);
-    previousTime = t;
+  // Time is counted from the moment the last reagent is really in the tube.
+  await page.waitForFunction(id => (window.__testTubeStorageStore.getState().fumeHoodTestTubes[0]?.contents ?? []).includes(id),
+    lastReagent, { timeout: 120000, polling: 10 });
+  let t0 = await page.evaluate(() => window.__reviewPourAt);
+  for (const [index, t] of times.entries()) {
+    if (process.env.RESET_EACH && index > 0) {
+      await page.evaluate(() => { window.__reviewPourAt = 0; });
+      await page.getByRole("button", { name: `Опыт ${exp}` }).click();
+      await page.waitForFunction(() => window.__reviewPourAt > 0, null,
+        { timeout: 120000, polling: 10 });
+      t0 = await page.evaluate(() => window.__reviewPourAt);
+    }
+    await page.waitForTimeout(Math.max(0, t0 + t * 1000 - Date.now()));
+    const actual = (Date.now() - t0) / 1000;
+    const progressAtCapture = await page.evaluate(() => {
+      const tube = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0];
+      return tube ? window.__tubeReactionStore.getState().chemistryById[tube.instanceId]?.progress : undefined;
+    });
+    if (process.env.SCREEN) {
+      // The game's own close-up camera: no extra shader compilation, so the time is right.
+      await page.screenshot({ path: `${out}/e${exp}-${t}s-screen.png` });
+      console.log("screen", t, "actual", actual.toFixed(2), "end", ((Date.now() - t0) / 1000).toFixed(2), "progress", progressAtCapture?.toFixed(2));
+      continue;
+    }
     const shots = await page.evaluate(async selectedAngles => {
       const THREE = await import("/node_modules/three/build/three.module.js");
       const { gl, scene, camera: game } = window.__three;
@@ -43,11 +104,26 @@ try {
     }, selectedAngles);
     if (!shots) { console.log("no tube", t); continue; }
     for (const [label, url] of shots) await writeFile(`${out}/e${exp}-${t}s-${label}.png`, Buffer.from(url.split(",")[1], "base64"));
-    const p = await page.evaluate(() => {
-      const index = window.__bunsenStandStore.getState().attachedTubeSlotIndex;
-      const tube = index === null ? null : window.__testTubeStorageStore.getState().fumeHoodTestTubes[index];
-      return tube ? window.__tubeReactionStore.getState().chemistryById[tube.instanceId]?.progress : undefined;
+    console.log("shot", t, "actual", actual.toFixed(2), "end", ((Date.now() - t0) / 1000).toFixed(2), "progress", progressAtCapture?.toFixed(2));
+  }
+  if (process.env.VIDEO) {
+    const data = await page.evaluate(async () => new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      window.__reviewVideo.then(blob => reader.readAsDataURL(blob));
+    }));
+    await writeFile(`${out}/e${exp}-onset.webm`, Buffer.from(data.split(",")[1], "base64"));
+  }
+  if (process.env.FPS) {
+    const timing = await page.evaluate(() => {
+      const start = window.__reviewPourAt;
+      const stamps = window.__reviewFrames.filter(t => t >= start && t <= start + 4000);
+      const gaps = stamps.slice(1).map((t, i) => ({ ms: t - stamps[i], at: (t - start) / 1000 }))
+        .sort((a, b) => a.ms - b.ms);
+      return { frames: stamps.length, fps: stamps.length / 4,
+        medianGap: gaps[Math.floor(gaps.length / 2)]?.ms, maxGap: gaps.at(-1),
+        maxFirstSecond: gaps.filter(gap => gap.at <= 1).at(-1) };
     });
-    console.log("shot", t, "progress", p?.toFixed(2));
+    console.log("fps", timing);
   }
 } finally { await browser.close(); }

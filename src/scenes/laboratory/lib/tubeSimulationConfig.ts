@@ -16,4 +16,10 @@ export const TUBE_SIMULATION = {
     copperSaturation: 2.3, copperSettledSaturation: 2.05 },
   bubbles: { capacity: 384, samplesPerNO: 5400, attachedSeconds: [0.9, 1.75] },
   gas: { oxygenDefault: true as boolean, noOxidationRate: 0.48 },
+  barium: {
+    // Artistic acceleration of size-dependent settling; chemistry stays local.
+    settlingAcceleration: 4,
+    settlingSpeeds: [0.0003, 0.00065, 0.0014],
+    suspensionOpticalScale: 2.8,
+  },
 } as const;
