@@ -6,7 +6,8 @@ import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStor
 import { reactionKindFor, reactionTriggerFor, useTubeReactionStore, type ReactionKind } from "../lib/tubeReactions";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
-import { replaceSandboxTube, showExperiment } from "./setupSandbox";
+import { useBurnerStore } from "../lib/useBurnerStore";
+import { replaceSandboxTube, setSandboxBurnerLit, showExperiment } from "./setupSandbox";
 
 const REACTION_NAMES: Record<ReactionKind, string> = {
   "copper-nitric": "Cu + HNO₃ (разб.) — голубой раствор, NO → бурый NO₂",
@@ -24,6 +25,7 @@ export function SandboxPanel() {
   const [pourSpeed, setPourSpeed] = useState<"slow" | "fast">("slow");
   const navigate = useNavigate();
   const sandbox = useLaboratoryStore((state) => state.mode === "sandbox");
+  const burnerLit = useBurnerStore((state) => state.lit);
   const hoodTubes = useTestTubeStorageStore((state) => state.fumeHoodTestTubes);
   const clampedIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
   const chemistryById = useTubeReactionStore((state) => state.chemistryById);
@@ -75,7 +77,13 @@ export function SandboxPanel() {
             Опыт {experiment}
           </button>
         ))}
+        <button type="button" style={buttonStyle} onClick={() => showExperiment(1, pourPoint, pourSpeed, true)}>
+          Опыт 1, с нагревом
+        </button>
       </div>
+      <label style={hintStyle}>
+        <input type="checkbox" checked={burnerLit} onChange={event => setSandboxBurnerLit(event.target.checked)} /> Спиртовка горит
+      </label>
 
       <div style={rowStyle}>
         <button type="button" style={buttonStyle} onClick={replaceSandboxTube}>

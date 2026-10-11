@@ -10,7 +10,7 @@ try {
   const fps = () => page.evaluate(async () => { let n = 0; const t0 = performance.now(); await new Promise(r => { const f = () => { n++; performance.now() - t0 < 3000 ? requestAnimationFrame(f) : r(); }; requestAnimationFrame(f); }); return (n / 3).toFixed(1); });
   console.log("idle", await fps());
   for (const e of [3, 1]) {
-    await page.getByRole("button", { name: `Опыт ${e}` }).click();
+    await page.getByRole("button", { name: `Опыт ${e}`, exact: true }).click();
     await page.waitForTimeout(5000);
     console.log("exp", e, await fps());
   }

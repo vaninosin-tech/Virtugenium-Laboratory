@@ -80,11 +80,17 @@ export function setupSandbox(): void {
   });
 
   useBurnerStore.setState({ place: "fumeHood", returnRequest: null });
-  useBurnerStore.getState().setLit(true);
+  // Heating is never required (game-rules-amounts §7): the burner starts out and the player lights it.
+  useBurnerStore.getState().setLit(false);
   useHeatingStore.getState().reset();
   useTubeReactionStore.getState().reset();
   resetTubeAmounts();
   useSceneInteractionStore.getState().requestFocus(FUME_HOOD_ID);
+}
+
+/** The sandbox burner is lit or put out here; nothing heats a tube until it is lit and the tube is held in the flame. */
+export function setSandboxBurnerLit(lit: boolean): void {
+  useBurnerStore.getState().setLit(lit);
 }
 
 /**
@@ -115,8 +121,8 @@ export function replaceSandboxTube(): void {
 }
 
 /** What goes in first, and the reagent poured last — the one that starts the reaction. */
-const EXPERIMENT_SHOWCASE: Record<1 | 2 | 3 | 4, { first: ReagentId[]; last: ReagentId; hot?: boolean }> = {
-  1: { first: ["cu"], last: "hno3", hot: true },
+const EXPERIMENT_SHOWCASE: Record<1 | 2 | 3 | 4, { first: ReagentId[]; last: ReagentId }> = {
+  1: { first: ["cu"], last: "hno3" },
   2: { first: ["agno3"], last: "nacl" },
   3: { first: ["bacl2"], last: "k2so4" },
   4: { first: ["na2so3", "h2so4"], last: "kmno4" },
@@ -128,10 +134,11 @@ let showcaseGeneration = 0;
 /**
  * Shows one experiment close up: a clean tube with the first reagents, the
  * camera at the tube, then the last reagent a moment later so the start of the
- * reaction is seen. Experiment 1 is kept hot instead of being heated by hand.
+ * reaction is seen. Every experiment starts cold; `heated` (experiment 1 only)
+ * feeds the tube the same heat the flame would, for a quick look at the hot reaction.
  */
 export function showExperiment(experiment: 1 | 2 | 3 | 4,
-  point: "left" | "center" | "right" = "right", speed: "slow" | "fast" = "slow"): void {
+  point: "left" | "center" | "right" = "right", speed: "slow" | "fast" = "slow", heated = false): void {
   const generation = ++showcaseGeneration;
   for (const timer of showcaseTimers) {
     window.clearTimeout(timer);
@@ -139,7 +146,8 @@ export function showExperiment(experiment: 1 | 2 | 3 | 4,
   }
   showcaseTimers = [];
   replaceSandboxTube();
-  const { first, last, hot } = EXPERIMENT_SHOWCASE[experiment];
+  const { first, last } = EXPERIMENT_SHOWCASE[experiment];
+  const hot = heated && experiment === 1;
   const tubes = useTestTubeStorageStore.getState();
   for (const id of first) tubes.addTubeContents("fumeHood", 0, id);
   const tubeId = useTestTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId;

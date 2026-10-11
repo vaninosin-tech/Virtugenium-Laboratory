@@ -53,7 +53,7 @@ try {
       }
     });
   }, lastReagent);
-  await page.getByRole("button", { name: `Опыт ${exp}` }).click();
+  await page.getByRole("button", { name: process.env.HEATED && exp === 1 ? "Опыт 1, с нагревом" : `Опыт ${exp}`, exact: true }).click();
   // Time is counted from the moment the last reagent is really in the tube.
   await page.waitForFunction(id => (window.__testTubeStorageStore.getState().fumeHoodTestTubes[0]?.contents ?? []).includes(id),
     lastReagent, { timeout: 120000, polling: 10 });
@@ -61,7 +61,7 @@ try {
   for (const [index, t] of times.entries()) {
     if (process.env.RESET_EACH && index > 0) {
       await page.evaluate(() => { window.__reviewPourAt = 0; });
-      await page.getByRole("button", { name: `Опыт ${exp}` }).click();
+      await page.getByRole("button", { name: process.env.HEATED && exp === 1 ? "Опыт 1, с нагревом" : `Опыт ${exp}`, exact: true }).click();
       await page.waitForFunction(() => window.__reviewPourAt > 0, null,
         { timeout: 120000, polling: 10 });
       t0 = await page.evaluate(() => window.__reviewPourAt);

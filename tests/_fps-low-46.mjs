@@ -24,7 +24,7 @@ try {
   console.log("quality", await page.evaluate(() => localStorage.getItem("virtugenium.runtime-quality.v1")));
   console.log("idle", await fps());
   for (const experiment of [3, 1]) {
-    await page.getByRole("button", { name: `Опыт ${experiment}` }).click();
+    await page.getByRole("button", { name: `Опыт ${experiment}`, exact: true }).click();
     await page.waitForTimeout(5000);
     console.log("experiment", experiment, await fps());
   }
