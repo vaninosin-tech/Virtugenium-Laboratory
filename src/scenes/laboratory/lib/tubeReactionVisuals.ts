@@ -863,7 +863,9 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   // the top, preserving the bowl profile instead of flattening the hemisphere.
   const bedGeometry = new BariumSedimentGeometry(radius, box.min.y);
   const silverBedGeometry = new SilverSedimentGeometry(radius, box.min.y);
-  const bedMaterial = new THREE.MeshBasicMaterial({ color: "#f8f9f7", toneMapped: false,
+  const bedMaterial = new THREE.MeshBasicMaterial({
+    color: kind === "barium-sulfate" ? "#d9dad7" : "#f8f9f7",
+    toneMapped: kind === "barium-sulfate",
     side: THREE.DoubleSide, depthWrite: true });
   const bed = new THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>(bedGeometry, bedMaterial);
   bed.renderOrder = 5;
@@ -978,6 +980,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
     ? new TubeBariumField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, fieldHeight, inertTracerOnly ? 0 : 1.1, inertTracerOnly) : null;
   const bariumInlet = new THREE.Vector3();
+  let bariumImpactSerial = -1;
+  let bariumImpactMl = 0;
   const silverField = kind === "silver-chloride" && hasLiquid
     ? new TubeSilverField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, fieldHeight) : null;
@@ -1219,6 +1223,19 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         }
         bariumInlet.y = (level.value - up.value.x * bariumInlet.x - up.value.z * bariumInlet.z)
           / Math.max(0.2, up.value.y) - 0.0007;
+        if (waveSurface && impact?.reagentId === "k2so4") {
+          if (impact.serial !== bariumImpactSerial) {
+            bariumImpactSerial = impact.serial;
+            bariumImpactMl = 0;
+          }
+          const newMl = Math.max(0, impact.deliveredMl - bariumImpactMl);
+          bariumImpactMl = impact.deliveredMl;
+          if (newMl > 0) {
+            const flow = THREE.MathUtils.clamp(impact.flowMlPerSecond, 0, 3);
+            waveSurface.impulse(bariumInlet.x / radius, bariumInlet.z / radius,
+              -radius * Math.min(0.026, newMl * (0.12 + 0.06 * flow)), 0.16 + flow * 0.015);
+          }
+        }
         const previousExtent = bariumField.extent;
         const agitation = Math.max(motion,
           Math.min(1, Math.hypot(slope.x - previousSlopeX, slope.y - previousSlopeZ) * 15));
@@ -1393,6 +1410,13 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         const movement = Math.hypot(dx, dz);
         if (movement > 0.001) waveSurface.impulse(dx / movement * 0.76, dz / movement * 0.76,
           Math.min(radius * 0.08, radius * 0.22 * movement), 0.27);
+        if (bariumField && motion > 0.03) {
+          const acceleration = tubeMotion.impulse;
+          const horizontal = Math.hypot(acceleration.x, acceleration.z);
+          if (horizontal > 0.001) waveSurface.impulse(
+            acceleration.x / horizontal * 0.72, acceleration.z / horizontal * 0.72,
+            radius * Math.min(0.035, 0.018 * motion) * dt * 20, 0.3);
+        }
         heatPulseAge += dt * THREE.MathUtils.smoothstep(temperature, 0.72, 1);
         if (heatPulseAge > 0.14) {
           heatPulseAge -= 0.14;

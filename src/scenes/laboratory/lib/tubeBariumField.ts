@@ -227,8 +227,8 @@ export class TubeBariumField {
       for (let i = 0; i < this.pixels.length; i++)
         this.pixels[i] = m.data[i] ? this.inertTracerOnly
           ? this.tracer[i] * m.activeCount * 2
-          : (this.suspension[0][i] + this.suspension[1][i]
-            + this.suspension[2][i]) * m.activeCount * TUBE_SIMULATION.barium.suspensionOpticalScale : 0;
+          : (this.suspension[0][i] + this.suspension[1][i] * 0.70
+            + this.suspension[2][i] * 0.45) * m.activeCount * TUBE_SIMULATION.barium.suspensionOpticalScale : 0;
       if (this.dyePixels) for (let i = 0; i < this.pixels.length; i++) {
         this.dyePixels[i * 2] = m.data[i] ? this.layers[i] * m.activeCount : 0;
         this.dyePixels[i * 2 + 1] = this.pixels[i];

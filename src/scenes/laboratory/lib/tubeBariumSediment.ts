@@ -47,7 +47,7 @@ export class BariumSedimentGeometry extends THREE.BufferGeometry {
     if (mass <= 0) return;
     const count = (this.rings + 1) * (this.sectors + 1);
     // Cell mass gives layer volume through a fixed effective packing factor.
-    const thicknessPerCellMass = this.radius * 24 * (1 - field.compaction * 0.2);
+    const thicknessPerCellMass = this.radius * 8 * (1 - field.compaction * 0.2);
     for (let ring = 0; ring <= this.rings; ring++) {
       const u = ring / this.rings;
       const r = this.radius * 0.96 * u;
@@ -70,7 +70,7 @@ export class BariumSedimentGeometry extends THREE.BufferGeometry {
           weight += w;
         }
         const rawHeight = thicknessPerCellMass * local / Math.max(weight, 1);
-        const cap = this.radius * 0.7;
+        const cap = this.radius * 0.12;
         const height = cap * rawHeight / (cap + rawHeight);
         const grain = 0.94 + 0.035 * Math.sin(sector * 5.9 + ring * 3.1)
           + 0.025 * Math.sin(sector * 13.1 - ring * 6.3);

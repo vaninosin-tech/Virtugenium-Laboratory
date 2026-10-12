@@ -142,7 +142,8 @@ describe("BaSO4 R3 field", () => {
     sediment.deposit(4 * 8 + 4, 0.7);
     geometry.update(sediment);
     expect(positions.getY(0)).toBeGreaterThan(shallow);
-    expect(positions.getY(0)).toBeGreaterThan(0.002);
+    expect(positions.getY(0)).toBeGreaterThan(0.0001);
+    expect(positions.getY(0)).toBeLessThan(0.007 * 0.12);
     expect(geometry.index?.count).toBeGreaterThan(0);
     geometry.dispose();
   });

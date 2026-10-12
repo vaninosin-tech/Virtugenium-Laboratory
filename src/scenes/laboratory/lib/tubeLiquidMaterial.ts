@@ -192,10 +192,7 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
       opticalDepth += (uBaActive > 0.5 ? texture(uBaField, uvw).r : 0.0)
         * distance / (8.0 * radius);
     }
-    float legacyVeil = uTransportActive > 0.01
-      ? 0.65 + 0.35 * bariumCloud(vec2(radial.x * 2.0, h), uTransportAge,
-          clamp((uLevel - uBoundsMin.y) / uBoundsSize.y, 0.05, 1.0)) : 1.0;
-    cloud = 1.0 - exp(-opticalDepth * legacyVeil * 1.5);
+    cloud = 1.0 - exp(-opticalDepth * 1.5);
   }
   localMix = cloud;
 } else if (uReactionKind > 3.5) {
@@ -207,6 +204,12 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
 }
 if (p <= 0.0 && uReactionKind < 1.5) { localMix = 0.0; cloud = 0.0; }
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
+// BaSO4 is rendered through the liquid volume by the backdrop pass. The
+// air-water interface itself carries only clear-water reflection/refraction.
+if (uReactionKind > 2.5 && uReactionKind < 3.5 && vCap > 0.5 && uTracerMode < 0.5) {
+  cloud = 0.0;
+  localMix = 0.0;
+}
 vec3 reactionTint = uReactionColor;
 if (uReactionKind > 0.5 && uReactionKind < 1.5)
   reactionTint = mix(vec3(0.34, 0.67, 0.68), uReactionColor, smoothstep(0.55, 1.0, p));
@@ -313,11 +316,11 @@ if (uReactionKind > 1.5 && uReactionKind < 2.5) {
 }
 // BaSO4 suspension is an opaque milk on reference footage (exp3-*): the
 // background must not show through while the column is still cloudy.
-if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTracerMode < 0.5) {
+if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTracerMode < 0.5 && vCap < 0.5) {
   gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.90), cloud * 0.70);
   gl_FragColor.a = max(gl_FragColor.a, cloud * 0.94);
 }`);
     };
   }
-  customProgramCacheKey() { return "tube-liquid-water-color-v26-barium-field"; }
+  customProgramCacheKey() { return "tube-liquid-water-color-v28-barium-volume-only"; }
 }
