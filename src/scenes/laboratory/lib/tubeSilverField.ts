@@ -3,6 +3,7 @@ import { LiquidMask, SpeciesField, VelocityField } from "./tubeVolumeField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { SilverSedimentField } from "./tubeSilverSediment";
 import { TubeFlowSolver } from "./tubeFlowSolver";
+import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
 
 /** R3 bookkeeping in normalized amounts. */
 export function reactR2(silver: number, chloride: number, fraction = 1) {
@@ -28,6 +29,7 @@ export class TubeSilverField {
   readonly coarse: Float64Array;
   readonly flocs: FlocAggregate[] = [];
   readonly tracer: Float64Array;
+  readonly productSource: Float64Array;
   readonly sedimentField: SilverSedimentField;
   readonly pixels: Float32Array;
   readonly texture: THREE.Data3DTexture;
@@ -55,6 +57,7 @@ export class TubeSilverField {
     this.suspension = [0, 1, 2].map(() => new Float64Array(this.mask.data.length));
     this.coarse = new Float64Array(this.mask.data.length);
     this.tracer = new Float64Array(this.mask.data.length);
+    this.productSource = new Float64Array(this.mask.data.length);
     this.sedimentField = new SilverSedimentField(this.mask.nx, this.mask.nz);
     this.next = new Float64Array(this.mask.data.length);
     this.flow = this.solver.flow;
@@ -75,6 +78,7 @@ export class TubeSilverField {
   get coarseMass() { return this.flocs.reduce((sum, floc) => sum + floc.mass, 0)
     + this.coarse.reduce((sum, amount) => sum + amount, 0); }
   get totalSolidMass() { return this.suspensionMass + this.coarseMass + this.sedimentMass; }
+  get massBalanceError() { return this.totalSolidMass - this.extent; }
 
   diagnostics() {
     let upper = 0, lower = 0, upperCount = 0, lowerCount = 0, speed = 0;
@@ -87,7 +91,8 @@ export class TubeSilverField {
       speed += Math.hypot(this.flow[i * 3], this.flow[i * 3 + 1], this.flow[i * 3 + 2]);
     }
     return { suspended: this.suspensionMass, coarse: this.coarseMass,
-      settled: this.sedimentMass, formed: this.extent,
+      settled: this.sedimentMass, formed: this.extent, massBalanceError: this.massBalanceError,
+      silverRemaining: this.species["Ag+"].total, chlorideRemaining: this.species["Cl-"].total,
       upperTurbidity: upper / Math.max(1, upperCount),
       lowerTurbidity: lower / Math.max(1, lowerCount),
       meanSpeed: speed / Math.max(1, m.activeCount),
@@ -158,15 +163,18 @@ export class TubeSilverField {
       }
       this.solver.transport(this.coarse, step, 0.000003);
       const ba = this.species["Ag+"].values, so = this.species["Cl-"].values;
+      this.productSource.fill(0);
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a];
-        const r = reactR2(ba[i], so[i], 1 - Math.exp(-24 * step));
-        ba[i] = r.silver; so[i] = r.chloride; this.extent += r.precipitate;
-        for (let k = 0; k < 3; k++) this.suspension[k][i] += r.precipitate * [0.58, 0.28, 0.14][k];
+        const formed = precipitatePair(ba[i], so[i], m.activeCount, 0.0005, step,
+          this.suspension[0][i] + this.suspension[1][i] + this.suspension[2][i]);
+        ba[i] -= formed; so[i] -= formed; this.extent += formed;
+        this.productSource[i] = formed;
+        for (let k = 0; k < 3; k++) this.suspension[k][i] += formed * [0.58, 0.28, 0.14][k];
         // A sparse fraction of fine particles coalesces only in dense local clouds.
         if (this.suspension[0][i] * m.activeCount > 0.02) {
           const aggregate = Math.min(this.suspension[0][i],
-            r.precipitate * TUBE_SIMULATION.silver.flocMassFraction);
+            formed * TUBE_SIMULATION.silver.flocMassFraction);
           this.suspension[0][i] -= aggregate;
           this.coarse[i] += aggregate;
         }
@@ -275,29 +283,8 @@ export class TubeSilverField {
   }
 
   private settle(values: Float64Array, dt: number, settling: number) {
-    const m = this.mask, next = this.next;
-    next.set(values);
-    const stride = [1, m.nx, m.nx * m.ny];
-    const spacing = [2 * m.radius / m.nx, m.height / m.ny, 2 * m.radius / m.nz];
-    for (let a = 0; a < m.activeCount; a++) {
-      const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
-      const z = Math.floor(i / (m.nx * m.ny));
-      for (let axis = 0; axis < 3; axis++) {
-        if (axis === 0 && x + 1 === m.nx || axis === 1 && y + 1 === m.ny || axis === 2 && z + 1 === m.nz) continue;
-        const j = i + stride[axis];
-        if (!m.data[j]) continue;
-        const speed = -settling * this.velocity.gravityUp.getComponent(axis);
-        const fraction = Math.min(0.72, Math.abs(speed) * dt / spacing[axis]);
-        const advect = speed > 0 ? values[i] * fraction : -values[j] * fraction;
-        const flux = Math.max(-next[j], Math.min(next[i], advect));
-        next[i] -= flux; next[j] += flux;
-      }
-      if (settling && y > 0 && !m.data[i - m.nx]) {
-        const deposited = Math.min(next[i], values[i] * Math.min(0.1, settling * dt / spacing[1]));
-        next[i] -= deposited; this.sedimentField.deposit(z * m.nx + x, deposited);
-      }
-    }
-    values.set(next);
+    settleParticleClass(this.mask, values, this.next, this.velocity.gravityUp, dt, settling,
+      (column, mass) => this.sedimentField.deposit(column, mass));
   }
 
   dispose() { this.texture.dispose(); }

@@ -1232,9 +1232,14 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         updateTubeFlowDebug("BaSO4", bariumField.solver, bariumField.tracer,
           bariumField.species["SO4(2-)"].values, bariumField.pixels, bariumField.sedimentMass,
           () => ({ suspensionMass: bariumField.suspensionMass, formed: bariumField.extent,
+            aggregateMass: bariumField.coarseMass, massBalanceError: bariumField.massBalanceError,
+            bariumRemaining: bariumField.species["Ba2+"].total,
+            sulfateRemaining: bariumField.species["SO4(2-)"].total,
             layerMass: bariumField.inertTracerOnly ? bariumField.solver.scalarDiagnostics(bariumField.layers).mass : 0,
             motionIntensity: motion, motionImpulse: tubeMotion.impulse.length() }),
           { "Ba2+": bariumField.species["Ba2+"].values,
+            "SO4(2-)": bariumField.species["SO4(2-)"].values,
+            "product source": bariumField.productSource,
             suspension: bariumField.suspension[0], aggregates: bariumField.coarse,
             ...(bariumField.inertTracerOnly ? { layers: bariumField.layers } : {}) });
         if (attachedNow) syncBariumExtent(attachedNow.instanceId, bariumField.extent);
@@ -1287,7 +1292,14 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
             .applyQuaternion(volume.getWorldQuaternion(impactQuaternion).invert()) : undefined);
         updateTubeFlowDebug("AgCl", silverField.solver, silverField.tracer,
           silverField.species["Cl-"].values, silverField.pixels, silverField.sedimentMass,
-          () => ({ suspensionMass: silverField.suspensionMass, formed: silverField.extent }));
+          () => ({ suspensionMass: silverField.suspensionMass, formed: silverField.extent,
+            aggregateMass: silverField.coarseMass, massBalanceError: silverField.massBalanceError,
+            silverRemaining: silverField.species["Ag+"].total,
+            chlorideRemaining: silverField.species["Cl-"].total }),
+          { "Ag+": silverField.species["Ag+"].values,
+            "Cl-": silverField.species["Cl-"].values,
+            "product source": silverField.productSource,
+            suspension: silverField.suspension[0], aggregates: silverField.coarse });
         if (attachedNow) syncSilverExtent(attachedNow.instanceId, silverField.extent);
         if (options.activeSurface) {
           const stand = useBunsenStandStorageStore.getState();

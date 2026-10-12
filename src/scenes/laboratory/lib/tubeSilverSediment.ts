@@ -46,10 +46,7 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
     const mass = field.mass;
     if (mass <= 0) return;
     const count = (this.rings + 1) * (this.sectors + 1);
-    let occupied = 0;
-    for (const value of field.values) if (value > 0) occupied++;
-    const mean = mass / Math.max(1, occupied);
-    const height = this.radius * 0.82 * Math.sqrt(mass) * (1 - field.compaction * 0.2);
+    const thicknessPerCellMass = this.radius * 36 * (1 - field.compaction * 0.2);
     for (let ring = 0; ring <= this.rings; ring++) {
       const u = ring / this.rings;
       const r = this.radius * 0.96 * u;
@@ -71,11 +68,13 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
           local += amount * w;
           weight += w;
         }
-        const density = Math.min(1.8, Math.sqrt((local / Math.max(weight, 1)) / mean));
+        const rawHeight = thicknessPerCellMass * local / Math.max(weight, 1);
+        const cap = this.radius * 0.8;
+        const height = cap * rawHeight / (cap + rawHeight);
         const grain = 0.90 + 0.10 * Math.sin(sector * 5.9 + ring * 3.1)
           + 0.08 * Math.sin(sector * 13.1 - ring * 6.3);
         const i = ring * (this.sectors + 1) + sector;
-        this.position.set([x, floor + height * density * taper * grain, z], i * 3);
+        this.position.set([x, floor + height * taper * grain, z], i * 3);
         this.position.set([x, floor - 0.00003, z], (count + i) * 3);
       }
     }
