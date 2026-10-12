@@ -66,7 +66,9 @@ export class BariumSedimentGeometry extends THREE.BufferGeometry {
           const sx = ix + dx, sz = iz + dz;
           if (sx < 0 || sx >= field.nx || sz < 0 || sz >= field.nz) continue;
           const w = 1 / (1 + dx * dx + dz * dz);
-          local += field.values[sz * field.nx + sx] * w;
+          const amount = field.values[sz * field.nx + sx];
+          if (amount <= 0) continue;
+          local += amount * w;
           weight += w;
         }
         const density = Math.min(1.8, Math.sqrt((local / Math.max(weight, 1)) / mean));

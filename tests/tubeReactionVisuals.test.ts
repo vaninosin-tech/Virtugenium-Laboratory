@@ -404,8 +404,8 @@ describe("tube reaction rendering contract", () => {
     expect(silverTop).toBeLessThan(0.055 * 0.36);
     expect(barium.get("TubePrecipitate").visible).toBe(false);
     expect(bariumBed.visible).toBe(false);
-    expect((bariumBed.material as THREE.MeshStandardMaterial).roughness).toBe(1);
-    expect((bariumBed.material as THREE.MeshStandardMaterial).metalness).toBe(0);
+    expect(bariumBed.material).toBeInstanceOf(THREE.MeshBasicMaterial);
+    expect((bariumBed.material as THREE.MeshBasicMaterial).color.getHexString()).toBe("f8f9f7");
     expect((silver.get("TubePrecipitate").material as THREE.MeshStandardMaterial).emissive.getHex()).toBe(0);
   });
 

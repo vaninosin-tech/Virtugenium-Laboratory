@@ -183,13 +183,14 @@ export function showExperiment(experiment: 1 | 2 | 3 | 4,
       // The close-up needs the reacting tube to have claimed the focus point first.
       showcaseTimers.push(window.setTimeout(() => useTubeCloseUpStore.getState().open(), 150));
   };
-  if (experiment === 3 || experiment === 4) {
+  {
     const three = (window as unknown as { __three?: { gl: THREE.WebGLRenderer;
       scene: THREE.Scene; camera: THREE.Camera } }).__three;
     if (three) {
       const started = Date.now();
       void prewarmBariumLiquidShader(three.gl, three.scene, three.camera,
-        experiment === 3 ? "barium-sulfate" : "permanganate-redox")
+        experiment === 1 ? "copper-nitric" : experiment === 2 ? "silver-chloride"
+          : experiment === 3 ? "barium-sulfate" : "permanganate-redox")
         .catch(error => { if (import.meta.env.DEV) console.warn("Reaction shader warmup failed", error); })
         .then(() => showcaseTimers.push(window.setTimeout(pour,
           Math.max(0, 1500 - (Date.now() - started)))));

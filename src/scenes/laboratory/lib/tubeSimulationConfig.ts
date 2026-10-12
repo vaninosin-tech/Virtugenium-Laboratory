@@ -29,5 +29,7 @@ export const TUBE_SIMULATION = {
     settlingAcceleration: 4,
     settlingSpeeds: [0.0003, 0.00065, 0.0014],
     suspensionOpticalScale: 4.5,
+    coarseMassFraction: 0.015,
+    coarseSettlingSpeed: 0.0028,
   },
 } as const;

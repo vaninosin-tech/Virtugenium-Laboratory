@@ -11,13 +11,14 @@ export function reactR3(barium: number, sulfate: number, fraction = 1) {
   return { barium: barium - extent, sulfate: sulfate - extent, precipitate: extent };
 }
 
-/** Three size classes of BaSO4 suspension and a bottom x/z sediment reservoir. */
+/** Fine suspension, rare coarse aggregates, and a conserved bottom reservoir. */
 export class TubeBariumField {
   readonly mask: LiquidMask;
   readonly velocity: VelocityField;
   readonly solver: TubeFlowSolver;
   readonly species: Record<string, SpeciesField>;
   readonly suspension: Float64Array[];
+  readonly coarse: Float64Array;
   readonly tracer: Float64Array;
   readonly sedimentField: BariumSedimentField;
   readonly pixels: Float32Array;
@@ -28,6 +29,7 @@ export class TubeBariumField {
   private settlingBoost = 1;
   private accumulator = 0;
   private readonly scratch = new THREE.Vector3();
+  private readonly wallJet = new THREE.Vector3();
   private readonly next: Float64Array;
   private readonly flow: Float32Array;
   private readonly priorUp = new THREE.Vector3(Infinity, Infinity, Infinity);
@@ -43,6 +45,7 @@ export class TubeBariumField {
     this.species = { "Ba2+": new SpeciesField("Ba2+", this.mask),
       "SO4(2-)": new SpeciesField("SO4(2-)", this.mask) };
     this.suspension = [0, 1, 2].map(() => new Float64Array(this.mask.data.length));
+    this.coarse = new Float64Array(this.mask.data.length);
     this.tracer = new Float64Array(this.mask.data.length);
     this.sedimentField = new BariumSedimentField(this.mask.nx, this.mask.nz);
     this.next = new Float64Array(this.mask.data.length);
@@ -61,6 +64,7 @@ export class TubeBariumField {
     sum + field.reduce((a, b) => a + b, 0), 0); }
   get sediment() { return this.sedimentField.values; }
   get sedimentMass() { return this.sedimentField.mass; }
+  get coarseMass() { return this.coarse.reduce((sum, amount) => sum + amount, 0); }
 
   diagnostics() {
     let upper = 0, lower = 0, upperCount = 0, lowerCount = 0, speed = 0;
@@ -72,7 +76,8 @@ export class TubeBariumField {
       else { lower += this.pixels[i]; lowerCount++; }
       speed += Math.hypot(this.flow[i * 3], this.flow[i * 3 + 1], this.flow[i * 3 + 2]);
     }
-    return { suspended: this.suspensionMass, settled: this.sedimentMass, formed: this.extent,
+    return { suspended: this.suspensionMass, coarse: this.coarseMass,
+      settled: this.sedimentMass, formed: this.extent,
       upperTurbidity: upper / Math.max(1, upperCount),
       lowerTurbidity: lower / Math.max(1, lowerCount),
       meanSpeed: speed / Math.max(1, m.activeCount),
@@ -95,7 +100,7 @@ export class TubeBariumField {
         this.solver.refreshMask();
         this.priorUp.copy(up); this.priorLevel = level;
         // Keep amounts in the closed liquid when a moving meniscus vacates cells.
-        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension, this.tracer]) {
+        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension, this.coarse, this.tracer]) {
           for (let i = 0; i < old.length; i++) {
             if (!old[i] || m.data[i] || values[i] === 0) continue;
             let nearest = -1, distance = Infinity;
@@ -119,11 +124,16 @@ export class TubeBariumField {
       }
       const amount = Math.max(0, Math.min(1, delivery) - this.delivered);
       this.inject(inlet, amount, jetStrength);
-      this.solver.step(step, inlet, jetDirection ?? up.clone().negate(),
+      const wall = THREE.MathUtils.smoothstep(Math.hypot(inlet.x, inlet.z) / m.radius, 0.38, 0.80);
+      this.wallJet.copy(jetDirection ?? up);
+      if (!jetDirection) this.wallJet.negate();
+      this.wallJet.x += inlet.x / m.radius * wall * 0.55;
+      this.wallJet.z += inlet.z / m.radius * wall * 0.55;
+      this.solver.step(step, inlet, this.wallJet,
         amount > 0 ? 0.2 * Math.min(3, Math.max(0.4, jetStrength)) : 0,
         agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined);
       const kinetic = this.solver.diagnostics().energy;
-      const ionMixing = 0.000015 + agitation * 0.000001;
+      const ionMixing = 0.000035 + agitation * 0.000001;
       for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing);
       this.solver.transport(this.tracer, step, ionMixing);
       const calm = this.delivered >= 0.999 && agitation < 0.02
@@ -136,12 +146,21 @@ export class TubeBariumField {
         this.settle(this.suspension[k], step,
           TUBE_SIMULATION.barium.settlingSpeeds[k] * this.settlingBoost);
       }
+      this.solver.transport(this.coarse, step, 0.000003);
+      this.settle(this.coarse, step, TUBE_SIMULATION.barium.coarseSettlingSpeed * this.settlingBoost);
       const ba = this.species["Ba2+"].values, so = this.species["SO4(2-)"].values;
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a];
         const r = reactR3(ba[i], so[i], 1 - Math.exp(-24 * step));
         ba[i] = r.barium; so[i] = r.sulfate; this.extent += r.precipitate;
         for (let k = 0; k < 3; k++) this.suspension[k][i] += r.precipitate * [0.78, 0.18, 0.04][k];
+        // A sparse fraction of fine particles coalesces only in dense local clouds.
+        if (this.suspension[0][i] * m.activeCount > 0.02) {
+          const aggregate = Math.min(this.suspension[0][i],
+            r.precipitate * TUBE_SIMULATION.barium.coarseMassFraction);
+          this.suspension[0][i] -= aggregate;
+          this.coarse[i] += aggregate;
+        }
       }
       // Redispersion moves an actual fraction of the bottom reservoir into liquid.
       if (agitation > 0.02) for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
@@ -174,7 +193,8 @@ export class TubeBariumField {
       const depth = Math.max(0, inlet.y - p.y);
       const dx = p.x - inlet.x;
       const dz = p.z - inlet.z;
-      const width = m.radius * (0.20 + 0.06 * Math.min(3, jetStrength));
+      const wall = THREE.MathUtils.smoothstep(Math.hypot(inlet.x, inlet.z) / m.radius, 0.38, 0.80);
+      const width = m.radius * (0.20 + 0.06 * Math.min(3, jetStrength)) * (1 - 0.38 * wall);
       const vertical = m.radius * (0.36 + 0.12 * Math.min(3, jetStrength));
       weights[i] = p.y <= inlet.y && depth < vertical * 2
         ? Math.exp(-(dx * dx + dz * dz) / (width * width) - depth * depth / (vertical * vertical)) : 0;

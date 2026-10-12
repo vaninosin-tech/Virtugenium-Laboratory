@@ -71,7 +71,7 @@ try {
     lastReagent, { timeout: 120000, polling: 10 });
   let t0 = await page.evaluate(() => window.__reviewPourAt);
   for (const [index, t] of times.entries()) {
-    if (process.env.RESET_EACH && index > 0) {
+    if ((process.env.RESET_EACH || process.env.RESET_EARLY && t <= 3) && index > 0) {
       if (variants[index]) {
         await page.locator("select").nth(0).selectOption(variants[index][0]);
         await page.locator("select").nth(1).selectOption(variants[index][1]);
@@ -135,6 +135,50 @@ try {
     if (!shots) { console.log("no tube", t); continue; }
     for (const [angle, url] of shots) await writeFile(`${out}/e${exp}-${t}s${label}-${angle}.png`, Buffer.from(url.split(",")[1], "base64"));
     console.log("shot", t, "actual", actual.toFixed(2), "end", ((Date.now() - t0) / 1000).toFixed(2), "progress", progressAtCapture?.toFixed(2));
+  }
+  if (process.env.SHAKE && exp === 3) {
+    const measure = () => page.evaluate(() => {
+      const d = window.__tubeDebug;
+      return d && { sediment: d.sedimentMass, suspension: d.suspensionMass,
+        formed: d.formed, energy: d.velocity?.energy };
+    });
+    const move = (amplitude, hz) => page.evaluate(({ amplitude, hz }) => {
+      if (!window.__shakeRoot) {
+        let candidate = null;
+        window.__three.scene.traverse(object => {
+          if (object.name === "TubeReactionVisuals" && object.parent?.visible) candidate = object.parent;
+        });
+        window.__shakeRoot = candidate;
+        window.__shakeOrigin = candidate?.position.clone();
+      }
+      if (!window.__shakeRoot) throw new Error("No tube root for shake");
+      clearInterval(window.__shakeTimer);
+      const start = performance.now();
+      window.__shakeTimer = setInterval(() => {
+        window.__shakeRoot.position.x = window.__shakeOrigin.x
+          + amplitude * Math.sin((performance.now() - start) * hz * Math.PI * 2 / 1000);
+      }, 16);
+    }, { amplitude, hz });
+    const stop = () => page.evaluate(() => {
+      clearInterval(window.__shakeTimer);
+      window.__shakeRoot.position.copy(window.__shakeOrigin);
+    });
+    const shakeRecords = [];
+    shakeRecords.push({ phase: "before", ...(await measure()) });
+    await page.screenshot({ path: `${out}/shake-before.png` });
+    await move(0.0001, 1); await page.waitForTimeout(1200); await stop();
+    await page.waitForTimeout(250);
+    shakeRecords.push({ phase: "weak", ...(await measure()) });
+    await page.screenshot({ path: `${out}/shake-weak.png` });
+    await move(0.004, 4); await page.waitForTimeout(700);
+    shakeRecords.push({ phase: "strong", ...(await measure()) });
+    await page.screenshot({ path: `${out}/shake-strong.png` });
+    await page.waitForTimeout(700); await stop();
+    await page.waitForTimeout(10000);
+    shakeRecords.push({ phase: "resettled", ...(await measure()) });
+    await page.screenshot({ path: `${out}/shake-resettled.png` });
+    await writeFile(`${out}/shake.json`, JSON.stringify(shakeRecords, null, 2));
+    console.log("shake", shakeRecords);
   }
   if (process.env.VIDEO) {
     const data = await page.evaluate(async () => new Promise(resolve => {
