@@ -1,0 +1,5 @@
+Проект: D:\Claude\virtugenium-lab-transfer\virtugenium-lab-transfer
+
+Ворота 3 серии «физика опытов 2 и 3» (задачи 57, 59, 60 заказчика). Прочитай целиком docs/codex/G3-baso4-volume-surface.md (задание), docs/realism/liquid-surface-spec.md, docs/realism/microphysics-supplement.md (разделы 5, 10, 11, 14), docs/realism/agcl-baso4-full-physics-tasks.md (задачи 57, 59, 60), docs/codex/exp23-physics-plan.md. Ворота 1 (16ecc01) и 2 (a8fa8d9) приняты, опыт 1 принят (ab1238f). Опыт 4 и опыт 1 не менять, налив и автопозиционирование не менять, вид AgCl не трогать. Срок релиза близок: делай главное первым: (1) убрать белую крышку у уровня в опыте 3, (2) объёмная взвесь по полю, (3) свободная поверхность, (4) видео и цифры. Лимит токенов ограничен.
+
+Чужие файлы не трогай (правит другая сессия: ui/, планшет, hover). Один браузер, dev-сервер http://127.0.0.1:5173. Артефакты только в tmp/. Не делай git commit и git push. В конце: npm run typecheck, npx vitest run --no-file-parallelism tests src, npm run build, отчёт по-русски: изменения, файлы, цифры, листы по actual, видео, FPS, ограничения.
