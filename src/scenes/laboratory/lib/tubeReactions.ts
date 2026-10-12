@@ -165,7 +165,7 @@ export const advanceChemistry = (
     if (state.fieldUpdatedAt !== undefined && Date.now() - state.fieldUpdatedAt <= 1000)
       return { ...state, temperature, temperatureField, externalHeat: external, age };
   }
-  if (reaction.kind === "barium-sulfate") {
+  if (reaction.kind === "barium-sulfate" || reaction.kind === "silver-chloride") {
     if (state.fieldUpdatedAt === undefined)
       return { ...state, progress: 0, rate: 0, fieldUpdatedAt: Date.now(),
         temperature, temperatureField, externalHeat: external, age };

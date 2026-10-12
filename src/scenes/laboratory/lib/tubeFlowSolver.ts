@@ -23,7 +23,7 @@ export class TubeFlowSolver {
   private readonly pressureWeight: Float32Array;
   private readonly eddy: Float32Array;
   private readonly direction = new THREE.Vector3();
-  constructor(readonly mask: LiquidMask) {
+  constructor(readonly mask: LiquidMask, readonly options: { lowDiffusion?: boolean } = {}) {
     const n = mask.data.length;
     for (let axis = 0; axis < 3; axis++) this.faces[axis] = new Float32Array(n);
     this.previousFaces = Array.from({ length: 3 }, () => new Float32Array(n));
@@ -160,8 +160,21 @@ export class TubeFlowSolver {
         if (j < 0) continue;
         const f = this.faces[axis][i] * dt / this.spacing[axis];
         // Six wet faces may export from one cell; keep explicit diffusion below its CFL limit.
-        const mixing = Math.min(0.12, (diffusivity + this.eddy[i]) * dt / this.spacing[axis] ** 2);
-        const raw = (f >= 0 ? values[i] : values[j]) * f + (values[i] - values[j]) * mixing;
+        const mixing = Math.min(0.12, (diffusivity
+          + this.eddy[i] * (this.options.lowDiffusion ? 0.02 : 1)) * dt / this.spacing[axis] ** 2);
+        let donorValue = f >= 0 ? values[i] : values[j];
+        if (this.options.lowDiffusion) {
+          const donor = f >= 0 ? i : j;
+          const upstream = this.neighbor(donor, axis, f >= 0 ? -1 : 1);
+          const downstream = this.neighbor(donor, axis, f >= 0 ? 1 : -1);
+          if (upstream >= 0 && downstream >= 0) {
+            const left = donorValue - values[upstream];
+            const right = values[downstream] - donorValue;
+            const slope = left * right > 0 ? Math.sign(left) * Math.min(Math.abs(left), Math.abs(right)) : 0;
+            donorValue = Math.max(0, donorValue + 0.5 * (1 - Math.min(1, Math.abs(f))) * slope);
+          }
+        }
+        const raw = donorValue * f + (values[i] - values[j]) * mixing;
         this.flux[i * 3 + axis] = raw;
         this.outgoing[raw >= 0 ? i : j] += Math.abs(raw);
       }

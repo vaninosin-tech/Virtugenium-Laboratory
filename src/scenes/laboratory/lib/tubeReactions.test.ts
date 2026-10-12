@@ -92,8 +92,8 @@ describe("advanceChemistry", () => {
   });
 
   it("the ionic reactions run on mixing alone, in their own time", () => {
-    expect(run(["agno3", "nacl"], 6, false).progress).toBeCloseTo(0.5, 1);
-    expect(run(["agno3", "nacl"], 12.5, false).progress).toBe(1);
+    expect(run(["agno3", "nacl"], 6, false).progress).toBe(0);
+    expect(run(["agno3", "nacl"], 12.5, false).progress).toBe(0);
     // Until the R3 field supplies an extent, the timer must not invent one.
     expect(run(["bacl2", "k2so4"], 12.5, false).progress).toBe(0);
     // R4 falls back to scalar kinetics while the spatial field is absent.

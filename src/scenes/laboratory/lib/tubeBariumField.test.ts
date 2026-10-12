@@ -2,8 +2,52 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { reactR3, TubeBariumField } from "./tubeBariumField";
 import { BariumSedimentField, BariumSedimentGeometry } from "./tubeBariumSediment";
+import { tubeLiquidHeight } from "./tubeLiquidLevel";
 
 describe("BaSO4 R3 field", () => {
+  it("keeps an inert charge through a rising meniscus and fixed physics steps", () => {
+    const run = (fps: number) => {
+      const field = new TubeBariumField("LOW", 0.007, 0, 0.055, 0, true);
+      const up = new THREE.Vector3(0, 1, 0);
+      const h0 = tubeLiquidHeight(2.5, 0.007);
+      const h1 = tubeLiquidHeight(3.5, 0.007);
+      let time = 0;
+      for (let frame = 0; frame < fps * 3; frame++) {
+        const next = (frame + 1) / fps;
+        const volume = 2.5 + Math.min(1, next / 0.5);
+        const h = tubeLiquidHeight(volume, 0.007);
+        field.advance(next - time, up, h, new THREE.Vector3(0, h - 0.0007, 0),
+          Math.min(1, next / 0.5));
+        time = next;
+      }
+      const result = { tracer: field.solver.scalarDiagnostics(field.tracer),
+        energy: field.solver.diagnostics().energy, active: field.mask.activeCount,
+        formed: field.extent, h0, h1 };
+      expect(field.tracer.every(v => Number.isFinite(v) && v >= 0)).toBe(true);
+      expect(result.tracer.mass).toBeCloseTo(1, 10);
+      expect(result.formed).toBe(0);
+      expect(result.h1).toBeGreaterThan(result.h0);
+      field.dispose();
+      return result;
+    };
+    const a = run(30), b = run(60), c = run(144);
+    expect(a.active).toBe(b.active);
+    expect(b.active).toBe(c.active);
+    expect(Math.abs(a.tracer.variance - b.tracer.variance)).toBeLessThan(3);
+    expect(Math.abs(b.tracer.variance - c.tracer.variance)).toBeLessThan(2);
+  }, 30000);
+  it("drives bulk circulation from tube acceleration after pouring", () => {
+    const field = new TubeBariumField("LOW", 0.007, 0, 0.055, 0, true);
+    const up = new THREE.Vector3(0, 1, 0), h = tubeLiquidHeight(3.5, 0.007);
+    const inlet = new THREE.Vector3(0, h - 0.0007, 0);
+    for (let n = 0; n < 40; n++) field.advance(0.05, up, h, inlet, 1);
+    const before = field.solver.diagnostics().energy;
+    field.velocity.contributions.acceleration.set(1, 0, 0);
+    for (let n = 0; n < 14; n++) field.advance(0.05, up, h, inlet, 1, 1);
+    expect(field.solver.diagnostics().energy).toBeGreaterThan(before);
+    expect(field.solver.scalarDiagnostics(field.tracer).mass).toBeCloseTo(1, 10);
+    field.dispose();
+  });
   it("reacts only on contact and preserves both ions", () => {
     expect(reactR3(1, 0).precipitate).toBe(0);
     expect(reactR3(0, 1).precipitate).toBe(0);

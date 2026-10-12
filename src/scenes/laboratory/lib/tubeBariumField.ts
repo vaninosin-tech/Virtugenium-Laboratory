@@ -20,8 +20,10 @@ export class TubeBariumField {
   readonly suspension: Float64Array[];
   readonly coarse: Float64Array;
   readonly tracer: Float64Array;
+  readonly layers: Float64Array;
   readonly sedimentField: BariumSedimentField;
   readonly pixels: Float32Array;
+  private readonly dyePixels: Float32Array | null;
   readonly texture: THREE.Data3DTexture;
   extent = 0;
   delivered = 0;
@@ -30,6 +32,8 @@ export class TubeBariumField {
   private accumulator = 0;
   private readonly scratch = new THREE.Vector3();
   private readonly wallJet = new THREE.Vector3();
+  private readonly shakeFlow = new Float64Array(3);
+  private lastDeliveryAge = -Infinity;
   private readonly next: Float64Array;
   private readonly flow: Float32Array;
   private readonly priorUp = new THREE.Vector3(Infinity, Infinity, Infinity);
@@ -37,22 +41,27 @@ export class TubeBariumField {
   private initialized = false;
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
-    readonly bariumAmount = 1.1) {
-    const size = quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
+    readonly bariumAmount = 1.1, readonly inertTracerOnly = false) {
+    const size = inertTracerOnly
+      ? { width: 24, height: 64, depth: 24 }
+      : quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
     this.mask = new LiquidMask(size.width, size.height, size.depth, radius, bottom, height);
     this.velocity = new VelocityField(this.mask);
-    this.solver = new TubeFlowSolver(this.mask);
+    this.solver = new TubeFlowSolver(this.mask, { lowDiffusion: true });
     this.species = { "Ba2+": new SpeciesField("Ba2+", this.mask),
       "SO4(2-)": new SpeciesField("SO4(2-)", this.mask) };
     this.suspension = [0, 1, 2].map(() => new Float64Array(this.mask.data.length));
     this.coarse = new Float64Array(this.mask.data.length);
     this.tracer = new Float64Array(this.mask.data.length);
+    this.layers = new Float64Array(this.mask.data.length);
     this.sedimentField = new BariumSedimentField(this.mask.nx, this.mask.nz);
     this.next = new Float64Array(this.mask.data.length);
     this.flow = this.solver.flow;
     this.pixels = new Float32Array(this.mask.data.length);
-    this.texture = new THREE.Data3DTexture(this.pixels, this.mask.nx, this.mask.ny, this.mask.nz);
-    this.texture.format = THREE.RedFormat; this.texture.type = THREE.FloatType;
+    this.dyePixels = inertTracerOnly ? new Float32Array(this.mask.data.length * 2) : null;
+    this.texture = new THREE.Data3DTexture(this.dyePixels ?? this.pixels, this.mask.nx, this.mask.ny, this.mask.nz);
+    this.texture.format = inertTracerOnly ? THREE.RGFormat : THREE.RedFormat;
+    this.texture.type = THREE.FloatType;
     this.texture.minFilter = this.texture.magFilter = THREE.LinearFilter;
     this.texture.wrapS = this.texture.wrapT = this.texture.wrapR = THREE.ClampToEdgeWrapping;
     this.texture.unpackAlignment = 1; this.texture.needsUpdate = true;
@@ -100,7 +109,7 @@ export class TubeBariumField {
         this.solver.refreshMask();
         this.priorUp.copy(up); this.priorLevel = level;
         // Keep amounts in the closed liquid when a moving meniscus vacates cells.
-        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension, this.coarse, this.tracer]) {
+        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension, this.coarse, this.tracer, this.layers]) {
           for (let i = 0; i < old.length; i++) {
             if (!old[i] || m.data[i] || values[i] === 0) continue;
             let nearest = -1, distance = Infinity;
@@ -118,35 +127,67 @@ export class TubeBariumField {
         }
       }
       if (!this.initialized && m.activeCount) {
-        for (let a = 0; a < m.activeCount; a++)
+        if (this.inertTracerOnly) {
+          let sum = 0;
+          for (let a = 0; a < m.activeCount; a++) {
+            const i = m.active[a], y = Math.floor(i / m.nx) % m.ny;
+            const fraction = y / m.ny;
+            const stripe = Math.exp(-(((fraction - 11 / 64) / 0.003) ** 2))
+              + Math.exp(-(((fraction - 24 / 64) / 0.003) ** 2));
+            this.layers[i] = stripe;
+            sum += stripe;
+          }
+          if (sum > 0) for (let a = 0; a < m.activeCount; a++)
+            this.layers[m.active[a]] /= sum;
+        } else for (let a = 0; a < m.activeCount; a++)
           this.species["Ba2+"].values[m.active[a]] = this.bariumAmount / m.activeCount;
         this.initialized = true;
       }
       const amount = Math.max(0, Math.min(1, delivery) - this.delivered);
       this.inject(inlet, amount, jetStrength);
+      if (amount > 0) this.lastDeliveryAge = this.age;
       const wall = THREE.MathUtils.smoothstep(Math.hypot(inlet.x, inlet.z) / m.radius, 0.38, 0.80);
       this.wallJet.copy(jetDirection ?? up);
       if (!jetDirection) this.wallJet.negate();
       this.wallJet.x += inlet.x / m.radius * wall * 0.55;
       this.wallJet.z += inlet.z / m.radius * wall * 0.55;
+      const jetDrive = Math.exp(-Math.max(0, this.age - this.lastDeliveryAge) / 1.2);
+      const jetScale = this.inertTracerOnly ? 10 : 3;
       this.solver.step(step, inlet, this.wallJet,
         amount > 0 ? 0.2 * Math.min(3, Math.max(0.4, jetStrength)) : 0,
-        agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined);
+        agitation, agitation > 0.01 || jetDrive > 0.01 ? (x, y, z) => {
+          const base = agitation > 0.01 ? this.velocity.at(x, y, z, this.age) : null;
+          const a = this.velocity.contributions.acceleration;
+          const rotation = 8000 * agitation;
+          const vertical = (y - m.bottom) / m.height - 0.5;
+          const radial2 = ((x - inlet.x) ** 2 + (z - inlet.z) ** 2) / (m.radius * 0.45) ** 2;
+          const core = Math.exp(-radial2);
+          const depth = Math.max(0, Math.min(1, (y - m.bottom) / Math.max(m.radius, inlet.y - m.bottom)));
+          this.shakeFlow[0] = (base?.[0] ?? 0) - a.x * vertical * m.radius * rotation
+            - inlet.x / m.radius * 0.018 * jetScale * jetDrive * (1 - depth);
+          this.shakeFlow[1] = (base?.[1] ?? 0) + (a.x * x + a.z * z) * rotation
+            + jetScale * jetDrive * (0.012 * (1 - core) - 0.08 * core) * (0.4 + 0.6 * depth);
+          this.shakeFlow[2] = (base?.[2] ?? 0) - a.z * vertical * m.radius * rotation
+            - inlet.z / m.radius * 0.018 * jetScale * jetDrive * (1 - depth);
+          return this.shakeFlow;
+        } : undefined);
       const kinetic = this.solver.diagnostics().energy;
-      const ionMixing = 0.000035 + agitation * 0.000001;
+      // Molecular transport plus a small unresolved mixing term, in m²/s.
+      const ionMixing = 0.0000002 + agitation * 0.0000001;
       for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing);
       this.solver.transport(this.tracer, step, ionMixing);
+      if (this.inertTracerOnly) this.solver.transport(this.layers, step, ionMixing);
       const calm = this.delivered >= 0.999 && agitation < 0.02
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
       const targetBoost = calm ? TUBE_SIMULATION.barium.settlingAcceleration : 1;
       this.settlingBoost += (targetBoost - this.settlingBoost) * (1 - Math.exp(-step / 0.8));
       if (calm) this.sedimentField.settle(step);
       for (let k = 0; k < 3; k++) {
-        this.solver.transport(this.suspension[k], step, 0.000006);
+        this.solver.transport(this.suspension[k], step, 0.00000008);
         this.settle(this.suspension[k], step,
           TUBE_SIMULATION.barium.settlingSpeeds[k] * this.settlingBoost);
       }
-      this.solver.transport(this.coarse, step, 0.000003);
+      this.solver.transport(this.coarse, step, 0.00000003);
       this.settle(this.coarse, step, TUBE_SIMULATION.barium.coarseSettlingSpeed * this.settlingBoost);
       const ba = this.species["Ba2+"].values, so = this.species["SO4(2-)"].values;
       for (let a = 0; a < m.activeCount; a++) {
@@ -175,8 +216,14 @@ export class TubeBariumField {
         }
       }
       for (let i = 0; i < this.pixels.length; i++)
-        this.pixels[i] = m.data[i] ? (this.suspension[0][i] + this.suspension[1][i]
-          + this.suspension[2][i]) * m.activeCount * TUBE_SIMULATION.barium.suspensionOpticalScale : 0;
+        this.pixels[i] = m.data[i] ? this.inertTracerOnly
+          ? this.tracer[i] * m.activeCount * 2
+          : (this.suspension[0][i] + this.suspension[1][i]
+            + this.suspension[2][i]) * m.activeCount * TUBE_SIMULATION.barium.suspensionOpticalScale : 0;
+      if (this.dyePixels) for (let i = 0; i < this.pixels.length; i++) {
+        this.dyePixels[i * 2] = m.data[i] ? this.layers[i] * m.activeCount : 0;
+        this.dyePixels[i * 2 + 1] = this.pixels[i];
+      }
       this.texture.needsUpdate = true;
     }
   }
@@ -203,7 +250,7 @@ export class TubeBariumField {
     if (sum < 1e-20) return;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a], added = amount * weights[i] / sum;
-      this.species["SO4(2-)"].values[i] += added;
+      if (!this.inertTracerOnly) this.species["SO4(2-)"].values[i] += added;
       this.tracer[i] += added;
     }
     this.delivered += amount;

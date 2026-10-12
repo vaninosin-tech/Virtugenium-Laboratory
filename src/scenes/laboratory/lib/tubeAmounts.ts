@@ -9,6 +9,7 @@ export type TubeAmount = { volumeMl: number; species: Record<string, number>; co
 const tubes = new Map<string, TubeAmount>();
 const copperProgress = new Map<string, number>();
 const bariumExtent = new Map<string, number>();
+const silverExtent = new Map<string, number>();
 const permanganateExtent = new Map<string, number>();
 const initial: Record<string, { ml: number; species?: Record<string, number>; copper?: number }> = {
   cu: { ml: 0, copper: 3 }, hno3: { ml: 1, species: { HNO3: 4.4 } },
@@ -74,6 +75,14 @@ export function syncBariumExtent(tubeId: string, extent: number) {
   state.species.BaSO4 = (state.species.BaSO4 ?? 0) + delta;
   bariumExtent.set(tubeId, (bariumExtent.get(tubeId) ?? 0) + delta);
 }
+export function syncSilverExtent(tubeId: string, extent: number) {
+  const state = tubeAmount(tubeId);
+  const delta = Math.max(0, Math.min(extent - (silverExtent.get(tubeId) ?? 0),
+    state.species["Ag+"] ?? 0, state.species["Cl-"] ?? 0));
+  state.species["Ag+"] -= delta; state.species["Cl-"] -= delta;
+  state.species.AgCl = (state.species.AgCl ?? 0) + delta;
+  silverExtent.set(tubeId, (silverExtent.get(tubeId) ?? 0) + delta);
+}
 export function syncPermanganateExtent(tubeId: string, extent: number) {
   const state = tubeAmount(tubeId);
   const delta = Math.max(0, Math.min(extent - (permanganateExtent.get(tubeId) ?? 0),
@@ -87,10 +96,10 @@ export function syncPermanganateExtent(tubeId: string, extent: number) {
   permanganateExtent.set(tubeId, (permanganateExtent.get(tubeId) ?? 0) + delta);
 }
 export function clearTubeAmount(tubeId: string) {
-  tubes.delete(tubeId); copperProgress.delete(tubeId); bariumExtent.delete(tubeId); permanganateExtent.delete(tubeId);
+  tubes.delete(tubeId); copperProgress.delete(tubeId); bariumExtent.delete(tubeId); silverExtent.delete(tubeId); permanganateExtent.delete(tubeId);
 }
 export function resetTubeAmounts() {
-  tubes.clear(); copperProgress.clear(); bariumExtent.clear(); permanganateExtent.clear();
+  tubes.clear(); copperProgress.clear(); bariumExtent.clear(); silverExtent.clear(); permanganateExtent.clear();
 }
 if (import.meta.env.DEV && typeof window !== "undefined")
   (window as unknown as { __tubeAmount?: typeof tubeAmount }).__tubeAmount = tubeAmount;

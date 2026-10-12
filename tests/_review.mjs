@@ -13,6 +13,8 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(120000);
   page.on("pageerror", e => console.log("pageerror", e.message));
+  page.on("console", message => { if (message.text().includes("Reaction shader warmup failed"))
+    console.log("browser", message.type(), message.text()); });
   await page.goto("http://127.0.0.1:5173");
   await page.getByText("Играть", { exact: true }).click();
   await page.getByText("Песочница (временно)").click();
@@ -51,9 +53,16 @@ try {
   await page.evaluate(id => {
     window.__reviewPourAt = 0;
     window.__reviewFrames = [];
+    window.__reviewPrograms = [];
+    window.__reviewProgramChanges = [];
     if (window.__reviewFrameLoop) cancelAnimationFrame(window.__reviewFrameLoop);
     const tick = () => {
       window.__reviewFrames.push(Date.now());
+      window.__reviewPrograms.push(window.__three?.gl.info.programs?.length ?? 0);
+      if (window.__reviewPrograms.length > 1 && window.__reviewPrograms.at(-1) !== window.__reviewPrograms.at(-2))
+        window.__reviewProgramChanges.push({ at: Date.now() - window.__reviewPourAt,
+          programs: window.__three?.gl.info.programs?.slice(window.__reviewPrograms.at(-2))
+            .map(p => ({ name: p.name, key: p.cacheKey })) });
       window.__reviewFrameLoop = requestAnimationFrame(tick);
     };
     window.__reviewFrameLoop = requestAnimationFrame(tick);
@@ -192,14 +201,25 @@ try {
   if (process.env.FPS) {
     timing = await page.evaluate(() => {
       const start = window.__reviewPourAt;
-      const stamps = window.__reviewFrames.filter(t => t >= start && t <= start + 4000);
-      const gaps = stamps.slice(1).map((t, i) => ({ ms: t - stamps[i], at: (t - start) / 1000 }))
+      const indices = window.__reviewFrames.map((t, i) => ({ t, i }))
+        .filter(item => item.t >= start && item.t <= start + 4000);
+      const stamps = indices.map(item => item.t);
+      const gaps = stamps.slice(1).map((t, i) => ({ ms: t - stamps[i], at: (t - start) / 1000,
+        programsBefore: window.__reviewPrograms[indices[i].i],
+        programsAfter: window.__reviewPrograms[indices[i + 1].i] }))
         .sort((a, b) => a.ms - b.ms);
+      const programCounts = indices.map(item => window.__reviewPrograms[item.i]);
       return { frames: stamps.length, fps: stamps.length / 4,
+        programs: [programCounts[0], programCounts.at(-1)],
         medianGap: gaps[Math.floor(gaps.length / 2)]?.ms, maxGap: gaps.at(-1),
         maxFirstSecond: gaps.filter(gap => gap.at <= 1).at(-1) };
     });
     console.log("fps", timing);
+    console.log("warmup", await page.evaluate(() => window.__reactionWarmup));
+    const changes = await page.evaluate(() => window.__reviewProgramChanges);
+    await writeFile(`${out}/program-changes.json`, JSON.stringify(changes));
+    console.log("program changes", changes.map(change => ({ at: change.at,
+      names: change.programs.map(program => program.name) })));
   }
   await writeFile(`${out}/manifest.json`, JSON.stringify({ exp, quality: process.env.QUALITY ?? "AUTO", records, fps: timing }, null, 2));
 } finally { await browser.close(); }

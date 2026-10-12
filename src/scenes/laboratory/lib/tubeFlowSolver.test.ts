@@ -4,6 +4,27 @@ import { LiquidMask } from "./tubeVolumeField";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 
 describe("closed tube flow", () => {
+  it("uses conservative bounded high order transport only when requested", () => {
+    const mask = new LiquidMask(12, 24, 12, 0.007, 0, 0.055);
+    mask.update(new THREE.Vector3(0, 1, 0), 0.03);
+    const modern = new TubeFlowSolver(mask, { lowDiffusion: true });
+    const legacy = new TubeFlowSolver(mask);
+    const source = new Float64Array(mask.data.length);
+    source[mask.index(6, 9, 6)] = 1;
+    const tracer = source.slice();
+    const oldTracer = source.slice();
+    const inlet = new THREE.Vector3(0, 0.028, 0);
+    for (let n = 0; n < 30; n++) {
+      modern.step(0.05, inlet, new THREE.Vector3(0, -1, 0), n < 10 ? 0.025 : 0);
+      legacy.step(0.05, inlet, new THREE.Vector3(0, -1, 0), n < 10 ? 0.025 : 0);
+      modern.transport(tracer, 0.05, 2e-7);
+      legacy.transport(oldTracer, 0.05, 2e-7);
+    }
+    expect(modern.scalarDiagnostics(tracer).mass).toBeCloseTo(1, 10);
+    expect(tracer.every(v => Number.isFinite(v) && v >= 0)).toBe(true);
+    expect(oldTracer.every(v => Number.isFinite(v) && v >= 0)).toBe(true);
+    expect(modern.scalarDiagnostics(tracer).variance).toBeLessThan(legacy.scalarDiagnostics(oldTracer).variance);
+  });
   it("projects local jet momentum, conserves tracer, and coasts after pouring", () => {
     const mask = new LiquidMask(12, 24, 12, 0.007, 0, 0.055);
     mask.update(new THREE.Vector3(0, 1, 0), 0.038);

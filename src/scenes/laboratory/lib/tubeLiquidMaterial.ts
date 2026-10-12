@@ -62,6 +62,7 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uMnActive: { value: 0 },
       uBaField: { value: null as THREE.Data3DTexture | null },
       uBaActive: { value: 0 },
+      uTracerMode: { value: 0 },
       uCuBlend: { value: 0 },
       uCuCompletion: { value: 0 },
       uCuTime: { value: 0 },
@@ -98,7 +99,7 @@ uniform float uClearAlpha; uniform float uEdgeAlpha; uniform float uMeniscusAlph
 uniform vec3 uUp; uniform float uLevel; uniform vec3 uBoundsMin; uniform vec3 uBoundsSize;
 uniform float uReactionKind; uniform float uRate; uniform float uTemperature; uniform float uTime;
 uniform float uResidualHaze; uniform float uWallFilm;
-uniform sampler2D uTransport; uniform float uMnActive; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality; uniform float uTransportAge;
+uniform sampler2D uTransport; uniform float uMnActive; uniform float uTransportActive; uniform float uTransportDye; uniform float uTransportQuality; uniform float uTransportAge; uniform float uTracerMode;
 uniform vec3 uCameraLocal;
 uniform sampler3D uBaField; uniform float uBaActive;
 varying vec3 vTubePoint; varying float vCap; varying float vTubeWaveSlope;
@@ -148,25 +149,16 @@ float localMix = p;
 float cloud = uCloudiness;
 float dyeCloud = 0.0;
 float dyeHalo = 0.0;
+float tracerLayer = 0.0;
+float tracerJet = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   localMix = copperField(vTubePoint);
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
-  // New curds are localized to the inlet. A weak veil develops only after
-  // they have fallen; the clear lower column remains visible at onset.
-  vec2 inletUv = vec2(clamp(0.5 + dot(radial, vec2(0.42, 0.91)), 0.0, 1.0), h);
-  float inlet = texture2D(uTransport, inletUv).g;
-  float local = smoothstep(0.035, 0.48, max(inlet, transportedMatter.g));
-  float milkAge = smoothstep(5.0, 8.0, uTransportAge);
-  float milkSpread = smoothstep(8.0, 25.0, uTransportAge);
-  float folded = tubeNoise(vec3(radial * 8.0 + vec2(sin(h * 18.0), cos(h * 15.0)) * 0.25,
-    h * 12.0 - uTime * 0.12));
-  float swirls = smoothstep(0.23, 0.75, folded)
-    * (1.0 - smoothstep(0.36, 0.85, h));
-  cloud *= max(local * 0.18, milkAge * mix(swirls * 0.62, 0.44, milkSpread));
-  float clearing = smoothstep(0.32, 0.82, p);
-  float clearFront = smoothstep(1.0 - clearing - 0.08, 1.0 - clearing + 0.08, h);
-  cloud *= 1.0 - clearFront;
-  cloud *= 0.82 + 0.30 * n;
+  // AgCl scattering follows the conserved fine suspension volume.
+  vec3 uvw = clamp((vTubePoint - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);
+  float density = uBaActive > 0.5 ? texture(uBaField, uvw).r : 0.0;
+  cloud = 1.0 - exp(-density * 1.2);
+  localMix = cloud;
 } else if (uReactionKind > 2.5 && uReactionKind < 3.5) {
   vec3 ray = normalize(vTubePoint - uCameraLocal);
   vec2 edge = vTubePoint.xz;
@@ -180,16 +172,31 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   float upRay = dot(uUp, ray);
   if (upRay > 0.00001) distance = min(distance,
     max(0.0, (uLevel - dot(uUp, vTubePoint)) / upRay));
-  float opticalDepth = 0.0;
-  for (int k = 0; k < 8; k++) {
-    vec3 q = vTubePoint + ray * distance * (float(k) + 0.5) / 8.0;
-    vec3 uvw = clamp((q - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);
-    opticalDepth += (uBaActive > 0.5 ? texture(uBaField, uvw).r : 0.0)
-      * distance / (8.0 * radius);
+  if (uTracerMode > 0.5) {
+    float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    for (int k = 0; k < 64; k++) {
+      vec3 q = vTubePoint + ray * distance * (float(k) + jitter) / 64.0;
+      vec3 uvw = clamp((q - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);
+      vec2 dye = texture(uBaField, uvw).rg;
+      tracerLayer += dye.r * distance / (64.0 * radius);
+      tracerJet += dye.g * distance / (64.0 * radius);
+    }
+    tracerLayer = 1.0 - exp(-tracerLayer * 2.2);
+    tracerJet = 1.0 - exp(-tracerJet * 2.2);
+    cloud = clamp(tracerLayer + tracerJet, 0.0, 1.0);
+  } else {
+    float opticalDepth = 0.0;
+    for (int k = 0; k < 8; k++) {
+      vec3 q = vTubePoint + ray * distance * (float(k) + 0.5) / 8.0;
+      vec3 uvw = clamp((q - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);
+      opticalDepth += (uBaActive > 0.5 ? texture(uBaField, uvw).r : 0.0)
+        * distance / (8.0 * radius);
+    }
+    float legacyVeil = uTransportActive > 0.01
+      ? 0.65 + 0.35 * bariumCloud(vec2(radial.x * 2.0, h), uTransportAge,
+          clamp((uLevel - uBoundsMin.y) / uBoundsSize.y, 0.05, 1.0)) : 1.0;
+    cloud = 1.0 - exp(-opticalDepth * legacyVeil * 1.5);
   }
-  float liquidHeight = clamp((uLevel - uBoundsMin.y) / uBoundsSize.y, 0.05, 1.0);
-  float fibers = bariumCloud(vec2(radial.x * 2.0, h), uTransportAge, liquidHeight);
-  cloud = 1.0 - exp(-opticalDepth * (0.65 + 0.35 * fibers) * 1.5);
   localMix = cloud;
 } else if (uReactionKind > 3.5) {
   vec2 dyeUv = vec2(clamp((vTubePoint.x - uBoundsMin.x) / uBoundsSize.x, 0.0, 1.0), h);
@@ -198,12 +205,17 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   dyeHalo = 0.0;
   localMix = 1.0 - dyeCloud;
 }
-if (p <= 0.0 && uReactionKind < 2.5) { localMix = 0.0; cloud = 0.0; }
+if (p <= 0.0 && uReactionKind < 1.5) { localMix = 0.0; cloud = 0.0; }
 cloud = clamp(cloud + uResidualHaze, 0.0, 1.0);
 vec3 reactionTint = uReactionColor;
 if (uReactionKind > 0.5 && uReactionKind < 1.5)
   reactionTint = mix(vec3(0.34, 0.67, 0.68), uReactionColor, smoothstep(0.55, 1.0, p));
 vec3 tubeColor = mix(uBaseColor, reactionTint, localMix);
+if (uTracerMode > 0.5) {
+  vec3 layers = vec3(0.95, 0.25, 0.63), jet = vec3(0.02, 0.80, 0.96);
+  tubeColor = mix(uBaseColor, mix(layers, jet,
+    tracerJet / max(0.0001, tracerLayer + tracerJet)), cloud);
+}
 if (uReactionKind > 3.5) tubeColor = mix(vec3(0.77, 0.90, 0.92), vec3(0.25, 0.002, 0.075),
   max(dyeCloud, dyeHalo * 0.30));
 float baseChroma = max(max(uBaseColor.r, uBaseColor.g), uBaseColor.b) - min(min(uBaseColor.r, uBaseColor.g), uBaseColor.b);
@@ -275,6 +287,14 @@ float waveDark = vCap * clamp(-vTubeWaveSlope * 10.0, 0.0, 1.0);
 outgoingLight = mix(outgoingLight, mix(vec3(0.90, 0.97, 1.0), body + (vec3(1.0) - body) * 0.30, tinted),
   waveBright * 0.85);
 outgoingLight *= 1.0 - waveDark * mix(0.55, 0.25, tinted);
+if (uTracerMode > 0.5) {
+  float dyeAlpha = clamp(cloud * 0.83, 0.0, 0.91);
+  outgoingLight = mix(vec3(0.48, 0.62, 0.67),
+    mix(vec3(0.91, 0.19, 0.54), vec3(0.01, 0.72, 0.92),
+      tracerJet / max(0.0001, tracerLayer + tracerJet)),
+    smoothstep(0.03, 0.35, cloud));
+  diffuseColor.a = max(waterEdge * 0.06, dyeAlpha);
+}
 // Permanganate absorbs green strongly even under the bright bench lights.
 // Override the neutral water lighting only where a dense tongue is present.
 if ((uReactionKind > 0.5 && uReactionKind < 1.5) || uReactionKind > 3.5) {
@@ -293,7 +313,7 @@ if (uReactionKind > 1.5 && uReactionKind < 2.5) {
 }
 // BaSO4 suspension is an opaque milk on reference footage (exp3-*): the
 // background must not show through while the column is still cloudy.
-if (uReactionKind > 2.5 && uReactionKind < 3.5) {
+if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTracerMode < 0.5) {
   gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.90), cloud * 0.70);
   gl_FragColor.a = max(gl_FragColor.a, cloud * 0.94);
 }`);
