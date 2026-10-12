@@ -13,7 +13,7 @@ import { TubeVolumeField } from "./tubeVolumeField";
 import { TubePermanganateField } from "./tubePermanganateField";
 import { tubePourImpact } from "./tubePourImpact";
 import { updateTubeFlowDebug } from "./tubeFlowDebug";
-import { seedTubeAmounts, syncBariumExtent, syncSilverExtent, syncCopperProgress, syncPermanganateExtent, tubeAmount, tubeVisualFill } from "./tubeAmounts";
+import { seedTubeAmounts, syncBariumExtent, syncSilverExtent, syncCopperProgress, syncPermanganateExtent, tubeAmount } from "./tubeAmounts";
 import { tubeEffectiveRadius, tubeLiquidFill, tubeLiquidHeight } from "./tubeLiquidLevel";
 import { TubeMotion } from "./tubeMotion";
 import { CLAMP_TUBE_MOUTH } from "./useStandMotionStore";
@@ -458,7 +458,9 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const lip = volume.worldToLocal(shell.localToWorld(new THREE.Vector3(0, shell.geometry.boundingBox!.max.y, 0)));
   const effectiveRadius = tubeEffectiveRadius(size.y);
   const fieldHeight = Math.max(size.y, tubeLiquidHeight(5, effectiveRadius) + radius * 0.25);
-  const renderHeight = kind === "copper-nitric" ? size.y : fieldHeight;
+  const renderHeight = fieldHeight;
+  // Experiment 1 starts with solid copper and receives one 1 ml acid portion.
+  const copperHeight = tubeLiquidHeight(1, effectiveRadius) + radius * 0.2;
   const baseline = volume.material;
   const originalGeometry = volume.geometry;
   const base = Array.isArray(baseline) ? baseline[0] : baseline;
@@ -567,7 +569,7 @@ outgoingLight *= mix(1.0, 0.80, dyeWindow);`);
     group.add(backdropWall, backdropCap);
   }
   const absorption = hasLiquid && (kind === "copper-nitric" || kind === "permanganate-redox" || standalonePermanganate)
-    ? new TubeAbsorptionMaterial(radius, box.min.y, renderHeight) : null;
+    ? new TubeAbsorptionMaterial(radius, box.min.y, kind === "copper-nitric" ? copperHeight : renderHeight) : null;
   const absorptionWall = absorption ? new THREE.Mesh(wallGeometry, absorption) : null;
   const absorptionCap = absorption ? new THREE.Mesh(capGeometry, absorption) : null;
   if (absorptionWall && absorptionCap) {
@@ -933,16 +935,19 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
       Math.hypot(positions.getX(i), positions.getY(i), positions.getZ(i)));
     return bound;
   }) ?? [];
-  // Three separated actual surface vertices per grain. The enclosing sphere used for
-  // placement is larger than the irregular copper and left a clear gap.
+  // Evenly spaced directions cover the entire irregular grain, including the
+  // camera-facing, side and bottom faces. Snap each direction to its mesh.
   const copperSourceVertices = copper?.children.flatMap((child, i) => {
     if (!(child instanceof THREE.Mesh)) return [];
     const positions = child.geometry.getAttribute("position");
     const candidates: THREE.Vector3[] = [];
     const vertex = new THREE.Vector3();
-    for (let k = 0; k < 3; k++) {
-      const angle = [0, Math.PI / 2, Math.PI][k] + i * 1.7;
-      const direction = new THREE.Vector3(Math.cos(angle) * 0.8, 0.6, Math.sin(angle) * 0.8);
+    for (let k = 0; k < 24; k++) {
+      const elevation = 1 - 2 * (k + 0.5) / 24;
+      const angle = k * Math.PI * (3 - Math.sqrt(5)) + i * 1.7;
+      const horizontal = Math.sqrt(1 - elevation * elevation);
+      const direction = new THREE.Vector3(Math.cos(angle) * horizontal, elevation,
+        Math.sin(angle) * horizontal);
       let best = -Infinity;
       let selected = new THREE.Vector3();
       for (let j = 0; j < positions.count; j++) {
@@ -954,7 +959,7 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
     }
     return candidates;
   }) ?? [];
-  const sourcePoints = Array.from({ length: (copper?.children.length ?? 0) * 3 }, () => new THREE.Vector3());
+  const sourcePoints = Array.from({ length: (copper?.children.length ?? 0) * 24 }, () => new THREE.Vector3());
   const bubbleSites = Array.from({ length: NO_BUBBLE_CAPACITY }, () => new THREE.Vector3());
   const wettedSites: THREE.Vector3[] = [];
   const bubbleSiteVertex = new THREE.Vector3();
@@ -964,7 +969,7 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
       (z - center.z) / radius, sizeBubble * 0.7, 0.18);
   const copperField = kind === "copper-nitric" && hasLiquid
     ? new TubeVolumeField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
-      radius, box.min.y, size.y, copperPoints) : null;
+      radius, box.min.y, copperHeight, copperPoints) : null;
   const permanganateField = kind === "permanganate-redox" && hasLiquid
     ? new TubePermanganateField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, renderHeight) : null;
@@ -997,7 +1002,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
       const { progress } = chemistry;
       const rate = Number.isFinite(chemistry.rate) ? THREE.MathUtils.clamp(chemistry.rate, 0, 1) : 0;
       const temperature = Number.isFinite(chemistry.temperature) ? THREE.MathUtils.clamp(chemistry.temperature, 0, 1) : 0;
-      const p = Number.isFinite(progress) ? THREE.MathUtils.clamp(progress, 0, 1) : 0;
+      let p = Number.isFinite(progress) ? THREE.MathUtils.clamp(progress, 0, 1) : 0;
+      if (copperField && cameraPosition) p = copperField.reaction.extent;
       const reverseTime = lastTime !== undefined && time < lastTime;
       const elapsed = lastTime === undefined ? 0 : Math.max(0, time - lastTime);
       const dt = Math.min(elapsed, 0.1);
@@ -1008,13 +1014,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
       const attachedNow = standNow.attachedTubeSlotIndex === null ? undefined
         : (standNow.onFumeHood ? tubesNow.fumeHoodTestTubes : tubesNow.workbenchTestTubes)[standNow.attachedTubeSlotIndex];
       const impact = options.activeSurface && attachedNow ? tubePourImpact(attachedNow.instanceId) : undefined;
-      if (kind === "copper-nitric" && attachedNow && tubeAmount(attachedNow.instanceId).copper > 0)
-        syncCopperProgress(attachedNow.instanceId,
-          useTubeReactionStore.getState().chemistryById[attachedNow.instanceId]?.progress ?? reactionProgress ?? p);
       const fill = attachedNow && tubeAmount(attachedNow.instanceId).volumeMl > 0
-        ? kind === "copper-nitric" || standalonePermanganate
-          ? tubeVisualFill(tubeAmount(attachedNow.instanceId).volumeMl)
-          : tubeLiquidFill(tubeAmount(attachedNow.instanceId).volumeMl, effectiveRadius, size.y)
+        ? tubeLiquidFill(tubeAmount(attachedNow.instanceId).volumeMl, effectiveRadius, size.y)
         : THREE.MathUtils.lerp(startFill, targetFill, THREE.MathUtils.smoothstep(pourAge, 0, 1.3));
       transport?.advance(dt, fill);
       waveSurface?.setQuality(quality);
@@ -1069,9 +1070,9 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         copper.children.forEach((child, i) => {
           const etch = THREE.MathUtils.smoothstep(p * (0.8 + random(i + 150) * 0.38), 0.02, 0.9);
           if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-            child.material.color.set("#d58b68").lerp(new THREE.Color("#bd785b"), etch * 0.45);
-            child.material.roughness = THREE.MathUtils.lerp(0.32, 0.68, etch);
-            child.material.metalness = THREE.MathUtils.lerp(0.62, 0.40, etch);
+            child.material.color.set("#b8733f").lerp(new THREE.Color("#654b3b"), etch * 0.8);
+            child.material.roughness = THREE.MathUtils.lerp(0.24, 0.7, etch);
+            child.material.metalness = THREE.MathUtils.lerp(0.98, 0.78, etch);
           }
           // A bounding sphere encloses every rotated, irregular grain. Fit
           // that sphere inside the bowl instead of trusting its drop target.
@@ -1099,8 +1100,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         copper?.children.forEach((child, i) => {
           if (!(child instanceof THREE.Mesh) || !child.visible) return;
           child.updateMatrix();
-          for (let k = 0; k < 3; k++) {
-            sourcePoints[sourceCount++].copy(copperSourceVertices[i * 3 + k]).applyMatrix4(child.matrix);
+          for (let k = 0; k < 24; k++) {
+            sourcePoints[sourceCount++].copy(copperSourceVertices[i * 24 + k]).applyMatrix4(child.matrix);
           }
         });
         copperField.setSources(sourcePoints, sourceCount);
@@ -1114,8 +1115,44 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         // tube's spatial field directly so its hot side reaches convection.
         const spatialHeat = options.activeSurface && attached
           ? useTubeReactionStore.getState().chemistryById[attached.instanceId]?.temperatureField : undefined;
-        copperField.advance(Math.min(elapsed, 0.25), reactionProgress ?? p, up.value, level.value,
-          rate, temperature, spatialHeat, tubeWorldPosition);
+        const acidDelivery = impact?.reagentId === "hno3" ? {
+          inlet: volume.worldToLocal(impactPoint.copy(impact.point)),
+          direction: impactDirection.copy(impact.direction)
+            .applyQuaternion(volume.getWorldQuaternion(impactQuaternion).invert()),
+          deliveredMl: impact.deliveredMl,
+        } : !attached ? undefined : {
+          inlet: impactPoint.set(0, level.value, 0),
+          direction: impactDirection.set(0, -1, 0),
+          deliveredMl: 0,
+        };
+        copperField.advance(Math.min(elapsed, 0.25), reactionProgress ?? chemistry.progress,
+          up.value, level.value, rate, temperature, spatialHeat, tubeWorldPosition,
+          noBubbles, center, acidDelivery);
+        if (import.meta.env.DEV && options.activeSurface &&
+          (window as unknown as { __exp1DiagnosticsEnabled?: boolean }).__exp1DiagnosticsEnabled) {
+          const debug = window as unknown as { __exp1Diagnostics?: unknown; __exp1Field?: TubeVolumeField };
+          debug.__exp1Field = copperField;
+          const verticalMass = [0, 0, 0, 0, 0];
+          const values = copperField.species["Cu2+"].values;
+          for (let a = 0; a < copperField.mask.activeCount; a++) {
+            const i = copperField.mask.active[a];
+            const y = Math.floor(i / copperField.mask.nx) % copperField.mask.ny;
+            verticalMass[Math.min(4, Math.floor(5 * y / copperField.mask.ny))] += values[i];
+          }
+          debug.__exp1Diagnostics = {
+            copperII: copperField.copperII, acid: copperField.species.HNO3.total,
+            extent: copperField.reaction.extent, target: reactionProgress ?? chemistry.progress,
+            level: level.value, sources: sourceCount, deliveredMl: acidDelivery?.deliveredMl ?? 0,
+            fieldBottom: copperField.mask.bottom, fieldHeight: copperField.mask.height,
+            volumeMl: attached ? tubeAmount(attached.instanceId).volumeMl : 0,
+            fieldTime: Reflect.get(copperField, "time"),
+            profile: copperField.profile,
+            verticalMass,
+          };
+        }
+        p = copperField.reaction.extent;
+        if (attached && tubeAmount(attached.instanceId).copper > 0)
+          syncCopperProgress(attached.instanceId, p);
       }
       if (permanganateField) {
         if (impact?.reagentId === "kmno4") {
@@ -1295,15 +1332,9 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
           absorption.uniforms.uCuBlend.value = copperField.alpha;
           absorption.uniforms.uCuCompletion.value = p;
           absorption.uniforms.uCuTime.value = time;
-          const spheres = absorption.uniforms.uCuSpheres.value as THREE.Vector4[];
-          let count = 0;
-          copper?.children.forEach((child, i) => {
-            if (count < spheres.length && child instanceof THREE.Mesh && child.visible) {
-              spheres[count++].set(child.position.x, child.position.y, child.position.z,
-                copperBounds[i] * child.scale.x * 0.55);
-            }
-          });
-          absorption.uniforms.uCuCount.value = count;
+          // Copper composites after absorption. A sphere proxy here would
+          // hide concentration in front of the irregular metal surface.
+          absorption.uniforms.uCuCount.value = 0;
         }
         if (permanganateField) {
           absorption.uniforms.uMnField.value = permanganateField.texture;
@@ -1329,7 +1360,7 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         immersion.uniforms.uCuCompletion.value = p;
         immersion.uniforms.uCuTime.value = time;
         immersion.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
-        immersion.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
+        immersion.uniforms.uCuBoundsSize.value.set(2 * radius, copperHeight, 2 * radius);
       }
       immersion.uniforms.uImmersionKind.value = kind === "copper-nitric" ? 1 : options.incomingDyed ? 2 : 0;
       immersion.uniforms.uImmersionDyeActive.value = transport?.running ? 1 : 0;
@@ -1471,7 +1502,7 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
           activeLiquid.uniforms.uCuCompletion.value = p;
           activeLiquid.uniforms.uCuTime.value = time;
           activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
-          activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, size.y, 2 * radius);
+          activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, copperHeight, 2 * radius);
         }
         if (permanganateField) {
           activeLiquid.uniforms.uMnField.value = permanganateField.texture;
@@ -1518,7 +1549,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
         liquid.uniforms.uWallFilm.value = 0;
         liquid.uniforms.uOpacity.value = precipitate ? 0.3
           : kind === "permanganate-redox" ? 0.14
-            : THREE.MathUtils.lerp(baseOpacity, 0.42, p);
+            : kind === "copper-nitric" ? THREE.MathUtils.lerp(baseOpacity, 0.13, p)
+              : THREE.MathUtils.lerp(baseOpacity, 0.42, p);
         liquid.uniforms.uQualityNoise.value = quality === "LOW" ? 0 : 1;
       }
       const causticTint = kind === "copper-nitric" && p > 0.05 ? "#a5ecff"

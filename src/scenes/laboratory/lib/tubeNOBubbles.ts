@@ -92,5 +92,23 @@ export class TubeNOBubbles {
         onPop?.(this.x[i], this.z[i], size);
       }
     }
+    // Nearby released bubbles can merge; attached nuclei remain independent.
+    for (let i = 0; i < this.capacity; i++) {
+      if (this.state[i] !== 2) continue;
+      for (let offset = 1; offset <= 6; offset++) {
+        const j = i + offset;
+        if (j >= this.capacity || this.state[j] !== 2) continue;
+        const dx = this.x[i] - this.x[j], dy = this.y[i] - this.y[j], dz = this.z[i] - this.z[j];
+        const reach = (this.size[i] + this.size[j]) * 0.65;
+        if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+        const vi = this.size[i] ** 3, vj = this.size[j] ** 3;
+        this.x[i] = (this.x[i] * vi + this.x[j] * vj) / (vi + vj);
+        this.y[i] = (this.y[i] * vi + this.y[j] * vj) / (vi + vj);
+        this.z[i] = (this.z[i] * vi + this.z[j] * vj) / (vi + vj);
+        this.size[i] = Math.min(radius * 0.18, Math.cbrt(vi + vj));
+        this.state[j] = 0;
+        this.activeRising--;
+      }
+    }
   }
 }

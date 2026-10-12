@@ -25,28 +25,10 @@ uniform vec3 uCuBoundsMin, uCuBoundsSize;
 float copperField(vec3 p) {
   vec3 uvw = (p - uCuBoundsMin) / uCuBoundsSize;
   if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return 0.0;
-  if (uCuCompletion > 0.95) {
-    float settled = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
-    return ${TUBE_SIMULATION.render.copperSettledSaturation.toFixed(2)} * settled / (settled + 0.12);
-  }
-  float density = texture(uCuCurrent, uvw).r;
-  float neighbour = texture(uCuCurrent, clamp(uvw + vec3(0.045, 0.0, 0.045), 0.0, 1.0)).r;
-  float edge = smoothstep(0.005, 0.12, abs(density - neighbour));
-  float warp = edge * (1.0 - smoothstep(0.65, 1.0, uCuCompletion));
-  vec3 bend = vec3(
-    0.065 * sin(uvw.y * 9.5 + uvw.z * 5.0 - uCuTime * 0.53),
-    0.0,
-    0.05 * cos(uvw.y * 8.0 - uvw.x * 5.0 + uCuTime * 0.47));
-  vec3 folded = clamp(uvw + bend * warp, 0.0, 1.0);
-  density = mix(texture(uCuPrevious, folded).r, texture(uCuCurrent, folded).r, uCuBlend);
-  float threshold = mix(0.045, 0.015, smoothstep(0.38, 0.95, uCuCompletion));
-  float flowing = ${TUBE_SIMULATION.render.copperSaturation.toFixed(1)} * smoothstep(threshold, threshold + 0.32, max(0.0, density));
-  if (uCuCompletion > 0.75) {
-    float settled = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
-    return mix(flowing, ${TUBE_SIMULATION.render.copperSettledSaturation.toFixed(2)} * settled / (settled + 0.12),
-      smoothstep(0.75, 0.95, uCuCompletion));
-  }
-  return flowing;
+  float density = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
+  float c = max(0.0, density);
+  float contrast = 45.0 * pow(max(c - 0.012, 0.0), 1.5);
+  return contrast * mix(1.0, 0.55, smoothstep(0.7, 1.0, uCuCompletion));
 }`;
 
 export const permanganateTongueGLSL = `

@@ -27,7 +27,10 @@ try {
   }, process.env.QUALITY);
   if (process.env.IMPACT || variants.length) await page.locator("select").nth(0).selectOption(process.env.IMPACT ?? variants[0][0]);
   if (process.env.SPEED || variants.length) await page.locator("select").nth(1).selectOption(process.env.SPEED ?? variants[0][1]);
-  if (process.env.DEBUG) await page.evaluate(() => { window.__tubeDebugEnabled = true; });
+  if (process.env.DEBUG) await page.evaluate(() => {
+    window.__tubeDebugEnabled = true;
+    window.__exp1DiagnosticsEnabled = true;
+  });
   // Warm up the module import and a render first: the first shot is otherwise tens of seconds late.
   await page.evaluate(async () => { await import("/node_modules/three/build/three.module.js"); });
   const lastReagent = { 1: "hno3", 2: "nacl", 3: "k2so4", 4: "kmno4" }[exp];
@@ -98,14 +101,64 @@ try {
       return tube ? window.__tubeReactionStore.getState().chemistryById[tube.instanceId]?.progress : undefined;
     });
     const label = variants[index] ? `-${variants[index].join("-")}` : "";
-    const diagnostic = process.env.DEBUG ? await page.evaluate(() => {
-      const state = window.__tubeDebug;
+    const diagnostic = process.env.DEBUG ? await page.evaluate(exp => {
+      const state = exp === 1 ? window.__exp1Diagnostics : window.__tubeDebug;
+      if (exp === 1) return state;
       return state && { kind: state.kind, velocity: state.velocity,
         tracer: state.tracer, reagent: state.reagent, sedimentMass: state.sedimentMass,
         suspensionMass: state.suspensionMass, formed: state.formed };
-    }) : null;
+    }, exp) : null;
     if (process.env.DEBUG) console.log("diagnostics", t, label, diagnostic);
     records.push({ target: t, actual, progress: progressAtCapture, variant: label, diagnostic });
+    if (exp === 1 && process.env.SLICES) {
+      const slices = await page.evaluate(() => {
+        const field = window.__exp1Field;
+        if (!field) return null;
+        const m = field.mask, v = field.species["Cu2+"].values;
+        const mean = field.sources.reduce((sum, p) => (sum.x += p.x, sum.y += p.y, sum.z += p.z, sum), { x: 0, y: 0, z: 0 });
+        const count = Math.max(1, field.sources.length);
+        mean.x /= count; mean.y /= count; mean.z /= count;
+        const iy = Math.max(0, Math.min(m.ny - 1, Math.floor((mean.y - m.bottom) / m.height * m.ny)));
+        const iz = Math.max(0, Math.min(m.nz - 1, Math.floor((mean.z / m.radius + 1) * m.nz / 2)));
+        const horizontal = Array.from({ length: m.nz }, (_, z) => Array.from({ length: m.nx }, (_, x) => m.data[m.index(x, iy, z)] ? v[m.index(x, iy, z)] : null));
+        const vertical = Array.from({ length: m.ny }, (_, y) => Array.from({ length: m.nx }, (_, x) => m.data[m.index(x, y, iz)] ? v[m.index(x, y, iz)] : null));
+        const vals = vertical.flat().filter(x => x !== null);
+        const max = Math.max(0, ...vals), min = Math.min(...vals);
+        const tongues = vertical.slice(iy + 2).map(row => {
+          const wet = row.filter(value => value !== null);
+          const lo = Math.min(...wet), hi = Math.max(...wet);
+          const cutoff = lo + (hi - lo) * 0.55;
+          let n = 0, active = false;
+          for (const value of row) { const on = value !== null && hi > lo * 1.4 && value > cutoff;
+            if (on && !active) n++; active = on; }
+          return n;
+        });
+        const draw = rows => {
+          const cell = 24, canvas = document.createElement("canvas");
+          canvas.width = rows[0].length * cell; canvas.height = rows.length * cell;
+          const ctx = canvas.getContext("2d");
+          const sorted = rows.flat().filter(value => value !== null).sort((a, b) => a - b);
+          const upper = sorted[Math.floor(sorted.length * 0.95)] || max;
+          for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y].length; x++) {
+            const value = rows[y][x], c = value === null ? 0 : Math.min(1, value / Math.max(1e-12, upper));
+            ctx.fillStyle = value === null ? "#333" : `rgb(${Math.round(245 * (1-c))},${Math.round(250 * (1-c*.55))},${Math.round(255 - c * 35)})`;
+            ctx.fillRect(x * cell, (rows.length - 1 - y) * cell, cell, cell);
+          }
+          return canvas.toDataURL("image/png");
+        };
+        return { nx: m.nx, ny: m.ny, nz: m.nz, iy, iz, min, max, tongues, horizontal, vertical,
+          sourceCellCount: field.sourceCells.length, flow: field.flowSolver.diagnostics(),
+          bottom: m.bottom, height: m.height, volume: Array.from(v), mask: Array.from(m.data),
+          images: { horizontal: draw(horizontal), vertical: draw(vertical) } };
+      });
+      if (slices) {
+        for (const [axis, dataUrl] of Object.entries(slices.images))
+          await writeFile(`${out}/e1-${t}s-${axis}.png`, Buffer.from(dataUrl.split(",")[1], "base64"));
+        delete slices.images;
+        await writeFile(`${out}/e1-${t}s-slices.json`, JSON.stringify(slices));
+        console.log("slices", t, { min: slices.min, max: slices.max, tongues: slices.tongues });
+      }
+    }
     if (process.env.SCREEN) {
       // The game's own close-up camera: no extra shader compilation, so the time is right.
       if (process.env.DEBUG) {
@@ -115,20 +168,19 @@ try {
       await page.screenshot({ path: `${out}/e${exp}-${t}s${label}-screen.png` });
       if (process.env.DEBUG) await page.evaluate(() => { const canvas = document.getElementById("tube-flow-debug"); if (canvas) canvas.style.visibility = "visible"; });
       console.log("screen", t, "actual", actual.toFixed(2), "end", ((Date.now() - t0) / 1000).toFixed(2), "progress", progressAtCapture?.toFixed(2));
-      continue;
     }
-    const shots = await page.evaluate(async selectedAngles => {
+    const shots = await page.evaluate(async ({ selectedAngles, closeup }) => {
       const THREE = await import("/node_modules/three/build/three.module.js");
       const { gl, scene, camera: game } = window.__three;
       await new Promise(r => requestAnimationFrame(() => r()));
       let group = null;
       scene.traverse(o => { if (group || o.name !== "TubeReactionVisuals") return; for (let x = o; x; x = x.parent) if (!x.visible) return; group = o; });
       if (!group) return null;
-      const target = group.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.03, 0));
+      const target = group.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, closeup ? 0.012 : 0.03, 0));
       const dir = game.position.clone().sub(target).setY(0).normalize();
       const res = [];
       for (const [label, rot, horizontal, elevation] of [
-        ["front", 0, 0.3, 0.05], ["side", Math.PI / 2, 0.3, 0.05],
+        ["front", 0, closeup ? 0.09 : 0.3, closeup ? 0.012 : 0.05], ["side", closeup ? -Math.PI / 2 : Math.PI / 2, closeup ? 0.09 : 0.3, closeup ? 0.012 : 0.05],
         ["top", 0, 0.055, 0.3], ["45", -Math.PI / 4, 0.28, 0.15],
       ]) {
         if (!selectedAngles.includes(label)) continue;
@@ -137,10 +189,12 @@ try {
         cam.position.copy(target).addScaledVector(d, horizontal).add(new THREE.Vector3(0, elevation, 0));
         cam.lookAt(target); cam.updateMatrixWorld();
         gl.render(scene, cam);
-        res.push([label, gl.domElement.toDataURL("image/png")]);
+        const blob = await new Promise(resolve => gl.domElement.toBlob(resolve, "image/png"));
+        const url = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsDataURL(blob); });
+        res.push([label, url]);
       }
       return res;
-    }, selectedAngles);
+    }, { selectedAngles, closeup: !!process.env.CLOSEUP });
     if (!shots) { console.log("no tube", t); continue; }
     for (const [angle, url] of shots) await writeFile(`${out}/e${exp}-${t}s${label}-${angle}.png`, Buffer.from(url.split(",")[1], "base64"));
     console.log("shot", t, "actual", actual.toFixed(2), "end", ((Date.now() - t0) / 1000).toFixed(2), "progress", progressAtCapture?.toFixed(2));

@@ -1,7 +1,8 @@
-import * as THREE from "three";
+﻿import * as THREE from "three";
 import { copperReactionState, type CopperReactionState } from "./tubeReactions";
 import type { TemperatureField } from "./tubeTemperatureField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
+import { TubeFlowSolver } from "./tubeFlowSolver";
 
 export type SpeciesId = "Cu2+" | (string & {});
 export type ReactionState = CopperReactionState;
@@ -22,6 +23,7 @@ export class LiquidMask {
   readonly height: number;
   private up = new THREE.Vector3(0, 1, 0);
   private readonly pointScratch = new THREE.Vector3();
+  private obstacles: { center: THREE.Vector3; radius: number }[] = [];
   private level = 0;
 
   constructor(nx: number, ny: number, nz: number, radius: number, bottom: number, height: number) {
@@ -44,8 +46,15 @@ export class LiquidMask {
     const h = p.y - this.bottom;
     if (h < 0 || h > this.height || p.dot(this.up) > this.level) return false;
     const radial = Math.hypot(p.x, p.z);
-    return h < this.radius ? radial * radial + (h - this.radius) ** 2 < this.radius ** 2
+    const inside = h < this.radius ? radial * radial + (h - this.radius) ** 2 < this.radius ** 2
       : radial < this.radius;
+    if (!inside) return false;
+    for (const obstacle of this.obstacles)
+      if (p.distanceToSquared(obstacle.center) < obstacle.radius * obstacle.radius) return false;
+    return true;
+  }
+  setObstacles(obstacles: { center: THREE.Vector3; radius: number }[]) {
+    this.obstacles = obstacles;
   }
   update(up: THREE.Vector3, level: number) {
     this.up.copy(up).normalize(); this.level = level;
@@ -72,6 +81,19 @@ export interface VelocityContributions {
   buoyancy: number;
   bubbles: number;
   acceleration: THREE.Vector3;
+}
+
+export interface RisingBubbleSamples {
+  readonly state: Uint8Array;
+  readonly x: Float32Array;
+  readonly y: Float32Array;
+  readonly z: Float32Array;
+  readonly size: Float32Array;
+}
+export interface CopperAcidDelivery {
+  readonly inlet: THREE.Vector3;
+  readonly direction: THREE.Vector3;
+  readonly deliveredMl: number;
 }
 
 /** Curl of an analytic vector potential; face samples have no volume source. */
@@ -103,10 +125,30 @@ export class VelocityField {
     const fx = 11.3 * X - time * 1.37 * motion;
     const fy = 8.7 * Y + time * 0.91 * motion;
     const fz = 10.1 * Z - time * 1.11 * motion;
-    const fine = 0.00000012 + heat * 0.00000017;
+    const fine = 0.00000012 + heat * 0.000001;
     const fineX = fine * 11.3 / r * Math.cos(fx) * Math.sin(fy) * Math.cos(fz);
     const fineY = fine * 8.7 / h * Math.sin(fx) * Math.cos(fy) * Math.cos(fz);
     const fineZ = -fine * 10.1 / r * Math.sin(fx) * Math.sin(fy) * Math.sin(fz);
+    // Two travelling convection rolls are curls of horizontal vector
+    // potentials. They bend liquid parcels into neighbouring up/down lanes.
+    const roll = 0.00005 + heat * 0.0015 + this.contributions.bubbles * 0.00028
+      + this.contributions.gas * 0.00012;
+    const phase1 = 4.2 * X + 2.4 * Z + time * 0.21;
+    const phase2 = -2.1 * X + 4.1 * Z - time * 0.17;
+    const a1 = roll * r / 4.2, a2 = roll * r / 4.1;
+    const rollX = a1 * 5.1 / h * Math.sin(phase1) * Math.cos(5.1 * Y);
+    const rollY = -roll * Math.cos(phase1) * Math.sin(5.1 * Y)
+      + roll * Math.cos(phase2) * Math.sin(4.4 * Y);
+    const rollZ = -a2 * 4.4 / h * Math.sin(phase2) * Math.cos(4.4 * Y);
+    // Smaller convection cells split the broad rise into moving up and down
+    // lanes. Their curl transports the concentration rather than drawing it.
+    const lanes = heat * 0.0018 + this.contributions.bubbles * 0.0006;
+    const lane1 = 8.0 * X - 0.6 * Z - time * 0.43 * motion;
+    const lane2 = 0.5 * X + 8.4 * Z + time * 0.31 * motion;
+    const laneX = lanes * r / h * 3.7 / 8.0 * Math.sin(lane1) * Math.cos(3.7 * Y);
+    const laneY = -lanes * (Math.cos(lane1) * Math.sin(3.7 * Y)
+      + Math.cos(lane2) * Math.sin(3.2 * Y));
+    const laneZ = lanes * r / h * 3.2 / 8.4 * Math.sin(lane2) * Math.cos(3.2 * Y);
     // Curl of (Zp, 0, -Xp), with a wandering centre. The broad updraft
     // reaches the copper surface; the return flow runs along the glass.
     const bend = 0.14 + heat * 0.14;
@@ -122,20 +164,18 @@ export class VelocityField {
     const czY = -(1 - anchor) * bend * 1.1 * Math.sin(phaseZ) / h
       + 0.3 * anchor * (driftZ - this.sourceZ) / h;
     const U = X - cx, V = Z - cz, radial2 = U * U + V * V;
-    const strength = 0.00022 + this.contributions.gas * 0.0006
-      + heat * TUBE_SIMULATION.field.heatConvection + this.contrast * 0.002 + this.contributions.bubbles * 0.0003;
-    const plume = strength * Math.exp(-0.65 * radial2);
-    const plumeY = plume * 1.3 * (U * cxY + V * czY);
+    const strength = heat * TUBE_SIMULATION.field.heatConvection + this.contrast * 0.002;
+    const plume = strength * Math.exp(-2.0 * radial2);
+    const plumeY = plume * 4.0 * (U * cxY + V * czY);
     const accel = this.contributions.acceleration;
     // The rising filament turns sideways at the closed liquid surface.
     // Reverse the source-directed lateral drift there instead of letting
     // colour pile up in a single top voxel row.
-    const surfaceTurn = 1 - 1.9 * THREE.MathUtils.smoothstep(Y, 0.58, 0.78);
-    const vx = -0.8 * dSdy - 0.7 * dSdz - fineY - fineZ - U * plumeY + cxY * plume
-      + (this.sourceX - X) * 0.0015 * anchor * surfaceTurn - accel.x * 0.0001 / h;
-    const vy = dSdz + 0.8 * dSdx + fineZ + fineX + plume * (2 - 1.3 * radial2);
-    const vz = 0.7 * dSdx - dSdy + fineX - fineY - V * plumeY + czY * plume
-      + (this.sourceZ - Z) * 0.0015 * anchor * surfaceTurn + accel.z * 0.0001 / r;
+    const vx = rollX + laneX - 0.8 * dSdy - 0.7 * dSdz - fineY - fineZ - U * plumeY + cxY * plume
+      - accel.x * 0.0001 / h;
+    const vy = rollY + laneY + dSdz + 0.8 * dSdx + fineZ + fineX + plume * (2 - 4.0 * radial2);
+    const vz = rollZ + laneZ + 0.7 * dSdx - dSdy + fineX - fineY - V * plumeY + czY * plume
+      + accel.z * 0.0001 / r;
     const g = this.gravityUp;
     this.result[0] = vx + vy * g.x;
     this.result[1] = vy * g.y;
@@ -148,45 +188,29 @@ export class TubeVolumeField {
   readonly mask: LiquidMask;
   readonly species: Record<string, SpeciesField>;
   readonly velocity: VelocityField;
+  readonly flowSolver: TubeFlowSolver;
   previous: THREE.Data3DTexture;
   current: THREE.Data3DTexture;
   readonly reaction: ReactionState = copperReactionState(0);
   private prevPixels: Float32Array;
   private pixels: Float32Array;
   private readonly sources: THREE.Vector3[];
-  private readonly faceX: Float32Array;
-  private readonly faceY: Float32Array;
-  private readonly faceZ: Float32Array;
-  private readonly facesX: Int32Array;
-  private readonly facesY: Int32Array;
-  private readonly facesZ: Int32Array;
-  private readonly leftX: Int32Array;
-  private readonly leftY: Int32Array;
-  private readonly leftZ: Int32Array;
-  private readonly rightX: Int32Array;
-  private readonly rightY: Int32Array;
-  private readonly rightZ: Int32Array;
-  private countX = 0;
-  private countY = 0;
-  private countZ = 0;
-  private readonly fluxX: Float64Array;
-  private readonly fluxY: Float64Array;
-  private readonly fluxZ: Float64Array;
-  private readonly outgoing: Float64Array;
-  private readonly nextValues: Float64Array;
-  private readonly injectionWeights: Float64Array[];
+  private readonly sourceCells: number[] = [];
   private readonly nearest: Int32Array;
   private readonly queue: Int32Array;
-  private readonly injectionTotals = new Float64Array(4);
-  private readonly pulseScales = new Float64Array(4);
+  private readonly wake: Float32Array;
+  private readonly wakeCargo: Float64Array;
+  private readonly wakeCell: Int32Array;
+  private readonly ambient = new Float64Array(3);
   private injectionDirty = true;
   private readonly injectionPoint = new THREE.Vector3();
   private readonly fallbackSource = new THREE.Vector3();
-  private readonly kernelX = new Float64Array(32);
-  private readonly kernelY = new Float64Array(32);
-  private readonly kernelZ = new Float64Array(32);
-  private readonly kernelWeight = new Float64Array(32);
-  private velocityAge = Infinity;
+  private readonly acidInlet = new THREE.Vector3();
+  private readonly acidDirection = new THREE.Vector3(0, -1, 0);
+  private acidDelivered = 0;
+  private acidSeeded = false;
+  private jetPending = 0;
+  private velocityAge = 0.2;
   private readonly priorUp = new THREE.Vector3(Infinity, Infinity, Infinity);
   private readonly priorPosition = new THREE.Vector3();
   private readonly positionDelta = new THREE.Vector3();
@@ -195,29 +219,24 @@ export class TubeVolumeField {
   private accumulator = 0;
   private time = 0;
   private pending = 0;
-  private sourceActivity = 0;
   private lastProgress = 0;
   private readonly step: number;
-  private readonly useMuscl: boolean;
+  readonly profile = { masks: 0, maskMs: 0, flowMs: 0, copperMs: 0, acidMs: 0, bubblesMs: 0, textureMs: 0, steps: 0, sources: 0, sourceMs: 0 };
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     sources: readonly THREE.Vector3[]) {
     const low = quality === "LOW";
-    this.useMuscl = !low;
     this.step = TUBE_SIMULATION.field.stepSeconds;
     const resolution = low ? TUBE_SIMULATION.field.LOW : TUBE_SIMULATION.field.HIGH;
     this.mask = new LiquidMask(resolution.width, resolution.height, resolution.depth, radius, bottom, height);
-    this.species = { "Cu2+": new SpeciesField("Cu2+", this.mask) };
+    this.species = { "Cu2+": new SpeciesField("Cu2+", this.mask), HNO3: new SpeciesField("HNO3", this.mask) };
     this.velocity = new VelocityField(this.mask);
+    this.flowSolver = new TubeFlowSolver(this.mask, { lowDiffusion: true, pressureIterations: 10, eddyFraction: 0.002, ambientStrength: 0.2 });
     this.sources = sources.map(p => p.clone());
     const n = this.mask.data.length;
-    this.faceX = new Float32Array(n); this.faceY = new Float32Array(n); this.faceZ = new Float32Array(n);
-    this.facesX = new Int32Array(n); this.facesY = new Int32Array(n); this.facesZ = new Int32Array(n);
-    this.leftX = new Int32Array(n); this.leftY = new Int32Array(n); this.leftZ = new Int32Array(n);
-    this.rightX = new Int32Array(n); this.rightY = new Int32Array(n); this.rightZ = new Int32Array(n);
-    this.fluxX = new Float64Array(n); this.fluxY = new Float64Array(n); this.fluxZ = new Float64Array(n);
-    this.outgoing = new Float64Array(n); this.nextValues = new Float64Array(n);
-    this.injectionWeights = Array.from({ length: 4 }, () => new Float64Array(n));
+    this.wake = new Float32Array(n);
+    this.wakeCargo = new Float64Array(384);
+    this.wakeCell = new Int32Array(384); this.wakeCell.fill(-1);
     this.nearest = new Int32Array(n); this.queue = new Int32Array(n);
     this.prevPixels = new Float32Array(n); this.pixels = new Float32Array(n);
     const texture = (pixels: Float32Array) => {
@@ -229,7 +248,6 @@ export class TubeVolumeField {
       return t;
     };
     this.previous = texture(this.prevPixels); this.current = texture(this.pixels);
-    this.rebuildFaces();
   }
 
   get alpha() { return clamp(this.accumulator / this.step, 0, 1); }
@@ -247,6 +265,19 @@ export class TubeVolumeField {
       else this.sources[i] = points[i].clone();
     }
     this.sources.length = count;
+    if (this.injectionDirty) {
+      const obstacles: { center: THREE.Vector3; radius: number }[] = [];
+      for (let start = 0; start + 24 <= count; start += 24) {
+        const center = new THREE.Vector3();
+        for (let i = start; i < start + 24; i++) center.add(this.sources[i]);
+        center.divideScalar(24);
+        let radius = 0;
+        for (let i = start; i < start + 24; i++)
+          radius = Math.max(radius, center.distanceTo(this.sources[i]));
+        obstacles.push({ center, radius: radius * 0.72 });
+      }
+      this.mask.setObstacles(obstacles);
+    }
     if (count > 0) {
       let x = 0, z = 0;
       for (let i = 0; i < count; i++) { x += points[i].x; z += points[i].z; }
@@ -256,15 +287,19 @@ export class TubeVolumeField {
   }
   /** The controller owns ξ. This only integrates positive increments of its progress. */
   advance(dt: number, progress: number, up: THREE.Vector3, level: number, gasDrive = 0,
-    temperature = 0, temperatureField?: TemperatureField, worldPosition?: THREE.Vector3) {
+    temperature = 0, temperatureField?: TemperatureField, worldPosition?: THREE.Vector3,
+    bubbles?: RisingBubbleSamples, bubbleCenter?: THREE.Vector3, acidDelivery?: CopperAcidDelivery) {
     const p = clamp(finite(progress), 0, 1);
     const delta = Math.max(0, p - this.lastProgress);
     this.lastProgress = p;
     this.pending += delta;
-    this.sourceActivity = clamp(finite(gasDrive), 0, 1)
-      * clamp(p * 30, 0, 1) * clamp((1 - p) * 8, 0, 1);
+    if (acidDelivery) {
+      this.acidInlet.copy(acidDelivery.inlet);
+      this.acidDirection.copy(acidDelivery.direction).normalize();
+    }
     this.velocity.contributions.gas = clamp(finite(gasDrive), 0, 1);
     this.velocity.contributions.buoyancy = clamp(finite(temperatureField?.mean ?? temperature), 0, 1);
+    this.flowSolver.options.ambientStrength = 0.2 + this.velocity.contributions.buoyancy * 0.22;
     this.velocity.heatX = temperatureField?.hotX ?? 0;
     this.velocity.heatZ = temperatureField?.hotZ ?? 0;
     this.velocity.contrast = temperatureField?.contrast ?? 0;
@@ -283,54 +318,145 @@ export class TubeVolumeField {
     let steps = 0;
     while (this.accumulator + 1e-10 >= this.step && steps++ < 2) {
       this.accumulator = Math.max(0, this.accumulator - this.step);
-      if (this.priorUp.distanceToSquared(up) > 0.0004 || Math.abs(this.priorLevel - level) > this.mask.height / this.mask.ny * 0.75) {
+      if (this.injectionDirty || this.priorUp.distanceToSquared(up) > 0.0004 || Math.abs(this.priorLevel - level) > this.mask.height / this.mask.ny * 0.75) {
+        const stamp = performance.now();
         this.mask.update(up, level);
-        this.rebuildFaces();
+        this.flowSolver.refreshMask();
         this.reconcileMask();
         this.injectionDirty = true;
-        this.velocityAge = Infinity;
+        this.velocityAge = 0.2;
         this.priorUp.copy(up); this.priorLevel = level;
+        this.profile.masks++; this.profile.maskMs += performance.now() - stamp;
       }
       this.velocityAge += this.step;
-      if (this.velocityAge >= 0.4) { this.updateVelocities(); this.velocityAge = 0; }
+      if (this.velocityAge >= 0.2) {
+        const stamp = performance.now();
+        this.updateBubbleWake(bubbles, bubbleCenter);
+        this.flowSolver.step(this.velocityAge,
+          acidDelivery ? this.acidInlet : this.fallbackSource.set(0, this.mask.bottom + this.mask.radius, 0),
+          acidDelivery ? this.acidDirection : up, this.jetPending, 0, (x, y, z) => {
+            const v = this.velocity.at(x, y, z, this.time);
+            const m = this.mask;
+            const ix = Math.max(0, Math.min(m.nx - 1, Math.floor((x / m.radius + 1) * m.nx / 2)));
+            const iy = Math.max(0, Math.min(m.ny - 1, Math.floor((y - m.bottom) / m.height * m.ny)));
+            const iz = Math.max(0, Math.min(m.nz - 1, Math.floor((z / m.radius + 1) * m.nz / 2)));
+            const wake = this.wake[m.index(ix, iy, iz)];
+            const wakeSpeed = Math.min(0.0035, wake * 0.0015);
+            this.ambient[0] = v[0] * 5 + up.x * wakeSpeed;
+            const acid = this.species.HNO3.values[m.index(ix, iy, iz)];
+            const acidContrast = Math.min(2, acid * m.activeCount / 4.4);
+            this.ambient[1] = v[1] * 5 + up.y * wakeSpeed - acidContrast * 0.007;
+            this.ambient[2] = v[2] * 5 + up.z * wakeSpeed;
+            return this.ambient;
+          }, acidDelivery ? this.mask.height * 0.8 : 0);
+        this.jetPending = 0;
+        this.velocityAge = 0;
+        this.profile.flowMs += performance.now() - stamp;
+      }
       const oldTexture = this.previous; this.previous = this.current; this.current = oldTexture;
       const oldPixels = this.prevPixels; this.prevPixels = this.pixels; this.pixels = oldPixels;
-      this.transport(this.step);
-      if (this.pending > 0) { this.inject(this.pending); this.pending = 0; }
+      let stamp = performance.now();
+      this.flowSolver.transport(this.species["Cu2+"].values, this.step,
+        TUBE_SIMULATION.field.baseDiffusivity + this.velocity.contributions.buoyancy * TUBE_SIMULATION.field.heatDiffusivity);
+      this.profile.copperMs += performance.now() - stamp;
+      stamp = performance.now();
+      this.advectBubbleCargo(bubbles, bubbleCenter);
+      this.profile.bubblesMs += performance.now() - stamp;
+      stamp = performance.now();
+      this.flowSolver.transport(this.species.HNO3.values, this.step, 0.000008);
+      this.profile.acidMs += performance.now() - stamp;
+      if (acidDelivery) this.deliverAcid(acidDelivery.deliveredMl);
+      else if (!this.acidSeeded) this.seedAcid();
+      if (this.acidSeeded) this.relocalizeSeedAcid();
+      if (this.pending > 0) this.pending -= this.reactAtCopper(this.pending);
+      stamp = performance.now();
       this.writeTexture();
+      this.profile.textureMs += performance.now() - stamp;
+      this.profile.steps++;
       this.time += this.step;
     }
   }
 
-  private rebuildFaces() {
-    const m = this.mask, slice = m.nx * m.ny;
-    this.countX = this.countY = this.countZ = 0;
-    for (let a = 0; a < m.activeCount; a++) {
-      const i = m.active[a];
-      const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / slice);
-      if (x + 1 < m.nx && m.data[i + 1]) {
-        const k = this.countX++;
-        this.facesX[k] = i;
-        this.leftX[k] = x > 0 && m.data[i - 1] ? i - 1 : i;
-        this.rightX[k] = x + 2 < m.nx && m.data[i + 2] ? i + 2 : i + 1;
+  private updateBubbleWake(bubbles?: RisingBubbleSamples, center?: THREE.Vector3) {
+    this.wake.fill(0);
+    if (!bubbles || !center) return;
+    const m = this.mask;
+    for (let b = 0; b < bubbles.state.length; b++) {
+      if (bubbles.state[b] !== 2) continue;
+      const x = Math.floor(((bubbles.x[b] - center.x) / m.radius + 1) * m.nx / 2);
+      const y = Math.floor((bubbles.y[b] - m.bottom) / m.height * m.ny);
+      const z = Math.floor(((bubbles.z[b] - center.z) / m.radius + 1) * m.nz / 2);
+      for (let dz = -1; dz <= 1; dz++) for (let dy = -2; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const ix = x + dx, iy = y + dy, iz = z + dz;
+          if (ix < 0 || ix >= m.nx || iy < 0 || iy >= m.ny || iz < 0 || iz >= m.nz) continue;
+          const i = m.index(ix, iy, iz);
+          if (m.data[i]) this.wake[i] += 0.12 * Math.exp(-(dx * dx + dz * dz + dy * dy * 0.5));
+        }
+    }
+  }
+
+  /** Resolved bubbles carry a small local parcel; every transfer stays inside the Cu field. */
+  private advectBubbleCargo(bubbles?: RisingBubbleSamples, center?: THREE.Vector3) {
+    if (!bubbles || !center) return;
+    const values = this.species["Cu2+"].values;
+    const m = this.mask;
+    this.rebuildSourceCells();
+    for (let b = 0; b < Math.min(bubbles.state.length, this.wakeCell.length); b++) {
+      if (bubbles.state[b] !== 2) {
+        this.wakeCell[b] = -1; this.wakeCargo[b] = 0;
+        continue;
       }
-      if (y + 1 < m.ny && m.data[i + m.nx]) {
-        const k = this.countY++;
-        this.facesY[k] = i;
-        this.leftY[k] = y > 0 && m.data[i - m.nx] ? i - m.nx : i;
-        this.rightY[k] = y + 2 < m.ny && m.data[i + 2 * m.nx] ? i + 2 * m.nx : i + m.nx;
-      }
-      if (z + 1 < m.nz && m.data[i + slice]) {
-        const k = this.countZ++;
-        this.facesZ[k] = i;
-        this.leftZ[k] = z > 0 && m.data[i - slice] ? i - slice : i;
-        this.rightZ[k] = z + 2 < m.nz && m.data[i + 2 * slice] ? i + 2 * slice : i + slice;
+      const x = bubbles.x[b] - center.x, y = bubbles.y[b], z = bubbles.z[b] - center.z;
+      const ix = Math.max(0, Math.min(m.nx - 1, Math.floor((x / m.radius + 1) * m.nx / 2)));
+      const iy = Math.max(0, Math.min(m.ny - 1, Math.floor((y - m.bottom) / m.height * m.ny)));
+      const iz = Math.max(0, Math.min(m.nz - 1, Math.floor((z / m.radius + 1) * m.nz / 2)));
+      const raw = m.index(ix, iy, iz);
+      const target = m.data[raw] ? raw : this.nearestWet(this.injectionPoint.set(x, y, z));
+      if (target < 0) continue;
+      const prior = this.wakeCell[b];
+      if (prior < 0) {
+        let source = -1, distance = Infinity;
+        for (const i of this.sourceCells) {
+          const p = m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
+            Math.floor(i / (m.nx * m.ny)), this.injectionPoint);
+          const d = (p.x - x) ** 2 + (p.z - z) ** 2;
+          if (d < distance && values[i] > 0) { distance = d; source = i; }
+        }
+        if (source < 0) continue;
+        const sx = source % m.nx, sy = Math.floor(source / m.nx) % m.ny;
+        const sz = Math.floor(source / (m.nx * m.ny));
+        let separation = Infinity;
+        for (let other = 0; other < Math.min(bubbles.state.length, this.wakeCargo.length); other++) {
+          if (other === b || bubbles.state[other] !== 2 || this.wakeCargo[other] <= 1e-6) continue;
+          separation = Math.min(separation, Math.hypot(bubbles.x[other] - bubbles.x[b],
+            bubbles.z[other] - bubbles.z[b]));
+        }
+        const distinctWake = Math.min(1, separation / (3 * m.radius / m.nx));
+        const capacity = Math.min(0.01, 0.01 * (bubbles.size[b] / (m.radius * 0.13)) ** 3)
+          * distinctWake;
+        let pickup = 0;
+        for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const px = sx + dx, py = sy + dy, pz = sz + dz;
+            if (px < 0 || px >= m.nx || py < 0 || py >= m.ny || pz < 0 || pz >= m.nz) continue;
+            const parcel = m.index(px, py, pz);
+            if (!m.data[parcel] || pickup >= capacity) continue;
+            const moved = Math.min(capacity - pickup, values[parcel] * 0.32);
+            values[parcel] -= moved; pickup += moved;
+          }
+        values[target] += pickup;
+        this.wakeCargo[b] = pickup; this.wakeCell[b] = target;
+      } else {
+        const move = Math.min(values[prior], this.wakeCargo[b]) * 0.91;
+        values[prior] -= move; values[target] += move;
+        this.wakeCargo[b] = move; this.wakeCell[b] = target;
       }
     }
   }
 
   private reconcileMask() {
-    const values = this.species["Cu2+"].values, mask = this.mask;
+    const mask = this.mask;
     const nearest = this.nearest, queue = this.queue;
     nearest.fill(-1);
     let head = 0, tail = 0;
@@ -348,187 +474,146 @@ export class TubeVolumeField {
       if (z > 0 && nearest[i - slice] < 0) { nearest[i - slice] = target; queue[tail++] = i - slice; }
       if (z + 1 < mask.nz && nearest[i + slice] < 0) { nearest[i + slice] = target; queue[tail++] = i + slice; }
     }
-    for (let i = 0; i < values.length; i++) {
-      if (mask.data[i] || values[i] === 0) continue;
-      const target = nearest[i];
-      if (target >= 0) values[target] += values[i];
-      values[i] = 0;
-    }
-  }
-
-  private transport(dt: number) {
-    const m = this.mask, values = this.species["Cu2+"].values;
-    const dx = 2 * m.radius / m.nx, dy = m.height / m.ny, dz = 2 * m.radius / m.nz;
-    const completion = clamp((this.reaction.extent - 0.68) / 0.27, 0, 1);
-    const diffusivity = TUBE_SIMULATION.field.baseDiffusivity
-      + this.velocity.contributions.buoyancy * TUBE_SIMULATION.field.heatDiffusivity
-      + this.velocity.contributions.gas * TUBE_SIMULATION.field.gasDiffusivity
-      + completion * completion * TUBE_SIMULATION.field.completionDiffusivity;
-    const { fluxX, fluxY, fluxZ, outgoing, nextValues } = this;
-    outgoing.fill(0);
-    nextValues.set(values);
-    for (let axis = 0; axis < 3; axis++) {
-      const faces = axis === 0 ? this.facesX : axis === 1 ? this.facesY : this.facesZ;
-      const speeds = axis === 0 ? this.faceX : axis === 1 ? this.faceY : this.faceZ;
-      const fluxes = axis === 0 ? fluxX : axis === 1 ? fluxY : fluxZ;
-      const lefts = axis === 0 ? this.leftX : axis === 1 ? this.leftY : this.leftZ;
-      const rights = axis === 0 ? this.rightX : axis === 1 ? this.rightY : this.rightZ;
-      const count = axis === 0 ? this.countX : axis === 1 ? this.countY : this.countZ;
-      const offset = axis === 0 ? 1 : axis === 1 ? m.nx : m.nx * m.ny;
-      const spacing = axis === 0 ? dx : axis === 1 ? dy : dz;
-      const cfl = dt / spacing, mix = Math.min(0.42, diffusivity * dt / (spacing * spacing));
-      for (let k = 0; k < count; k++) {
-        const a = faces[k], b = a + offset;
-        const fraction = Math.max(-0.2, Math.min(0.2, speeds[a] * cfl));
-        let reconstructed = fraction >= 0 ? values[a] : values[b];
-        if (this.useMuscl) {
-          const left = values[lefts[k]], right = values[rights[k]];
-          const slopeA = this.minmod(values[a] - left, values[b] - values[a]);
-          const slopeB = this.minmod(values[b] - values[a], right - values[b]);
-          reconstructed = fraction >= 0 ? values[a] + 0.5 * (1 - fraction) * slopeA
-            : values[b] - 0.5 * (1 + fraction) * slopeB;
-        }
-        const topFace = axis !== 1 && a + m.nx < m.data.length && b + m.nx < m.data.length
-          && (!m.data[a + m.nx] || !m.data[b + m.nx]);
-        const lateralMix = topFace ? Math.min(0.42, mix * 2.5) : mix;
-        const raw = reconstructed * fraction + (values[a] - values[b]) * lateralMix;
-        fluxes[a] = raw;
-        if (raw > 0) outgoing[a] += raw;
-        else outgoing[b] -= raw;
-      }
-    }
-    for (let axis = 0; axis < 3; axis++) {
-      const faces = axis === 0 ? this.facesX : axis === 1 ? this.facesY : this.facesZ;
-      const fluxes = axis === 0 ? fluxX : axis === 1 ? fluxY : fluxZ;
-      const count = axis === 0 ? this.countX : axis === 1 ? this.countY : this.countZ;
-      const offset = axis === 0 ? 1 : axis === 1 ? m.nx : m.nx * m.ny;
-      for (let k = 0; k < count; k++) {
-        const a = faces[k], b = a + offset, raw = fluxes[a];
-        if (raw === 0) continue;
-        const donor = raw > 0 ? a : b;
-        const flux = raw * Math.min(1, values[donor] / Math.max(1e-30, outgoing[donor]));
-        nextValues[a] -= flux; nextValues[b] += flux;
-      }
-    }
-    values.set(nextValues);
-    const lateMix = clamp((this.reaction.extent - 0.68) / 0.28, 0, 1) * dt * 0.24;
-    if (lateMix > 0 && m.activeCount > 0) {
-      let total = 0;
-      for (let a = 0; a < m.activeCount; a++) total += values[m.active[a]];
-      const mean = total / m.activeCount;
-      for (let a = 0; a < m.activeCount; a++) {
-        const i = m.active[a];
-        values[i] += lateMix * (mean - values[i]);
+    for (const field of Object.values(this.species)) {
+      const values = field.values;
+      for (let i = 0; i < values.length; i++) {
+        if (mask.data[i] || values[i] === 0) continue;
+        const target = nearest[i];
+        if (target >= 0) values[target] += values[i];
+        values[i] = 0;
       }
     }
   }
 
-  private minmod(a: number, b: number) {
-    return a > 0 && b > 0 ? Math.min(a, b) : a < 0 && b < 0 ? Math.max(a, b) : 0;
-  }
-
-  private updateVelocities() {
+  private nearestWet(point: THREE.Vector3) {
     const m = this.mask;
-    const dx = 2 * m.radius / m.nx, dy = m.height / m.ny, dz = 2 * m.radius / m.nz;
-    for (let axis = 0; axis < 3; axis++) {
-      const faces = axis === 0 ? this.facesX : axis === 1 ? this.facesY : this.facesZ;
-      const speeds = axis === 0 ? this.faceX : axis === 1 ? this.faceY : this.faceZ;
-      const count = axis === 0 ? this.countX : axis === 1 ? this.countY : this.countZ;
-      for (let k = 0; k < count; k++) {
-        const i = faces[k];
-        const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
-        const px = -m.radius + (x + 0.5) * dx;
-        const py = m.bottom + (y + 0.5) * dy;
-        const pz = -m.radius + (z + 0.5) * dz;
-        speeds[i] = this.velocity.at(px + (axis === 0 ? dx / 2 : 0),
-          py + (axis === 1 ? dy / 2 : 0), pz + (axis === 2 ? dz / 2 : 0), this.time)[axis];
-      }
-    }
-  }
-
-  private inject(dXi: number) {
-    const d = Math.min(dXi, this.reaction.copper / 1.65, this.reaction.acid / 4.4);
-    if (d <= 0) return;
-    Object.assign(this.reaction, copperReactionState(this.reaction.extent + d));
-    const values = this.species["Cu2+"].values, m = this.mask;
-    this.fallbackSource.set(0, m.bottom + m.radius, 0);
-    const zones = this.sources.length ? this.sources : [this.fallbackSource];
-    const zoneCount = Math.min(zones.length, this.kernelX.length);
-    const weights = this.injectionWeights;
-    if (this.injectionDirty) {
-      for (const group of weights) group.fill(0);
-      this.injectionTotals.fill(0);
-      for (let s = 0; s < zoneCount; s++) {
-        const source = zones[s];
-        this.kernelX[s] = source.x;
-        this.kernelY[s] = source.y;
-        this.kernelZ[s] = source.z;
-        this.kernelWeight[s] = 0.25 + 0.75 * Math.sin(s * 7.1) ** 2;
-      }
-      for (let a = 0; a < m.activeCount; a++) {
-        const i = m.active[a];
-        const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
-        const q = m.point(x, y, z, this.injectionPoint);
-        for (let s = 0; s < zoneCount; s++) {
-          const width = TUBE_SIMULATION.field.sourceWidths[s % TUBE_SIMULATION.field.sourceWidths.length];
-          const r2 = ((q.x - this.kernelX[s]) / (m.radius * width)) ** 2
-            + ((q.y - this.kernelY[s]) / (m.radius * 0.2)) ** 2
-            + ((q.z - this.kernelZ[s]) / (m.radius * width)) ** 2;
-          const w = this.kernelWeight[s] * Math.exp(-r2 * 1.4);
-          if (w > 1e-6) weights[s % 4][i] += w;
-        }
-        for (let group = 0; group < 4; group++) this.injectionTotals[group] += weights[group][i];
-      }
-      this.injectionDirty = false;
-    }
-    // Four phase-shifted microzones breathe independently. Normalize each
-    // pulse so its summed stoichiometric product is still exactly 3 d.
-    const pulses = this.pulseScales;
-    let pulseTotal = 0;
-    for (let group = 0; group < 4; group++) {
-      pulses[group] = this.injectionTotals[group] > 0
-        ? 0.18 + Math.pow(Math.max(0, Math.sin(this.time * 3.1 + group * 1.57)), 2) : 0;
-      pulseTotal += pulses[group];
-    }
-    if (pulseTotal === 0) return;
-    for (let group = 0; group < 4; group++) pulses[group] = pulses[group] > 0
-      ? 1.65 * d * pulses[group] / (pulseTotal * this.injectionTotals[group]) : 0;
+    let nearest = -1, distance = Infinity;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
-      values[i] += pulses[0] * weights[0][i] + pulses[1] * weights[1][i]
-        + pulses[2] * weights[2][i] + pulses[3] * weights[3][i];
+      const d = m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
+        Math.floor(i / (m.nx * m.ny)), this.injectionPoint).distanceToSquared(point);
+      if (d < distance) { distance = d; nearest = i; }
     }
+    return nearest;
+  }
+
+  private rebuildSourceCells() {
+    if (!this.injectionDirty) return;
+    const stamp = performance.now();
+    this.sourceCells.length = 0;
+    const seen = new Set<number>();
+    const m = this.mask;
+    const cell = Math.min(2 * m.radius / m.nx, m.height / m.ny);
+    for (let start = 0; start < this.sources.length; start += 24) {
+      const end = Math.min(start + 24, this.sources.length);
+      const centre = new THREE.Vector3();
+      for (let s = start; s < end; s++) centre.add(this.sources[s]);
+      centre.divideScalar(end - start);
+      for (let s = start; s < end; s++) {
+        const surface = this.sources[s];
+        const outward = this.injectionPoint.subVectors(surface, centre).normalize();
+        const adjacent = surface.clone().addScaledVector(outward, cell * 0.6);
+        const i = this.nearestWet(adjacent);
+        if (i < 0) continue;
+        const ix = i % m.nx, iy = Math.floor(i / m.nx) % m.ny;
+        const iz = Math.floor(i / (m.nx * m.ny));
+        for (const [dx, dy, dz] of [[0, 0, 0], [1, 0, 0], [-1, 0, 0],
+          [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+          const x = ix + dx, y = iy + dy, z = iz + dz;
+          if (x < 0 || x >= m.nx || y < 0 || y >= m.ny || z < 0 || z >= m.nz) continue;
+          const cellIndex = m.index(x, y, z);
+          if (!m.data[cellIndex] || seen.has(cellIndex)) continue;
+          const point = m.point(x, y, z, this.injectionPoint);
+          if (point.distanceToSquared(surface) > (cell * 1.25) ** 2) continue;
+          seen.add(cellIndex); this.sourceCells.push(cellIndex);
+        }
+      }
+    }
+    this.injectionDirty = false;
+    this.profile.sources++; this.profile.sourceMs += performance.now() - stamp;
+  }
+
+  private seedAcid() {
+    this.acidSeeded = true;
+    this.rebuildSourceCells();
+    const sites = this.sourceCells;
+    if (!sites.length) return;
+    const values = this.species.HNO3.values;
+    for (const i of sites) values[i] += 4.4 / sites.length;
+  }
+
+  /** Standalone field tests without a pour start with acid already wetting copper. */
+  private relocalizeSeedAcid() {
+    this.rebuildSourceCells();
+    if (!this.sourceCells.length) return;
+    const values = this.species.HNO3.values;
+    let total = 0;
+    for (const value of values) total += value;
+    values.fill(0);
+    for (const i of this.sourceCells) values[i] = total / this.sourceCells.length;
+  }
+
+  private deliverAcid(deliveredMl: number) {
+    const total = clamp(finite(deliveredMl), 0, 1);
+    const delta = Math.max(0, total - this.acidDelivered);
+    if (!delta) return;
+    this.acidDelivered = total;
+    this.jetPending += 2 * delta;
+    const m = this.mask, values = this.species.HNO3.values;
+    const dx = 2 * m.radius / m.nx, dy = m.height / m.ny;
+    const weights = new Float64Array(m.data.length);
+    let sum = 0;
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a];
+      const point = m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
+        Math.floor(i / (m.nx * m.ny)), this.injectionPoint);
+      const r2 = ((point.x - this.acidInlet.x) / (1.5 * dx)) ** 2
+        + ((point.y - this.acidInlet.y) / (2 * dy)) ** 2
+        + ((point.z - this.acidInlet.z) / (1.5 * dx)) ** 2;
+      const w = Math.exp(-r2);
+      weights[i] = w; sum += w;
+    }
+    if (sum > 1e-12) for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a]; values[i] += 4.4 * delta * weights[i] / sum;
+    }
+    else {
+      const i = this.nearestWet(this.acidInlet);
+      if (i >= 0) values[i] += 4.4 * delta;
+    }
+  }
+
+  private reactAtCopper(requested: number) {
+    this.rebuildSourceCells();
+    const acid = this.species.HNO3.values;
+    const threshold = 0.000001;
+    let available = 0;
+    for (const i of this.sourceCells) if (acid[i] > threshold) available += acid[i];
+    const d = Math.min(requested, this.reaction.copper / 1.65,
+      this.reaction.acid / 4.4, available / 4.4);
+    if (!(d > 0)) return 0;
+    const copper = this.species["Cu2+"].values;
+    for (const i of this.sourceCells) {
+      if (acid[i] <= threshold) continue;
+      const fraction = acid[i] / available;
+      acid[i] -= 4.4 * d * fraction;
+      copper[i] += 1.65 * d * fraction;
+    }
+    Object.assign(this.reaction, copperReactionState(this.reaction.extent + d));
+    return d;
   }
 
   private writeTexture() {
     const m = this.mask, v = this.species["Cu2+"].values;
     // Normalize by a whole-tube amount, not by max voxel, so hue preserves mass.
     const scale = m.data.length * TUBE_SIMULATION.field.opticalDensityScale;
-    const opticalSmoothing = clamp((this.reaction.extent - 0.8) / 0.17, 0, 1) * 0.65;
-    const slice = m.nx * m.ny;
     for (let i = 0; i < v.length; i++) {
       if (!m.data[i]) { this.pixels[i] = 0; continue; }
-      let value = v[i];
-      if (opticalSmoothing > 0) {
-        let sum = value, count = 1;
-        const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
-        if (x > 0 && m.data[i - 1]) { sum += v[i - 1]; count++; }
-        if (x + 1 < m.nx && m.data[i + 1]) { sum += v[i + 1]; count++; }
-        if (y > 0 && m.data[i - m.nx]) { sum += v[i - m.nx]; count++; }
-        if (y + 1 < m.ny && m.data[i + m.nx]) { sum += v[i + m.nx]; count++; }
-        if (i >= slice && m.data[i - slice]) { sum += v[i - slice]; count++; }
-        if (i + slice < v.length && m.data[i + slice]) { sum += v[i + slice]; count++; }
-        value += opticalSmoothing * (sum / count - value);
-      }
-      // Keep the reaction's optical core on the exact surface source. The
-      // coarse voxel interpolation otherwise puts its first visible sample
-      // outside the irregular mesh and leaves a transparent seam.
-      const core = this.sourceActivity * 1.4 * Math.min(1,
-        this.injectionWeights[0][i] + this.injectionWeights[1][i]
-        + this.injectionWeights[2][i] + this.injectionWeights[3][i]);
-      this.pixels[i] = Math.max(core, Math.max(0, finite(value) * scale));
+      this.pixels[i] = Math.max(0, finite(v[i]) * scale);
     }
     this.current.needsUpdate = true;
   }
   dispose() { this.previous.dispose(); this.current.dispose(); }
 }
+
+
+

@@ -23,7 +23,7 @@ export class TubeFlowSolver {
   private readonly pressureWeight: Float32Array;
   private readonly eddy: Float32Array;
   private readonly direction = new THREE.Vector3();
-  constructor(readonly mask: LiquidMask, readonly options: { lowDiffusion?: boolean } = {}) {
+  constructor(readonly mask: LiquidMask, readonly options: { lowDiffusion?: boolean; pressureIterations?: number; eddyFraction?: number; ambientStrength?: number } = {}) {
     const n = mask.data.length;
     for (let axis = 0; axis < 3; axis++) this.faces[axis] = new Float32Array(n);
     this.previousFaces = Array.from({ length: 3 }, () => new Float32Array(n));
@@ -64,7 +64,8 @@ export class TubeFlowSolver {
   }
   /** Adds momentum at the impact only, then transports, damps and projects the entire velocity. */
   step(dt: number, inlet: THREE.Vector3, direction: THREE.Vector3, impulse: number,
-    agitation = 0, background?: (x: number, y: number, z: number) => ArrayLike<number>) {
+    agitation = 0, background?: (x: number, y: number, z: number) => ArrayLike<number>,
+    jetReach = 0) {
     const started = typeof performance !== "undefined" ? performance.now() : 0;
     const m = this.mask, old = this.previousFaces;
     for (let axis = 0; axis < 3; axis++) old[axis].set(this.faces[axis]);
@@ -76,8 +77,14 @@ export class TubeFlowSolver {
       const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
       const z = Math.floor(i / (m.nx * m.ny));
       const p = m.point(x, y, z, this.scratch);
-      const distance2 = p.distanceToSquared(inlet);
-      const source = Math.exp(-distance2 / width2) * impulse;
+      const dx = p.x - inlet.x, dy = p.y - inlet.y, dz = p.z - inlet.z;
+      const along = dx * d.x + dy * d.y + dz * d.z;
+      const distance2 = dx * dx + dy * dy + dz * dz;
+      const radial2 = Math.max(0, distance2 - along * along);
+      const source = jetReach > 0
+        ? Math.exp(-radial2 / width2) * Math.exp(-Math.max(0, along) / jetReach)
+          * (along >= -m.radius * 0.15 ? impulse : 0)
+        : Math.exp(-distance2 / width2) * impulse;
       const ambient = background?.(p.x, p.y, p.z);
       for (let axis = 0; axis < 3; axis++) {
         const j = this.neighbor(i, axis, 1);
@@ -100,7 +107,7 @@ export class TubeFlowSolver {
         this.faces[axis][i] = Math.max(-0.09, Math.min(0.09,
           (advected + dt * TUBE_SIMULATION.jetFlow.molecularDiffusivity * laplace) * damp
           + source * d.getComponent(axis)
-          + (ambient?.[axis] ?? 0) * dt * 0.15));
+          + (ambient?.[axis] ?? 0) * dt * (this.options.ambientStrength ?? 0.15)));
       }
     }
     this.project();
@@ -127,7 +134,7 @@ export class TubeFlowSolver {
     }
     const p = this.pressure;
     p.fill(0);
-    for (let iteration = 0; iteration < TUBE_SIMULATION.jetFlow.pressureIterations; iteration++) {
+    for (let iteration = 0; iteration < (this.options.pressureIterations ?? TUBE_SIMULATION.jetFlow.pressureIterations); iteration++) {
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a]; let sum = 0;
         for (let axis = 0; axis < 3; axis++) {
@@ -161,7 +168,7 @@ export class TubeFlowSolver {
         const f = this.faces[axis][i] * dt / this.spacing[axis];
         // Six wet faces may export from one cell; keep explicit diffusion below its CFL limit.
         const mixing = Math.min(0.12, (diffusivity
-          + this.eddy[i] * (this.options.lowDiffusion ? 0.02 : 1)) * dt / this.spacing[axis] ** 2);
+          + this.eddy[i] * (this.options.eddyFraction ?? (this.options.lowDiffusion ? 0.02 : 1))) * dt / this.spacing[axis] ** 2);
         let donorValue = f >= 0 ? values[i] : values[j];
         if (this.options.lowDiffusion) {
           const donor = f >= 0 ? i : j;

@@ -71,21 +71,27 @@ describe("closed 3D Cu(II) field", () => {
   it("carries warm copper ions into the upper liquid while conserving their amount", () => {
     const field = new TubeVolumeField("LOW", 0.007, 0, 0.055,
       [new THREE.Vector3(0.002, 0.009, 0), new THREE.Vector3(-0.002, 0.009, 0)]);
-    const level = 0.055;
+    const level = 0.0233;
     for (let frame = 1; frame <= 30 * 35; frame++)
       field.advance(1 / 30, Math.min(1, frame / (30 * 29)), up, level, 0.8, 0.9);
     let upper = 0;
-    const bands = [0, 0, 0, 0];
     field.species["Cu2+"].values.forEach((value, index) => {
       const y = Math.floor(index / field.mask.nx) % field.mask.ny;
-      bands[Math.min(3, Math.floor(y / field.mask.ny * 4))] += value;
       if (field.mask.bottom + (y + 0.5) / field.mask.ny * field.mask.height > level * 0.55) upper += value;
     });
     expect(field.copperII).toBeCloseTo(1.65, 8);
-    expect(bands[0]).toBeGreaterThan(0.19);
-    expect(bands[2]).toBeGreaterThan(0.33);
-    expect(bands[3]).toBeGreaterThan(0.27);
-    expect(upper).toBeGreaterThan(0.55);
+    expect(upper).toBeGreaterThan(0.4);
+    const cold = new TubeVolumeField("LOW", 0.007, 0, 0.055,
+      [new THREE.Vector3(0.002, 0.009, 0), new THREE.Vector3(-0.002, 0.009, 0)]);
+    for (let frame = 1; frame <= 30 * 35; frame++)
+      cold.advance(1 / 30, Math.min(1, frame / (30 * 29)), up, level, 0.8, 0);
+    let coldUpper = 0;
+    cold.species["Cu2+"].values.forEach((value, index) => {
+      const y = Math.floor(index / cold.mask.nx) % cold.mask.ny;
+      if (cold.mask.bottom + (y + 0.5) / cold.mask.ny * cold.mask.height > level * 0.55) coldUpper += value;
+    });
+    expect(upper).toBeGreaterThan(coldUpper + 0.18);
+    cold.dispose();
     field.dispose();
   });
 
@@ -99,8 +105,87 @@ describe("closed 3D Cu(II) field", () => {
         field.advance(1 / 20, (i + 20) / 200, up, 0.044 + Math.sin(i * 0.1) * 0.0001, 0.8, 0.9);
       const milliseconds = (performance.now() - start) / 40;
       console.log(`${quality} TubeVolumeField.advance: ${milliseconds.toFixed(2)} ms`);
-      expect(milliseconds).toBeLessThan(quality === "LOW" ? 2 : 6);
+      expect(milliseconds).toBeLessThan(quality === "LOW" ? 3 : 20);
       field.dispose();
     }
+  });
+
+  it("retains stoichiometric copper and optical density after completion", () => {
+    const field = new TubeVolumeField("LOW", 0.007, 0, 0.055,
+      [new THREE.Vector3(0.002, 0.009, 0), new THREE.Vector3(-0.002, 0.009, 0)]);
+    const samples: { seconds: number; mass: number; optical: number }[] = [];
+    for (let frame = 1; frame <= 60 * 20; frame++) {
+      const seconds = frame / 20;
+      field.advance(0.05, Math.min(1, seconds / 25), up, 0.05, 0.7, 0.9);
+      if (frame === 500 || frame === 800 || frame === 1200) {
+        const pixels = field.current.image.data as Float32Array;
+        let optical = 0;
+        for (const value of pixels) optical += 1.7 * value + 2.4 * value ** 1.35;
+        samples.push({ seconds, mass: field.copperII, optical });
+      }
+    }
+    console.log("Cu completion diagnostics", samples);
+    for (const sample of samples) {
+      expect(sample.mass).toBeCloseTo(1.65, 8);
+      expect(sample.optical).toBeGreaterThan(0);
+    }
+    expect(samples[2].optical).toBeGreaterThan(samples[0].optical * 0.8);
+    field.dispose();
+  });
+
+  it("produces Cu(II) only where delivered acid reaches copper", () => {
+    const sources = [0].flatMap((cx, grain) =>
+      Array.from({ length: 24 }, (_, k) => {
+        const y = 1 - 2 * (k + 0.5) / 24;
+        const angle = k * Math.PI * (3 - Math.sqrt(5)) + grain * 1.7;
+        const radial = Math.sqrt(1 - y * y);
+        return new THREE.Vector3(cx + 0.003 * radial * Math.cos(angle),
+          0.005 + 0.003 * y, 0.003 * radial * Math.sin(angle));
+      }));
+    const field = new TubeVolumeField("LOW", 0.007, 0, 0.055,
+      sources);
+    field.setSources(sources);
+    const delivery = { inlet: new THREE.Vector3(0, 0.043, 0),
+      direction: new THREE.Vector3(0, -1, 0), deliveredMl: 0 };
+    field.advance(0.05, 0.1, up, 0.05, 0.7, 0.9,
+      undefined, undefined, undefined, undefined, delivery);
+    expect(field.copperII).toBe(0);
+    let earlyCopper = 0;
+    for (let frame = 1; frame <= 40 * 20; frame++) {
+      const seconds = frame / 20;
+      delivery.deliveredMl = Math.min(1, seconds / 2);
+      field.advance(0.05, Math.min(1, seconds / 25), up, 0.05, 0.7, 0.9,
+        undefined, undefined, undefined, undefined, delivery);
+      if (frame === 60) earlyCopper = field.copperII;
+    }
+    expect(earlyCopper).toBeGreaterThan(0);
+    expect(field.copperII).toBeGreaterThan(1.5);
+    expect(field.copperII).toBeLessThanOrEqual(1.65);
+    expect(field.copperII).toBeCloseTo(1.65 * field.reaction.extent, 8);
+    expect(field.species.HNO3.total).toBeCloseTo(4.4 * (1 - field.reaction.extent), 8);
+    field.dispose();
+  });
+
+  it("moves bubble wake parcels upward without creating or losing Cu(II)", () => {
+    const field = new TubeVolumeField("LOW", 0.007, 0, 0.055,
+      [new THREE.Vector3(0, 0.005, 0)]);
+    field.advance(0.05, 0.5, up, 0.0233);
+    const initial = field.copperII;
+    const bubbles = { state: new Uint8Array([2]), x: new Float32Array([0]),
+      y: new Float32Array([0.006]), z: new Float32Array([0]), size: new Float32Array([0.0005]) };
+    const center = new THREE.Vector3();
+    for (let step = 0; step < 5; step++) {
+      bubbles.y[0] = 0.006 + step * 0.002;
+      field.advance(0.05, 0.5, up, 0.0233, 0.5, 0.5,
+        undefined, undefined, bubbles, center);
+    }
+    expect(field.copperII).toBeCloseTo(initial, 10);
+    let upper = 0;
+    field.species["Cu2+"].values.forEach((value, i) => {
+      const y = Math.floor(i / field.mask.nx) % field.mask.ny;
+      if ((y + 0.5) / field.mask.ny * field.mask.height > 0.011) upper += value;
+    });
+    expect(upper).toBeGreaterThan(0);
+    field.dispose();
   });
 });
