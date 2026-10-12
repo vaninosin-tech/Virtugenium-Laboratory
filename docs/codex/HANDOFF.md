@@ -1,0 +1,58 @@
+# Передача работы (HANDOFF) — как продолжить, если сессия Claude оборвётся
+
+Состояние на **12.10.2026 ~19:40**. Проект: `D:\Claude\virtugenium-lab-transfer\virtugenium-lab-transfer`
+(React + Three.js, виртуальная лаборатория). Визуал реакций делает **Codex** (`codex exec`, модель **только по
+умолчанию gpt-6-sol**, не переключать), Claude пишет задания, **проверяет сам по кадрам и видео**, коммитит.
+
+## Главное
+- Приоритет заказчика: **опыт 1 первым** (`docs/codex/EXP1-sources-and-flow.md`), затем серия опытов 2–3
+  (`docs/realism/agcl-baso4-full-physics-tasks.md`, `docs/realism/microphysics-supplement.md`, карта и критерии
+  отказа — `docs/codex/exp23-physics-plan.md`). **Опыт 4 не менять.** Правила игры: `docs/realism/game-rules-amounts.md`,
+  `docs/realism/local-reaction-onset.md`, `docs/realism/liquid-surface-spec.md`, основной химический документ
+  `docs/realism/chemistry_four_experiments_corrected.md`.
+- Не менять свободное перемещение склянок; **автопозиционирование склянки при наливе остаётся**; налив — по клику
+  ЛКМ фиксированной порцией 1,0 мл; выливания нет; нагрев не обязателен.
+
+## Закоммиченное (последний коммит 9815aaf; серия 0f98d97…9815aaf, 15 коммитов)
+Опыт 1 (3D-поля, конвекция, пузырьки NO, газ NO/NO₂, медь 45 %), опыт 4 (R4 2:5:6, **устраивает заказчика**),
+опыт 3 (BaSO₄: локальная реакция, взвесь, донный слой, ресуспензия), общий решатель течения
+(`lib/tubeFlowSolver.ts`), учёт количеств (`lib/tubeAmounts.ts`), канал налива (`lib/tubePourImpact.ts`),
+встряхивание (`lib/tubeMotion.ts`), песочница с кнопками «Опыт 1–4» (холодные; «Опыт 1, с нагревом»).
+
+## В работе (НЕ закоммичено, не принято)
+Доработка **ворот 1** серии 2–3, сессия Codex `01a12e8a-4afd-71d2-9058-53cfa2ba335f`. Файлы в рабочей копии:
+`lib/tubeLiquidLevel.ts(+test)`, правки `tubeAmounts/tubeBariumField/tubeFlowSolver/tubeLiquidMaterial/
+tubeReactionVisuals/tubeReactions/tubeSimulationConfig`, `tests/_review.mjs`, `tests/_g1_artifacts.mjs`.
+Три незакрытых пункта: (1) встряхивание — энергия течения должна расти при движении пробирки и затем плавно
+спадать (скриптовый тест, график, видео); (2) трассер: без решётки «винограда» + слоёный краситель, видео с облётом;
+(3) уровень h(V) с эффективным радиусом так, чтобы 2,5 мл = авторская высота ≈55,5 мм (опыты 1 и 4 в начале выглядят
+как прежде). Черновик опыта 2 — `lib/tubeSilverField.ts`, `tubeSilverSediment.ts` (**не принят**, не коммитить до ворот 4).
+`tests/snap-pour.mjs` — чужая сессия, не мой.
+
+## Очередь
+1. Принять ворота 1 (доработка) → закоммитить path-limited.
+2. **Опыт 1** (`EXP1-sources-and-flow.md`, промпт `docs/codex/prompts/promptEXP1.txt`).
+3. Ворота 2 (`G2-nucleation-sedimentation.md`) → 3 (BaSO₄ + рендер + поверхность, 57+60+59) → 4 (AgCl, 56) →
+   5 (видео-сравнение, регрессии, 61+62). Для 3–5 задания пишет Claude по разделам основного документа.
+
+## Как запускать Codex (PowerShell, из каталога проекта)
+Новая сессия: `codex exec -C . -s workspace-write -c sandbox_workspace_write.network_access=true -o <out>.md - < docs\codex\prompts\<prompt>.txt > <log> 2>&1`
+Продолжить сессию: `codex exec resume <session-id> -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -o <out>.md - < <prompt>.txt > <log> 2>&1`
+(запускать через `Start-Process cmd.exe /c … -WindowStyle Hidden`). Лимиты читаются из последней
+`~/.codex/sessions/2026/10/*/*.jsonl` (`rate_limits.primary` — 5-часовой, `secondary` — недельный, `resets_at` — unix).
+Недельный сброс **14.10 17:11**; у заказчика есть 3 ручных сброса недельного лимита (применяет он сам).
+Dev-сервер: `npm run dev -- --host 127.0.0.1` (порт 5173).
+
+## Как принимать работу Codex (протокол)
+1. Отчёт `*-last.md` читать, но **не верить на слово**: сам снять кадры `tests/_review.mjs`
+   (`SCREEN=1`, `HEATED=1` для опыта 1; время считается от реального появления последнего реагента, см. поле `actual`).
+2. Проверка на чистой копии: `git worktree add --detach <dir> HEAD`, скопировать только файлы серии, junction `node_modules`,
+   `npm run typecheck` и `npx vitest run --no-file-parallelism tests src`.
+3. Коммит **только своих файлов**: `git commit -- <пути>` (в рабочей копии параллельно правит другая сессия:
+   планшет, перенос предметов, `ui/StandMotion.tsx` и др. — не трогать, `git add -A` не использовать).
+4. Для опытов 2–3 обязательны **непрерывное видео, срезы полей и баланс масс** (критерии отказа — `exp23-physics-plan.md` §5).
+5. Типичные регрессии Codex: пропадают пузырьки/тесты, «мгновенно белый столб», NaN → зелёный/чёрный в шейдере
+   (значение > 1 в смешении цвета), раздувание паузы при старте реакции (компиляция шейдера).
+
+## Незакоммиченное моё (ждёт решения заказчика о коммите чужих правок)
+Приближение камеры по **Q** (`ui/CameraRig.tsx`, `LabTestTubeInstance.tsx`, `HandHints.tsx`, `ControlGlyphs.tsx`).
