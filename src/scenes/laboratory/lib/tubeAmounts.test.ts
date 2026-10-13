@@ -31,14 +31,29 @@ describe("tube amounts", () => {
   });
 
   it("uses acid as the R1 limit and retains 45 percent of copper", () => {
+    tubeAmount("cu");
+    seedTubeAmounts("cu", []);
     seedTubeAmounts("cu", ["cu"]);
+    expect(tubeAmount("cu").volumeMl).toBe(2.5);
     deliver("cu", "hno3", 1);
+    seedTubeAmounts("cu", ["cu", "hno3"]);
+    expect(tubeAmount("cu").volumeMl).toBe(3.5);
     syncCopperProgress("cu", 1);
     const state = tubeAmount("cu");
     expect(state.copper / 3).toBeCloseTo(0.45);
     expect(state.species.HNO3).toBeCloseTo(0);
     expect(state.species["Cu2+"]).toBeCloseTo(1.65);
     expect(state.species.NO).toBeCloseTo(1.1);
+  });
+
+  it("starts the separate nitric acid tube at 2.5 ml and caps later pours at 5 ml", () => {
+    seedTubeAmounts("acid", ["hno3"]);
+    expect(tubeAmount("acid").volumeMl).toBe(2.5);
+    expect(tubeAmount("acid").species.HNO3).toBeCloseTo(4.4);
+    expect(deliver("acid", "hno3", 1)).toBe(1);
+    expect(tubeAmount("acid").volumeMl).toBe(3.5);
+    expect(deliver("acid", "hno3", 2)).toBe(1.5);
+    expect(tubeAmount("acid").volumeMl).toBe(5);
   });
 
   it("seeds R4 in the 2:5:6 ratio with enough sulfite and acid", () => {

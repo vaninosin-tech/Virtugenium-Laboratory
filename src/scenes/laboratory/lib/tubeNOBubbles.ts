@@ -36,13 +36,17 @@ export class TubeNOBubbles {
   /** source positions are actual wetted vertices supplied by the caller. */
   advance(dt: number, noSource: number, wettedArea: number, sources: readonly THREE.Vector3[],
     up: THREE.Vector3, level: number, center: THREE.Vector3, radius: number,
-    velocity?: VelocityField, time = 0, onPop?: (x: number, z: number, size: number) => void) {
+    velocity?: VelocityField, time = 0, onPop?: (x: number, z: number, size: number) => void,
+    surfaceActivity?: (point: THREE.Vector3) => number) {
     const boundedDt = Math.max(0, Math.min(dt, 0.25));
     // Visible events sample chemical flux, with area modulating the number
     // of active surface sites. The fractional remainder survives frame splits.
     this.accumulator += Math.max(0, noSource) * TUBE_SIMULATION.bubbles.samplesPerNO * Math.sqrt(Math.max(0, wettedArea));
     const births = Math.min(32, Math.floor(this.accumulator + 1e-9));
     this.accumulator = Math.max(0, this.accumulator - births);
+    const siteWeights = births && surfaceActivity
+      ? sources.map(point => Math.max(0.001, surfaceActivity(point))) : [];
+    const totalWeight = siteWeights.reduce((sum, value) => sum + value, 0);
     for (let b = 0; b < births && sources.length; b++) {
       let slot = -1;
       for (let n = 0; n < this.capacity; n++) {
@@ -51,7 +55,14 @@ export class TubeNOBubbles {
       }
       if (slot < 0) break;
       const serial = this.serial++;
-      const site = Math.floor(rand(serial + 19) * sources.length);
+      let site = Math.floor(rand(serial + 19) * sources.length);
+      if (totalWeight > 0) {
+        let pick = rand(serial + 19) * totalWeight;
+        for (let index = 0; index < siteWeights.length; index++) {
+          pick -= siteWeights[index];
+          if (pick <= 0) { site = index; break; }
+        }
+      }
       const p = sources[site];
       this.state[slot] = 1; this.site[slot] = site;
       this.x[slot] = p.x; this.y[slot] = p.y; this.z[slot] = p.z;

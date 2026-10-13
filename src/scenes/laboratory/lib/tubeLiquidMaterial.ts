@@ -152,11 +152,11 @@ float dyeHalo = 0.0;
 float tracerLayer = 0.0;
 float tracerJet = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
-  // Dissolved Cu(II) is present through the one-millilitre pool even when
-  // the near-wall voxel is still clear. Keep the field's stronger local
-  // filaments on top of this gradually growing body colour.
-  localMix = clamp(max(copperField(vTubePoint),
-    0.82 * smoothstep(0.015, 0.82, p)), 0.0, 1.0);
+  // The body colour follows actual dissolved Cu(II), leaving clear channels
+  // between concentrated parcels. Its full authored strength is still 0.82.
+  float blue = copperField(vTubePoint);
+  localMix = clamp(blue + 0.82 * smoothstep(0.015, 0.82, p)
+    * smoothstep(0.015, 0.25, blue), 0.0, 1.0);
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   // AgCl scattering follows the conserved fine suspension volume.
   vec3 uvw = clamp((vTubePoint - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);

@@ -209,7 +209,7 @@ describe("closed 3D Cu(II) field", () => {
     field.dispose();
   });
 
-  it("moves bubble wake parcels upward without creating or losing Cu(II)", () => {
+  it("moves Cu(II) through bubble-driven liquid flow without changing its mass", () => {
     const field = new TubeVolumeField("LOW", 0.007, 0, 0.055,
       [new THREE.Vector3(0, 0.005, 0)]);
     field.advance(0.05, 0.5, up, 0.0233);
@@ -230,5 +230,78 @@ describe("closed 3D Cu(II) field", () => {
     });
     expect(upper).toBeGreaterThan(0);
     field.dispose();
+  });
+
+  it("uses rising bubbles to change the shared velocity and Cu(II) distribution", () => {
+    const source = [new THREE.Vector3(0.001, 0.007, 0)];
+    const dryFlow = new TubeVolumeField("LOW", 0.007, 0, 0.055, source);
+    const bubbleFlow = new TubeVolumeField("LOW", 0.007, 0, 0.055, source);
+    const bubbles = { state: new Uint8Array([2, 2]),
+      x: new Float32Array([0.001, -0.001]), y: new Float32Array(2),
+      z: new Float32Array([0, 0.001]), size: new Float32Array([0.0006, 0.0004]) };
+    const center = new THREE.Vector3();
+    for (let step = 0; step < 240; step++) {
+      bubbles.y[0] = 0.007 + (step % 25) * 0.00035;
+      bubbles.y[1] = 0.009 + ((step + 12) % 25) * 0.00035;
+      const progress = Math.min(0.35, step * 0.005);
+      dryFlow.advance(0.05, progress, up, 0.05, 0.2);
+      bubbleFlow.advance(0.05, progress, up, 0.05, 0.2, 0,
+        undefined, undefined, bubbles, center);
+    }
+    const upper = (field: TubeVolumeField) => {
+      let amount = 0;
+      field.species["Cu2+"].values.forEach((value, index) => {
+        const y = Math.floor(index / field.mask.nx) % field.mask.ny;
+        if (y >= 6) amount += value;
+      });
+      return amount;
+    };
+    expect(bubbleFlow.copperII).toBeCloseTo(dryFlow.copperII, 9);
+    expect(bubbleFlow.flowSolver.diagnostics().energy)
+      .toBeGreaterThan(dryFlow.flowSolver.diagnostics().energy);
+    expect(upper(bubbleFlow)).toBeGreaterThan(upper(dryFlow));
+    dryFlow.dispose(); bubbleFlow.dispose();
+  });
+
+  it("places copper sources around both faces of a wetted granule", () => {
+    const radius = 0.007;
+    const sources = Array.from({ length: 24 }, (_, k) => {
+      const y = 1 - 2 * (k + 0.5) / 24;
+      const angle = k * Math.PI * (3 - Math.sqrt(5));
+      const planar = Math.sqrt(1 - y * y);
+      return new THREE.Vector3(0.003 * planar * Math.cos(angle),
+        0.007 + 0.003 * y, 0.003 * planar * Math.sin(angle));
+    });
+    const field = new TubeVolumeField("LOW", radius, 0, 0.055, sources);
+    field.setSources(sources);
+    field.advance(0.05, 0.1, up, 0.05);
+    const cells = Reflect.get(field, "sourceCells") as number[];
+    const depths = cells.map(i => Math.floor(i / (field.mask.nx * field.mask.ny)));
+    expect(Math.min(...depths)).toBeLessThan(field.mask.nz / 2);
+    expect(Math.max(...depths)).toBeGreaterThan(field.mask.nz / 2);
+    for (const i of cells) expect(field.mask.data[i]).toBe(1);
+    field.dispose();
+  });
+
+  it("responds to tube orientation through the same liquid field", () => {
+    const sources = [new THREE.Vector3(0.002, 0.008, 0),
+      new THREE.Vector3(-0.002, 0.009, 0)];
+    const still = new TubeVolumeField("LOW", 0.007, 0, 0.055, sources);
+    const moved = new TubeVolumeField("LOW", 0.007, 0, 0.055, sources);
+    const tilted = new THREE.Vector3(0.35, 0.93, 0.1).normalize();
+    for (let step = 0; step < 90; step++) {
+      const progress = Math.min(0.35, step * 0.007);
+      still.advance(0.05, progress, up, 0.048, 0.3);
+      moved.advance(0.05, progress, step < 20 ? up : tilted,
+        0.048, 0.3, 0, undefined,
+        new THREE.Vector3(step < 20 ? 0 : 0.002, 0, 0));
+    }
+    expect(moved.copperII).toBeCloseTo(still.copperII, 9);
+    let difference = 0;
+    for (let i = 0; i < moved.species["Cu2+"].values.length; i++)
+      difference += Math.abs(moved.species["Cu2+"].values[i]
+        - still.species["Cu2+"].values[i]);
+    expect(difference).toBeGreaterThan(0.01);
+    still.dispose(); moved.dispose();
   });
 });

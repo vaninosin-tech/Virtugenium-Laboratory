@@ -6,13 +6,20 @@ export function tubeVisualFill(volumeMl: number): number {
   return Number.isFinite(volumeMl) ? Math.max(0, Math.min(1, volumeMl / 2.5)) : 0;
 }
 export type TubeAmount = { volumeMl: number; species: Record<string, number>; copper: number };
-const tubes = new Map<string, TubeAmount>();
-const copperProgress = new Map<string, number>();
-const bariumExtent = new Map<string, number>();
-const silverExtent = new Map<string, number>();
-const permanganateExtent = new Map<string, number>();
+type AmountRegistry = {
+  tubes: Map<string, TubeAmount>; seededContents: Map<string, Set<string>>;
+  copperProgress: Map<string, number>; bariumExtent: Map<string, number>;
+  silverExtent: Map<string, number>; permanganateExtent: Map<string, number>;
+};
+const registryKey = Symbol.for("virtugenium.tubeAmounts");
+const globalRegistry = globalThis as unknown as Record<symbol, AmountRegistry | undefined>;
+const registry = globalRegistry[registryKey] ??= {
+  tubes: new Map(), seededContents: new Map(), copperProgress: new Map(),
+  bariumExtent: new Map(), silverExtent: new Map(), permanganateExtent: new Map(),
+};
+const { tubes, seededContents, copperProgress, bariumExtent, silverExtent, permanganateExtent } = registry;
 const initial: Record<string, { ml: number; species?: Record<string, number>; copper?: number }> = {
-  cu: { ml: 0, copper: 3 }, hno3: { ml: 1, species: { HNO3: 4.4 } },
+  cu: { ml: 2.5, copper: 3 }, hno3: { ml: 2.5, species: { HNO3: 4.4 } },
   agno3: { ml: 2.5, species: { "Ag+": 1.15 } },
   nacl: { ml: 1, species: { "Cl-": 1 } },
   bacl2: { ml: 2.5, species: { "Ba2+": 1.1 } },
@@ -28,9 +35,11 @@ export function tubeAmount(tubeId: string): TubeAmount {
 }
 /** Seed contents that predate this layer, including sandbox presets. */
 export function seedTubeAmounts(tubeId: string, contents: readonly string[]) {
-  if (tubes.has(tubeId)) return tubeAmount(tubeId);
   const state = tubeAmount(tubeId);
-  for (const id of contents) deliver(tubeId, id, initial[id]?.ml ?? 0, true);
+  for (const id of contents) {
+    if (seededContents.get(tubeId)?.has(id)) continue;
+    deliver(tubeId, id, initial[id]?.ml ?? 0, true);
+  }
   return state;
 }
 /** Deliver at most the remaining capacity. Returns the actual liquid admitted. */
@@ -38,7 +47,13 @@ export function deliver(tubeId: string, reagentId: string, ml: number, seed = fa
   const state = tubeAmount(tubeId);
   const recipe = initial[reagentId];
   if (!recipe || !Number.isFinite(ml) || ml < 0) return 0;
+  if (seed || ml > 0) {
+    let seen = seededContents.get(tubeId);
+    if (!seen) { seen = new Set<string>(); seededContents.set(tubeId, seen); }
+    seen.add(reagentId);
+  }
   if (recipe.copper) {
+    state.volumeMl = Math.min(TUBE_CAPACITY_ML, Math.max(state.volumeMl, recipe.ml));
     if (seed || ml > 0) state.copper = Math.max(state.copper, recipe.copper);
     return 0;
   }
@@ -96,9 +111,11 @@ export function syncPermanganateExtent(tubeId: string, extent: number) {
   permanganateExtent.set(tubeId, (permanganateExtent.get(tubeId) ?? 0) + delta);
 }
 export function clearTubeAmount(tubeId: string) {
+  seededContents.delete(tubeId);
   tubes.delete(tubeId); copperProgress.delete(tubeId); bariumExtent.delete(tubeId); silverExtent.delete(tubeId); permanganateExtent.delete(tubeId);
 }
 export function resetTubeAmounts() {
+  seededContents.clear();
   tubes.clear(); copperProgress.clear(); bariumExtent.clear(); silverExtent.clear(); permanganateExtent.clear();
 }
 if (import.meta.env.DEV && typeof window !== "undefined")

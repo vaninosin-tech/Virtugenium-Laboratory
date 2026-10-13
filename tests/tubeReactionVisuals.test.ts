@@ -152,7 +152,7 @@ describe("tube reaction rendering contract", () => {
     expect(f.get("TubeRefractedBackdrop").visible).toBe(false);
   });
 
-  it("multiplies coloured transmission before drawing copper and glass", () => {
+  it("multiplies Cu(II) transmission after the liquid and copper, before glass", () => {
     const f = fixture("copper-nitric", true);
     f.update(chemistry(0.6));
     const wall = f.get("TubeAbsorptionWall");
@@ -166,8 +166,9 @@ describe("tube reaction rendering contract", () => {
     expect(material.blendDst).toBe(THREE.SrcColorFactor);
     expect(material.depthWrite).toBe(false);
     expect(material.toneMapped).toBe(false);
-    expect(wall.renderOrder).toBeLessThan(f.copper!.children[0].renderOrder);
-    expect(f.copper!.children[0].renderOrder).toBeLessThan(f.get("Tube_Glass").renderOrder);
+    expect(f.copper!.children[0].renderOrder).toBeLessThan(f.volume.renderOrder);
+    expect(f.volume.renderOrder).toBeLessThan(wall.renderOrder);
+    expect(wall.renderOrder).toBeLessThan(f.get("Tube_Glass").renderOrder);
     expect(((f.copper!.children[0] as THREE.Mesh).material as THREE.Material).transparent).toBe(true);
     f.update(chemistry(0));
     expect(wall.visible).toBe(false);
@@ -177,6 +178,7 @@ describe("tube reaction rendering contract", () => {
     const f = fixture(null, false, false, false, REAGENTS.kmno4.contentsColor);
     f.update(chemistry(0));
     expect(f.get("TubeAbsorptionWall").visible).toBe(true);
+    expect(f.get("TubeAbsorptionWall").renderOrder).toBe(0.5);
     expect(f.get("TubeAbsorptionSurface").visible).toBe(true);
     expect(f.baseline.uniforms.uReactionKind.value).toBe(4);
     f.update(chemistry(1));

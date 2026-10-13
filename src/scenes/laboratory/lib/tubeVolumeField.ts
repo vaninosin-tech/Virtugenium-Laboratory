@@ -1,4 +1,4 @@
-﻿import * as THREE from "three";
+import * as THREE from "three";
 import { copperReactionState, type CopperReactionState } from "./tubeReactions";
 import type { TemperatureField } from "./tubeTemperatureField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
@@ -52,6 +52,10 @@ export class LiquidMask {
     for (const obstacle of this.obstacles)
       if (p.distanceToSquared(obstacle.center) < obstacle.radius * obstacle.radius) return false;
     return true;
+  }
+  surfaceIsWet(p: THREE.Vector3) {
+    return p.y >= this.bottom && p.y <= this.bottom + this.height
+      && p.dot(this.up) <= this.level;
   }
   setObstacles(obstacles: { center: THREE.Vector3; radius: number }[]) {
     this.obstacles = obstacles;
@@ -131,8 +135,7 @@ export class VelocityField {
     const fineZ = -fine * 10.1 / r * Math.sin(fx) * Math.sin(fy) * Math.sin(fz);
     // Two travelling convection rolls are curls of horizontal vector
     // potentials. They bend liquid parcels into neighbouring up/down lanes.
-    const roll = 0.00005 + heat * 0.0015 + this.contributions.bubbles * 0.00028
-      + this.contributions.gas * 0.00012;
+    const roll = 0.00005 + heat * 0.0015;
     const phase1 = 4.2 * X + 2.4 * Z + time * 0.21;
     const phase2 = -2.1 * X + 4.1 * Z - time * 0.17;
     const a1 = roll * r / 4.2, a2 = roll * r / 4.1;
@@ -140,15 +143,6 @@ export class VelocityField {
     const rollY = -roll * Math.cos(phase1) * Math.sin(5.1 * Y)
       + roll * Math.cos(phase2) * Math.sin(4.4 * Y);
     const rollZ = -a2 * 4.4 / h * Math.sin(phase2) * Math.cos(4.4 * Y);
-    // Smaller convection cells split the broad rise into moving up and down
-    // lanes. Their curl transports the concentration rather than drawing it.
-    const lanes = heat * 0.0018 + this.contributions.bubbles * 0.0006;
-    const lane1 = 8.0 * X - 0.6 * Z - time * 0.43 * motion;
-    const lane2 = 0.5 * X + 8.4 * Z + time * 0.31 * motion;
-    const laneX = lanes * r / h * 3.7 / 8.0 * Math.sin(lane1) * Math.cos(3.7 * Y);
-    const laneY = -lanes * (Math.cos(lane1) * Math.sin(3.7 * Y)
-      + Math.cos(lane2) * Math.sin(3.2 * Y));
-    const laneZ = lanes * r / h * 3.2 / 8.4 * Math.sin(lane2) * Math.cos(3.2 * Y);
     // Curl of (Zp, 0, -Xp), with a wandering centre. The broad updraft
     // reaches the copper surface; the return flow runs along the glass.
     const bend = 0.14 + heat * 0.14;
@@ -171,10 +165,10 @@ export class VelocityField {
     // The rising filament turns sideways at the closed liquid surface.
     // Reverse the source-directed lateral drift there instead of letting
     // colour pile up in a single top voxel row.
-    const vx = rollX + laneX - 0.8 * dSdy - 0.7 * dSdz - fineY - fineZ - U * plumeY + cxY * plume
+    const vx = rollX - 0.8 * dSdy - 0.7 * dSdz - fineY - fineZ - U * plumeY + cxY * plume
       - accel.x * 0.0001 / h;
-    const vy = rollY + laneY + dSdz + 0.8 * dSdx + fineZ + fineX + plume * (2 - 4.0 * radial2);
-    const vz = rollZ + laneZ + 0.7 * dSdx - dSdy + fineX - fineY - V * plumeY + czY * plume
+    const vy = rollY + dSdz + 0.8 * dSdx + fineZ + fineX + plume * (2 - 4.0 * radial2);
+    const vz = rollZ + 0.7 * dSdx - dSdy + fineX - fineY - V * plumeY + czY * plume
       + accel.z * 0.0001 / r;
     const g = this.gravityUp;
     this.result[0] = vx + vy * g.x;
@@ -196,11 +190,12 @@ export class TubeVolumeField {
   private pixels: Float32Array;
   private readonly sources: THREE.Vector3[];
   private readonly sourceCells: number[] = [];
+  private sourcePatchWeights = new Float32Array(0);
+  private sourcePatchCentres: THREE.Vector3[] = [];
+  private sourceReactionWeights = new Float64Array(0);
   private readonly nearest: Int32Array;
   private readonly queue: Int32Array;
   private readonly wake: Float32Array;
-  private readonly wakeCargo: Float64Array;
-  private readonly wakeCell: Int32Array;
   private readonly ambient = new Float64Array(3);
   private injectionDirty = true;
   private readonly injectionPoint = new THREE.Vector3();
@@ -235,8 +230,6 @@ export class TubeVolumeField {
     this.sources = sources.map(p => p.clone());
     const n = this.mask.data.length;
     this.wake = new Float32Array(n);
-    this.wakeCargo = new Float64Array(384);
-    this.wakeCell = new Int32Array(384); this.wakeCell.fill(-1);
     this.nearest = new Int32Array(n); this.queue = new Int32Array(n);
     this.prevPixels = new Float32Array(n); this.pixels = new Float32Array(n);
     const texture = (pixels: Float32Array) => {
@@ -252,6 +245,18 @@ export class TubeVolumeField {
 
   get alpha() { return clamp(this.accumulator / this.step, 0, 1); }
   get copperII() { return this.species["Cu2+"].total; }
+  private patchPulse(patch: number) {
+    return 0.04 + Math.pow(0.5 + 0.5 * Math.sin(this.time * (0.8 + patch * 0.17)
+      + patch * 2.43), 3);
+  }
+  surfaceActivityAt(point: THREE.Vector3) {
+    const width2 = (this.mask.radius * 0.38) ** 2;
+    let activity = 0.01;
+    for (let patch = 0; patch < this.sourcePatchCentres.length; patch++)
+      activity += this.patchPulse(patch)
+        * Math.exp(-point.distanceToSquared(this.sourcePatchCentres[patch]) / width2);
+    return activity;
+  }
   setSources(points: readonly THREE.Vector3[], count = points.length) {
     if (this.sources.length !== count) this.injectionDirty = true;
     const tolerance = Math.min(2 * this.mask.radius / this.mask.nx,
@@ -341,7 +346,7 @@ export class TubeVolumeField {
             const iy = Math.max(0, Math.min(m.ny - 1, Math.floor((y - m.bottom) / m.height * m.ny)));
             const iz = Math.max(0, Math.min(m.nz - 1, Math.floor((z / m.radius + 1) * m.nz / 2)));
             const wake = this.wake[m.index(ix, iy, iz)];
-            const wakeSpeed = Math.min(0.0035, wake * 0.0015);
+            const wakeSpeed = Math.min(0.2, wake * 0.5);
             this.ambient[0] = v[0] * 5 + up.x * wakeSpeed;
             const acid = this.species.HNO3.values[m.index(ix, iy, iz)];
             const acidContrast = Math.min(2, acid * m.activeCount / 4.4);
@@ -359,9 +364,6 @@ export class TubeVolumeField {
       this.flowSolver.transport(this.species["Cu2+"].values, this.step,
         TUBE_SIMULATION.field.baseDiffusivity + this.velocity.contributions.buoyancy * TUBE_SIMULATION.field.heatDiffusivity);
       this.profile.copperMs += performance.now() - stamp;
-      stamp = performance.now();
-      this.advectBubbleCargo(bubbles, bubbleCenter);
-      this.profile.bubblesMs += performance.now() - stamp;
       stamp = performance.now();
       this.flowSolver.transport(this.species.HNO3.values, this.step, 0.000008);
       this.profile.acidMs += performance.now() - stamp;
@@ -382,7 +384,8 @@ export class TubeVolumeField {
     if (!bubbles || !center) return;
     const m = this.mask;
     for (let b = 0; b < bubbles.state.length; b++) {
-      if (bubbles.state[b] !== 2) continue;
+      const state = bubbles.state[b];
+      if (state !== 1 && state !== 2) continue;
       const x = Math.floor(((bubbles.x[b] - center.x) / m.radius + 1) * m.nx / 2);
       const y = Math.floor((bubbles.y[b] - m.bottom) / m.height * m.ny);
       const z = Math.floor(((bubbles.z[b] - center.z) / m.radius + 1) * m.nz / 2);
@@ -391,67 +394,11 @@ export class TubeVolumeField {
           const ix = x + dx, iy = y + dy, iz = z + dz;
           if (ix < 0 || ix >= m.nx || iy < 0 || iy >= m.ny || iz < 0 || iz >= m.nz) continue;
           const i = m.index(ix, iy, iz);
-          if (m.data[i]) this.wake[i] += 0.12 * Math.exp(-(dx * dx + dz * dz + dy * dy * 0.5));
+          // Growing attached bubbles displace the adjacent liquid before
+          // detachment. A released bubble produces a stronger moving wake.
+          if (m.data[i]) this.wake[i] += (state === 1 ? 0.045 : 0.12)
+            * Math.exp(-(dx * dx + dz * dz + dy * dy * 0.5));
         }
-    }
-  }
-
-  /** Resolved bubbles carry a small local parcel; every transfer stays inside the Cu field. */
-  private advectBubbleCargo(bubbles?: RisingBubbleSamples, center?: THREE.Vector3) {
-    if (!bubbles || !center) return;
-    const values = this.species["Cu2+"].values;
-    const m = this.mask;
-    this.rebuildSourceCells();
-    for (let b = 0; b < Math.min(bubbles.state.length, this.wakeCell.length); b++) {
-      if (bubbles.state[b] !== 2) {
-        this.wakeCell[b] = -1; this.wakeCargo[b] = 0;
-        continue;
-      }
-      const x = bubbles.x[b] - center.x, y = bubbles.y[b], z = bubbles.z[b] - center.z;
-      const ix = Math.max(0, Math.min(m.nx - 1, Math.floor((x / m.radius + 1) * m.nx / 2)));
-      const iy = Math.max(0, Math.min(m.ny - 1, Math.floor((y - m.bottom) / m.height * m.ny)));
-      const iz = Math.max(0, Math.min(m.nz - 1, Math.floor((z / m.radius + 1) * m.nz / 2)));
-      const raw = m.index(ix, iy, iz);
-      const target = m.data[raw] ? raw : this.nearestWet(this.injectionPoint.set(x, y, z));
-      if (target < 0) continue;
-      const prior = this.wakeCell[b];
-      if (prior < 0) {
-        let source = -1, distance = Infinity;
-        for (const i of this.sourceCells) {
-          const p = m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
-            Math.floor(i / (m.nx * m.ny)), this.injectionPoint);
-          const d = (p.x - x) ** 2 + (p.z - z) ** 2;
-          if (d < distance && values[i] > 0) { distance = d; source = i; }
-        }
-        if (source < 0) continue;
-        const sx = source % m.nx, sy = Math.floor(source / m.nx) % m.ny;
-        const sz = Math.floor(source / (m.nx * m.ny));
-        let separation = Infinity;
-        for (let other = 0; other < Math.min(bubbles.state.length, this.wakeCargo.length); other++) {
-          if (other === b || bubbles.state[other] !== 2 || this.wakeCargo[other] <= 1e-6) continue;
-          separation = Math.min(separation, Math.hypot(bubbles.x[other] - bubbles.x[b],
-            bubbles.z[other] - bubbles.z[b]));
-        }
-        const distinctWake = Math.min(1, separation / (3 * m.radius / m.nx));
-        const capacity = Math.min(0.01, 0.01 * (bubbles.size[b] / (m.radius * 0.13)) ** 3)
-          * distinctWake;
-        let pickup = 0;
-        for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) {
-            const px = sx + dx, py = sy + dy, pz = sz + dz;
-            if (px < 0 || px >= m.nx || py < 0 || py >= m.ny || pz < 0 || pz >= m.nz) continue;
-            const parcel = m.index(px, py, pz);
-            if (!m.data[parcel] || pickup >= capacity) continue;
-            const moved = Math.min(capacity - pickup, values[parcel] * 0.32);
-            values[parcel] -= moved; pickup += moved;
-          }
-        values[target] += pickup;
-        this.wakeCargo[b] = pickup; this.wakeCell[b] = target;
-      } else {
-        const move = Math.min(values[prior], this.wakeCargo[b]) * 0.91;
-        values[prior] -= move; values[target] += move;
-        this.wakeCargo[b] = move; this.wakeCell[b] = target;
-      }
     }
   }
 
@@ -487,14 +434,10 @@ export class TubeVolumeField {
 
   private nearestWet(point: THREE.Vector3) {
     const m = this.mask;
-    let nearest = -1, distance = Infinity;
-    for (let a = 0; a < m.activeCount; a++) {
-      const i = m.active[a];
-      const d = m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
-        Math.floor(i / (m.nx * m.ny)), this.injectionPoint).distanceToSquared(point);
-      if (d < distance) { distance = d; nearest = i; }
-    }
-    return nearest;
+    const x = clamp(Math.floor((point.x / m.radius + 1) * m.nx / 2), 0, m.nx - 1);
+    const y = clamp(Math.floor((point.y - m.bottom) / m.height * m.ny), 0, m.ny - 1);
+    const z = clamp(Math.floor((point.z / m.radius + 1) * m.nz / 2), 0, m.nz - 1);
+    return this.nearest[m.index(x, y, z)];
   }
 
   private rebuildSourceCells() {
@@ -511,7 +454,8 @@ export class TubeVolumeField {
       centre.divideScalar(end - start);
       for (let s = start; s < end; s++) {
         const surface = this.sources[s];
-        const outward = this.injectionPoint.subVectors(surface, centre).normalize();
+        if (!m.surfaceIsWet(surface)) continue;
+        const outward = surface.clone().sub(centre).normalize();
         const adjacent = surface.clone().addScaledVector(outward, cell * 0.6);
         const i = this.nearestWet(adjacent);
         if (i < 0) continue;
@@ -525,8 +469,44 @@ export class TubeVolumeField {
           if (!m.data[cellIndex] || seen.has(cellIndex)) continue;
           const point = m.point(x, y, z, this.injectionPoint);
           if (point.distanceToSquared(surface) > (cell * 1.25) ** 2) continue;
+          if (end - start >= 4 && point.clone().sub(centre).dot(outward)
+            < surface.clone().sub(centre).dot(outward) - cell * 0.1) continue;
           seen.add(cellIndex); this.sourceCells.push(cellIndex);
         }
+      }
+    }
+    this.sourcePatchWeights = new Float32Array(this.sourceCells.length * 6);
+    this.sourceReactionWeights = new Float64Array(this.sourceCells.length);
+    if (!this.sourceCells.length) {
+      this.sourcePatchCentres = [];
+      this.injectionDirty = false;
+      return;
+    }
+    // Surface chemistry is patchy in 3D. Patch centres come from actual wet
+    // copper-adjacent cells, so none are tied to the camera or rear wall.
+    const surface = this.sourceCells.map(i => m.point(i % m.nx,
+      Math.floor(i / m.nx) % m.ny, Math.floor(i / (m.nx * m.ny))));
+    const meanY = surface.reduce((sum, point) => sum + point.y, 0) / surface.length;
+    const exposed = surface.filter(point => point.y >= meanY - m.radius * 0.12);
+    const candidates = exposed.length >= 6 ? exposed : surface;
+    const centres: THREE.Vector3[] = [candidates[Math.floor(candidates.length * 0.17)]];
+    while (centres.length < Math.min(6, candidates.length)) {
+      let best = candidates[0], spread = -1;
+      for (const point of candidates) {
+        const distance = Math.min(...centres.map(centre => point.distanceToSquared(centre)));
+        if (distance > spread) { best = point; spread = distance; }
+      }
+      centres.push(best);
+    }
+    this.sourcePatchCentres = centres;
+    const width = m.radius * 0.38;
+    for (let s = 0; s < this.sourceCells.length; s++) {
+      const i = this.sourceCells[s];
+      const point = m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
+        Math.floor(i / (m.nx * m.ny)), this.injectionPoint);
+      for (let patch = 0; patch < centres.length; patch++) {
+        const distance2 = point.distanceToSquared(centres[patch]);
+        this.sourcePatchWeights[s * 6 + patch] = Math.exp(-distance2 / (width * width));
       }
     }
     this.injectionDirty = false;
@@ -619,12 +599,26 @@ export class TubeVolumeField {
       this.reaction.acid / 4.4, available / 4.4);
     if (!(d > 0)) return 0;
     const copper = this.species["Cu2+"].values;
-    for (const i of this.sourceCells) {
+    // Irregular wet surface patches pulse independently, with one normalized
+    // Cu(II) budget. Activity changes position without creating extra mass.
+    const weights = this.sourceReactionWeights;
+    const pulses = Array.from({ length: 6 }, (_, patch) => this.patchPulse(patch));
+    let weightSum = 0;
+    for (let s = 0; s < this.sourceCells.length; s++) {
+      let patch = 0;
+      for (let active = 0; active < 6; active++)
+        patch += this.sourcePatchWeights[s * 6 + active] * pulses[active];
+      weights[s] = 0.01 + patch;
+      weightSum += weights[s];
+    }
+    for (let s = 0; s < this.sourceCells.length; s++) {
+      const i = this.sourceCells[s];
       if (acid[i] <= threshold) continue;
       const fraction = acid[i] / available;
       acid[i] -= 4.4 * d * fraction;
-      copper[i] += 1.65 * d * fraction;
     }
+    for (let s = 0; s < this.sourceCells.length; s++)
+      copper[this.sourceCells[s]] += 1.65 * d * weights[s] / weightSum;
     Object.assign(this.reaction, copperReactionState(this.reaction.extent + d));
     return d;
   }

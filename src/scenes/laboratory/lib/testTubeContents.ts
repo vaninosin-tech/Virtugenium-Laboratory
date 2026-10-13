@@ -206,8 +206,16 @@ export function fillTestTubeContents(
       return;
     }
 
-    // Copper alone, or an empty tube: the shared volume mesh would read as a
-    // solid plug of colour, so it stays hidden and the granules speak for it.
+    if (copper) {
+      const material = new TubeLiquidMaterial(object.geometry, {
+        color: "#eef6fb", opacity: 0.35,
+      });
+      object.material = material;
+      object.visible = true;
+      ownedMaterials.push(material);
+      return;
+    }
+    // An empty tube has no liquid volume.
     object.visible = false;
   });
 

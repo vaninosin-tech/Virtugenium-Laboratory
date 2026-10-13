@@ -479,8 +479,8 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const effectiveRadius = tubeEffectiveRadius(size.y);
   const fieldHeight = Math.max(size.y, tubeLiquidHeight(5, effectiveRadius) + radius * 0.25);
   const renderHeight = fieldHeight;
-  // Experiment 1 starts with solid copper and receives one 1 ml acid portion.
-  const copperHeight = tubeLiquidHeight(1, effectiveRadius) + radius * 0.2;
+  // Include the starting 2.5 ml and the full 5 ml capacity in the Cu field.
+  const copperHeight = fieldHeight;
   const baseline = volume.material;
   const originalGeometry = volume.geometry;
   const base = Array.isArray(baseline) ? baseline[0] : baseline;
@@ -596,7 +596,9 @@ outgoingLight *= mix(1.0, 0.80, dyeWindow);`);
     absorptionWall.name = "TubeAbsorptionWall";
     absorptionCap.name = "TubeAbsorptionSurface";
     absorptionWall.visible = absorptionCap.visible = false;
-    absorptionWall.renderOrder = absorptionCap.renderOrder = 0.5;
+    // Multiply the already composited liquid and copper by the 3D Cu(II)
+    // transmission. Earlier order let the clear liquid repaint the plumes.
+    absorptionWall.renderOrder = absorptionCap.renderOrder = kind === "copper-nitric" ? 3.25 : 0.5;
     absorptionCap.frustumCulled = false;
     absorptionWall.raycast = absorptionCap.raycast = () => {};
     group.add(absorptionWall, absorptionCap);
@@ -964,9 +966,9 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         // side. Otherwise draw order makes them appear over the metal.
         object.material.depthWrite = true;
         object.material.needsUpdate = true;
-        // Composite opaque metal after the coloured liquid wall so the blue
-        // body does not wash out the copper's facets and specular highlights.
-        object.renderOrder = 3.5;
+        // The absorption pass must filter the liquid in front of the metal.
+        // Depth writing by the metal still hides the far-side bubbles.
+        object.renderOrder = 0.25;
       }
     }
   });
@@ -1544,7 +1546,8 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         }
       }
       noBubbles.advance(dt, 2 * deltaExtent, Math.pow(copperGranuleRadiusScale(p), 2),
-        wettedSites, gravity, level.value, center, radius, copperField?.velocity, time, popSurface);
+        wettedSites, gravity, level.value, center, radius, copperField?.velocity, time, popSurface,
+        copperField ? point => copperField.surfaceActivityAt(point) : undefined);
       if (copperField) copperField.velocity.contributions.bubbles = Math.min(1, noBubbles.activeRising / 24);
       // Even the slow room-temperature reaction coats the copper with fine
       // bubbles; heating mainly makes them grow and detach faster.
