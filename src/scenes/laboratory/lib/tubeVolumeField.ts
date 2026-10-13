@@ -560,6 +560,33 @@ export class TubeVolumeField {
     this.acidDelivered = total;
     this.jetPending += 2 * delta;
     const m = this.mask, values = this.species.HNO3.values;
+    // This is a pour into an otherwise dry copper tube. The stream strikes
+    // the wall above the numerical liquid surface, then drains to the metal.
+    // Depositing everything at the inlet left almost no acid in the copper's
+    // source cells for the entire cold observation, despite a full 1 ml pour.
+    this.rebuildSourceCells();
+    const wetting = this.sourceCells.length ? 0.78 : 0;
+    if (wetting) {
+      let low = Infinity, high = -Infinity;
+      for (const i of this.sourceCells) {
+        const y = Math.floor(i / m.nx) % m.ny;
+        low = Math.min(low, y); high = Math.max(high, y);
+      }
+      let weightSum = 0;
+      const sourceWeights = this.sourceCells.map(i => {
+        const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
+        const z = Math.floor(i / (m.nx * m.ny));
+        // All wetted faces emit Cu(II). The upper face gets more acid and
+        // slight azimuthal variation breaks a symmetric halo.
+        const upper = (y - low) / Math.max(1, high - low);
+        const weight = (0.45 + 1.6 * upper) *
+          (0.8 + 0.2 * Math.sin(x * 2.17 + z * 1.31));
+        weightSum += weight;
+        return weight;
+      });
+      for (let n = 0; n < this.sourceCells.length; n++)
+        values[this.sourceCells[n]] += 4.4 * delta * wetting * sourceWeights[n] / weightSum;
+    }
     const dx = 2 * m.radius / m.nx, dy = m.height / m.ny;
     const weights = new Float64Array(m.data.length);
     let sum = 0;
@@ -574,11 +601,11 @@ export class TubeVolumeField {
       weights[i] = w; sum += w;
     }
     if (sum > 1e-12) for (let a = 0; a < m.activeCount; a++) {
-      const i = m.active[a]; values[i] += 4.4 * delta * weights[i] / sum;
+      const i = m.active[a]; values[i] += 4.4 * delta * (1 - wetting) * weights[i] / sum;
     }
     else {
       const i = this.nearestWet(this.acidInlet);
-      if (i >= 0) values[i] += 4.4 * delta;
+      if (i >= 0) values[i] += 4.4 * delta * (1 - wetting);
     }
   }
 

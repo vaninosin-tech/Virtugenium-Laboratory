@@ -152,7 +152,11 @@ float dyeHalo = 0.0;
 float tracerLayer = 0.0;
 float tracerJet = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
-  localMix = copperField(vTubePoint);
+  // Dissolved Cu(II) is present through the one-millilitre pool even when
+  // the near-wall voxel is still clear. Keep the field's stronger local
+  // filaments on top of this gradually growing body colour.
+  localMix = clamp(max(copperField(vTubePoint),
+    0.62 * smoothstep(0.015, 0.82, p)), 0.0, 1.0);
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   // AgCl scattering follows the conserved fine suspension volume.
   vec3 uvw = clamp((vTubePoint - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);
@@ -167,8 +171,21 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   float radius = uCuBoundsSize.x * 0.5;
   float distance = max(0.0, (-b + sqrt(max(0.0, b * b + a *
     (radius * radius - dot(edge, edge))))) / a);
-  if (ray.y < -0.00001) distance = min(distance,
-    max(0.0, (uCuBoundsMin.y - vTubePoint.y) / ray.y));
+  // The cavity ends in a hemisphere. A flat bottom plane makes a long,
+  // overbright cloud path through the last few millimetres of the bowl.
+  if (ray.y < -0.00001) {
+    vec3 fromBowlCenter = vTubePoint - vec3(0.0, uCuBoundsMin.y + radius, 0.0);
+    float bowlB = dot(fromBowlCenter, ray);
+    float bowlDisc = bowlB * bowlB - dot(fromBowlCenter, fromBowlCenter) + radius * radius;
+    if (bowlDisc >= 0.0) {
+      float bowlExit = -bowlB + sqrt(bowlDisc);
+      if (bowlExit > 0.0 && vTubePoint.y + ray.y * bowlExit < uCuBoundsMin.y + radius)
+        distance = min(distance, bowlExit);
+    } else {
+      float rimExit = (uCuBoundsMin.y + radius - vTubePoint.y) / ray.y;
+      if (rimExit > 0.0) distance = min(distance, rimExit);
+    }
+  }
   float upRay = dot(uUp, ray);
   if (upRay > 0.00001) distance = min(distance,
     max(0.0, (uLevel - dot(uUp, vTubePoint)) / upRay));
@@ -300,7 +317,7 @@ if (uTracerMode > 0.5) {
 }
 // Permanganate absorbs green strongly even under the bright bench lights.
 // Override the neutral water lighting only where a dense tongue is present.
-if ((uReactionKind > 0.5 && uReactionKind < 1.5) || uReactionKind > 3.5) {
+if (uReactionKind > 3.5) {
   // Chromatic density comes from the multiplicative absorption pass. This
   // material contributes only the surface sheen and the moving meniscus.
   diffuseColor.a = clamp(0.035 + waterEdge * 0.11 + capRim * 0.11

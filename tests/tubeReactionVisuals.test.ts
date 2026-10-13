@@ -410,8 +410,8 @@ describe("tube reaction rendering contract", () => {
     expect(silverTop).toBeLessThan(tubeLiquidHeight(3.5, tubeEffectiveRadius(0.055)));
     expect(barium.get("TubePrecipitate").visible).toBe(false);
     expect(bariumBed.visible).toBe(false);
-    expect(bariumBed.material).toBeInstanceOf(THREE.MeshBasicMaterial);
-    expect((bariumBed.material as THREE.MeshBasicMaterial).color.getHexString()).toBe("d9dad7");
+    expect(bariumBed.material).toBeInstanceOf(THREE.MeshStandardMaterial);
+    expect((bariumBed.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("c7ccc9");
     expect((silver.get("TubeSediment").material as THREE.MeshBasicMaterial).color.getHexString()).toBe("f8f9f7");
     expect((silver.get("TubePrecipitate").material as THREE.MeshLambertMaterial).emissive.getHex()).toBe(0);
   });

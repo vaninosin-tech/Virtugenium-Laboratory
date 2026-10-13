@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { TubeVolumeField } from "./tubeVolumeField";
 import { copperReactionState } from "./tubeReactions";
+import { tubeLiquidHeight } from "./tubeLiquidLevel";
 
 const up = new THREE.Vector3(0, 1, 0);
 const make = () => new TubeVolumeField("LOW", 1, 0, 4,
@@ -163,6 +164,48 @@ describe("closed 3D Cu(II) field", () => {
     expect(field.copperII).toBeLessThanOrEqual(1.65);
     expect(field.copperII).toBeCloseTo(1.65 * field.reaction.extent, 8);
     expect(field.species.HNO3.total).toBeCloseTo(4.4 * (1 - field.reaction.extent), 8);
+    field.dispose();
+  });
+
+  it("wets a copper granule after a one millilitre pour against the upper wall", () => {
+    const radius = 0.007;
+    const level = tubeLiquidHeight(1, radius);
+    const sources = Array.from({ length: 24 }, (_, k) => {
+      const elevation = 1 - 2 * (k + 0.5) / 24;
+      const angle = k * Math.PI * (3 - Math.sqrt(5));
+      const radial = Math.sqrt(1 - elevation * elevation);
+      return new THREE.Vector3(0.003 * radial * Math.cos(angle),
+        0.005 + 0.003 * elevation, 0.003 * radial * Math.sin(angle));
+    });
+    const field = new TubeVolumeField("LOW", radius, 0, level + radius * 0.2, sources);
+    field.setSources(sources);
+    const delivery = { inlet: new THREE.Vector3(radius * 0.93, 0.045, 0),
+      direction: new THREE.Vector3(0, -1, 0), deliveredMl: 0 };
+    delivery.deliveredMl = 0.2;
+    field.advance(0.05, 0, up, level, 0, 0,
+      undefined, undefined, undefined, undefined, delivery);
+    const sourceCells = Reflect.get(field, "sourceCells") as number[];
+    const acid = field.species.HNO3.values;
+    const halves = [0, 0], counts = [0, 0];
+    for (const i of sourceCells) {
+      const y = Math.floor(i / field.mask.nx) % field.mask.ny;
+      const half = y >= field.mask.ny * 0.2 ? 1 : 0;
+      halves[half] += acid[i]; counts[half]++;
+    }
+    expect(counts[0]).toBeGreaterThan(0);
+    expect(counts[1]).toBeGreaterThan(0);
+    expect(halves[1] / counts[1]).toBeGreaterThan(halves[0] / counts[0]);
+    const samples: number[] = [];
+    for (let frame = 1; frame <= 20 * 60; frame++) {
+      const seconds = frame / 20;
+      delivery.deliveredMl = Math.min(1, seconds / 2);
+      field.advance(0.05, Math.min(0.6, seconds * 0.01), up, level,
+        0.2, 0, undefined, undefined, undefined, undefined, delivery);
+      if ([15, 60].includes(seconds)) samples.push(field.copperII);
+    }
+    expect(samples[0]).toBeGreaterThan(0.05);
+    expect(samples[1]).toBeGreaterThan(0.4);
+    expect(field.species.HNO3.total + field.copperII * 4.4 / 1.65).toBeCloseTo(4.4, 6);
     field.dispose();
   });
 

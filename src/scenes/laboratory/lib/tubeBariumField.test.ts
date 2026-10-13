@@ -144,6 +144,9 @@ describe("BaSO4 R3 field", () => {
     expect(positions.getY(0)).toBeGreaterThan(shallow);
     expect(positions.getY(0)).toBeGreaterThan(0.0001);
     expect(positions.getY(0)).toBeLessThan(0.007 * 0.12);
+    const thickness = geometry.getAttribute("sedimentThickness");
+    expect(thickness.getX(0)).toBeGreaterThan(0);
+    expect(thickness.getX(14 * 41)).toBe(0);
     expect(geometry.index?.count).toBeGreaterThan(0);
     geometry.dispose();
   });

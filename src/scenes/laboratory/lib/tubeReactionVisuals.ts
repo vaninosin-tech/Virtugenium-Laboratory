@@ -239,7 +239,19 @@ vec3 transmitThroughTube(vec3 background) {
   float side = (-b + sqrt(max(0.0, b * b + a *
     (radius * radius - dot(vBackdropPoint.xz, vBackdropPoint.xz))))) / a;
   float distance = max(0.0, side);
-  if (ray.y < -0.00001) distance = min(distance, max(0.0, (bottom - vBackdropPoint.y) / ray.y));
+  if (ray.y < -0.00001) {
+    vec3 fromBowlCenter = vBackdropPoint - vec3(0.0, bottom + radius, 0.0);
+    float bowlB = dot(fromBowlCenter, ray);
+    float bowlDisc = bowlB * bowlB - dot(fromBowlCenter, fromBowlCenter) + radius * radius;
+    if (bowlDisc >= 0.0) {
+      float bowlExit = -bowlB + sqrt(bowlDisc);
+      if (bowlExit > 0.0 && vBackdropPoint.y + ray.y * bowlExit < bottom + radius)
+        distance = min(distance, bowlExit);
+    } else {
+      float rimExit = (bottom + radius - vBackdropPoint.y) / ray.y;
+      if (rimExit > 0.0) distance = min(distance, rimExit);
+    }
+  }
   float upRay = dot(uBackdropUp, ray);
   if (upRay > 0.00001) distance = min(distance,
     max(0.0, (uBackdropLevel - dot(uBackdropUp, vBackdropPoint)) / upRay));
@@ -445,6 +457,14 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   if (!cavity || !shell) return null;
   const volume = cavity;
   const glassShell = shell;
+  // The rounded glass bottom is a clear boundary, not an opaque white lens.
+  // Preserve the accepted optics of experiments 1, 2 and 4 unchanged.
+  const clearBottomOptics = kind === null || kind === "barium-sulfate";
+  const baseOptics = (glassShell.material as THREE.Material).userData.baseOptics as THREE.IUniform<number> | undefined;
+  if (baseOptics) baseOptics.value = clearBottomOptics ? 0 : 1;
+  const glassBackdrop = glassShell.getObjectByName("TubeGlassRefractedBackdrop") as THREE.Mesh | undefined;
+  const backdropGain = (glassBackdrop?.material as THREE.Material | undefined)?.userData.backdropGain as THREE.IUniform<number> | undefined;
+  if (backdropGain) backdropGain.value = clearBottomOptics ? 1 : 1.32;
   volume.geometry.computeBoundingBox();
   const box = volume.geometry.boundingBox!;
   const size = box.getSize(new THREE.Vector3());
@@ -698,7 +718,7 @@ float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
     for (let vertex = i; vertex < i + 3; vertex++) vertices.setXYZ(vertex, x, y, z);
   }
   curdGeometry.computeVertexNormals();
-  const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e8f7fa", transparent: true, opacity: 0.85, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
+  const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e8f7fa", transparent: true, opacity: 0.85, roughness: 0.04, metalness: 0, depthWrite: false, depthTest: true, side: THREE.DoubleSide });
   const pourAirMaterial = new THREE.MeshBasicMaterial({ color: "#e8f7fa", transparent: true,
     opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
   const flocMaterial = new THREE.MeshLambertMaterial({ color: "#f3f4f1", transparent: true,
@@ -841,13 +861,14 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   if (kind === "silver-chloride") flakes.geometry = curdGeometry;
   flakes.name = "TubePrecipitate";
   const bubbles = makePool(bubbleMaterial, NO_BUBBLE_CAPACITY);
+  bubbles.renderOrder = 3.75;
   bubbles.name = "TubeNOBubbles";
   const pourAir = makePool(pourAirMaterial, 12);
   pourAir.name = "TubePourAirBubbles";
   const attachedBubbles = makePool(bubbleMaterial, NO_BUBBLE_CAPACITY);
   // The copper is drawn after refraction; draw the adhering bubbles after it.
   // Depth testing still hides the bubbles on its far side.
-  attachedBubbles.renderOrder = 2;
+  attachedBubbles.renderOrder = 3.75;
   attachedBubbles.name = "TubeNOAttachedBubbles";
   const gas = makePool(gasMaterial);
   gas.geometry = gasGeometry;
@@ -863,11 +884,27 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   // the top, preserving the bowl profile instead of flattening the hemisphere.
   const bedGeometry = new BariumSedimentGeometry(radius, box.min.y);
   const silverBedGeometry = new SilverSedimentGeometry(radius, box.min.y);
-  const bedMaterial = new THREE.MeshBasicMaterial({
-    color: kind === "barium-sulfate" ? "#d9dad7" : "#f8f9f7",
-    toneMapped: kind === "barium-sulfate",
-    side: THREE.DoubleSide, depthWrite: true });
-  const bed = new THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>(bedGeometry, bedMaterial);
+  const bedMaterial = kind === "barium-sulfate"
+    ? new THREE.MeshStandardMaterial({ color: "#c7ccc9", roughness: 1,
+      metalness: 0, side: THREE.DoubleSide, transparent: true,
+      opacity: 0.38, depthWrite: false })
+    : new THREE.MeshBasicMaterial({ color: "#f8f9f7", toneMapped: false,
+      side: THREE.DoubleSide, depthWrite: true });
+  if (kind === "barium-sulfate") {
+    bedMaterial.onBeforeCompile = shader => {
+      shader.vertexShader = `attribute float sedimentThickness;
+varying float vSedimentThickness;
+${shader.vertexShader}`.replace("#include <begin_vertex>",
+        "#include <begin_vertex>\nvSedimentThickness = sedimentThickness;");
+      shader.fragmentShader = `varying float vSedimentThickness;
+${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
+        "#include <clipping_planes_fragment>\nif (vSedimentThickness < 0.00008) discard;")
+        .replace("#include <opaque_fragment>",
+          "outgoingLight = min(outgoingLight, vec3(0.58));\n#include <opaque_fragment>");
+    };
+    bedMaterial.customProgramCacheKey = () => "barium-sediment-film-v1";
+  }
+  const bed = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(bedGeometry, bedMaterial);
   bed.renderOrder = 5;
   bed.frustumCulled = false;
   bed.name = "TubeSediment";
@@ -915,15 +952,21 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   // their white solids. Their scattering is already handled by the liquid.
   const detachImmersion = kind === "silver-chloride" || kind === "barium-sulfate"
     ? [] : [immersion.attach(white), immersion.attach(bubbleMaterial)];
-  const copperDrawState: { mesh: THREE.Mesh; transparent: boolean; order: number }[] = [];
+  const copperDrawState: { mesh: THREE.Mesh; transparent: boolean; depthWrite: boolean; order: number }[] = [];
   if (copper) copper.traverse(object => {
     if (object instanceof THREE.Mesh && object.material instanceof THREE.Material) {
       detachImmersion.push(immersion.attach(object.material, true));
       if (absorption) {
-        copperDrawState.push({ mesh: object, transparent: object.material.transparent, order: object.renderOrder });
+        copperDrawState.push({ mesh: object, transparent: object.material.transparent,
+          depthWrite: object.material.depthWrite, order: object.renderOrder });
         object.material.transparent = true;
+        // The transparent copper pass still has to occlude bubbles on its far
+        // side. Otherwise draw order makes them appear over the metal.
+        object.material.depthWrite = true;
         object.material.needsUpdate = true;
-        object.renderOrder = 2;
+        // Composite opaque metal after the coloured liquid wall so the blue
+        // body does not wash out the copper's facets and specular highlights.
+        object.renderOrder = 3.5;
       }
     }
   });
@@ -1493,6 +1536,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
             vertex = (vertex + 17) % vertices.count;
           child.updateMatrix();
           bubbleSiteVertex.fromBufferAttribute(vertices, vertex).applyMatrix4(child.matrix);
+          // Include the face toward the camera: attached bubbles should coat
+          // the visible copper surface and hide part of its volume.
           if (bubbleSiteVertex.dot(up.value) > level.value - radius * 0.015) continue;
           bubbleSites[i].copy(bubbleSiteVertex);
           wettedSites.push(bubbleSites[i]);
@@ -1781,8 +1826,9 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
       volume.renderOrder = originalVolumeOrder;
       glassShell.renderOrder = originalGlassOrder;
       if (dyedShellMaterial) glassShell.material = originalShellMaterial;
-      for (const { mesh, transparent, order } of copperDrawState) {
+      for (const { mesh, transparent, depthWrite, order } of copperDrawState) {
         (mesh.material as THREE.Material).transparent = transparent;
+        (mesh.material as THREE.Material).depthWrite = depthWrite;
         (mesh.material as THREE.Material).needsUpdate = true;
         mesh.renderOrder = order;
       }

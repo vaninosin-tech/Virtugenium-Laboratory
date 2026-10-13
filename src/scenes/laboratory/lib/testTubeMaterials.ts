@@ -7,12 +7,14 @@ function createGlassBackdropMaterial() {
     color: "#ffffff", roughness: 0, metalness: 0, ior: 1.47,
     transmission: 1, thickness: 0.001, depthWrite: false, side: THREE.FrontSide,
   });
+  material.userData.backdropGain = { value: 1.32 };
   material.onBeforeCompile = shader => {
-    shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
+    shader.uniforms.uGlassBackdropGain = material.userData.backdropGain;
+    shader.fragmentShader = `uniform float uGlassBackdropGain;\n${shader.fragmentShader}`.replace("#include <opaque_fragment>", `
 vec2 glassUv = gl_FragCoord.xy / transmissionSamplerSize;
 vec2 glassBend = vec2(vNormal.x * 4.0, 0.0) / transmissionSamplerSize;
 vec3 glassBackground = texture2D(transmissionSamplerMap,
-  clamp(glassUv + glassBend, vec2(0.001), vec2(0.999))).rgb * 1.32;
+  clamp(glassUv + glassBend, vec2(0.001), vec2(0.999))).rgb * uGlassBackdropGain;
 gl_FragColor = vec4(glassBackground, 1.0);`);
   };
   material.customProgramCacheKey = () => "tube-glass-backdrop-v1";
@@ -29,10 +31,12 @@ function createTestTubeGlass(geometry: THREE.BufferGeometry) {
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     envMapIntensity: 0.8,
   });
+  material.userData.baseOptics = { value: 1 };
   // CrackSpot: local-Z side (-1..1), full-tube height (0..1); -1 means intact.
   material.userData.crackSpot = { value: new THREE.Vector2(0, -1) };
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTubeCrackSpot = material.userData.crackSpot;
+    shader.uniforms.uGlassBaseOptics = material.userData.baseOptics;
     shader.uniforms.uTubeCenter = { value: new THREE.Vector2(
       (bounds.min.x + bounds.max.x) * 0.5, (bounds.min.z + bounds.max.z) * 0.5,
     ) };
@@ -49,6 +53,7 @@ ${shader.vertexShader}`.replace("#include <begin_vertex>", `#include <begin_vert
 vTubePosition = position;
 vTubeHeight = (position.y - uTubeBottom) / uTubeHeight;`);
     shader.fragmentShader = `uniform vec2 uTubeCrackSpot;
+uniform float uGlassBaseOptics;
 uniform vec2 uTubeCenter;
 uniform float uTubeRadius;
 uniform float uTubeHeight;
@@ -68,7 +73,7 @@ ${shader.fragmentShader}`.replace("#include <opaque_fragment>", `
 float tubeEdge = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.0);
 float tubeLip = smoothstep(0.955, 0.99, vTubeHeight);
 float tubeBase = 1.0 - smoothstep(0.025, 0.10, vTubeHeight);
-float tubeThickness = max(tubeLip, tubeBase);
+float tubeThickness = max(tubeLip, tubeBase * uGlassBaseOptics);
 float tubeRim = smoothstep(0.80, 0.94, 1.0 - abs(dot(normal, normalize(vViewPosition))));
 vec2 tubeRadialOffset = vTubePosition.xz - uTubeCenter;
 vec2 tubeRadialLine = tubeRadialOffset / max(length(tubeRadialOffset), 0.0001);
@@ -80,7 +85,10 @@ diffuseColor.a = clamp(0.08 + 0.47 * tubeEdge + 0.24 * tubeThickness
   + 0.19 * tubeRim + 0.18 * tubeStripe + 0.16 * max(tubeLipLine, tubeBaseLine), 0.08, 0.88);
 vec3 tubeTint = mix(vec3(0.78, 0.88, 0.92), vec3(0.13, 0.24, 0.29),
   clamp(tubeEdge * 0.85 + tubeThickness * 0.35, 0.0, 1.0));
-outgoingLight = totalDiffuse * tubeTint + totalSpecular / max(diffuseColor.a, 0.10);
+vec3 glassSpecular = totalSpecular / max(diffuseColor.a, 0.10);
+vec3 boundedGlassSpecular = totalSpecular / (vec3(1.0) + totalSpecular) * 0.6;
+outgoingLight = totalDiffuse * tubeTint + mix(glassSpecular, boundedGlassSpecular,
+  (1.0 - uGlassBaseOptics) * tubeBase);
 outgoingLight += vec3(0.52, 0.67, 0.71) * (0.44 * tubeRim + 0.58 * tubeStripe
   + 0.32 * max(tubeLipLine, tubeBaseLine));
 // The hood/stand rotations put the close-up on local +X. asin(side)

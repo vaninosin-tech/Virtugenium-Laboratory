@@ -20,13 +20,16 @@ export class BariumSedimentField {
 /** Closed fine-grained solid following the test tube's hemispherical inner floor. */
 export class BariumSedimentGeometry extends THREE.BufferGeometry {
   private readonly position: Float32Array;
+  private readonly thickness: Float32Array;
   private readonly rings = 14;
   private readonly sectors = 40;
   constructor(private readonly radius: number, private readonly bottom: number) {
     super();
     const count = (this.rings + 1) * (this.sectors + 1);
     this.position = new Float32Array(count * 2 * 3);
+    this.thickness = new Float32Array(count * 2);
     this.setAttribute("position", new THREE.BufferAttribute(this.position, 3).setUsage(THREE.DynamicDrawUsage));
+    this.setAttribute("sedimentThickness", new THREE.BufferAttribute(this.thickness, 1).setUsage(THREE.DynamicDrawUsage));
     const indices: number[] = [];
     const stride = this.sectors + 1;
     for (let ring = 0; ring < this.rings; ring++) for (let sector = 0; sector < this.sectors; sector++) {
@@ -77,9 +80,11 @@ export class BariumSedimentGeometry extends THREE.BufferGeometry {
         const i = ring * (this.sectors + 1) + sector;
         this.position.set([x, floor + height * taper * grain, z], i * 3);
         this.position.set([x, floor - 0.00003, z], (count + i) * 3);
+        this.thickness[i] = this.thickness[count + i] = height * taper * grain;
       }
     }
     this.attributes.position.needsUpdate = true;
+    this.attributes.sedimentThickness.needsUpdate = true;
     this.computeVertexNormals();
     this.computeBoundingSphere();
   }
