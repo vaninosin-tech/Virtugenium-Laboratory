@@ -22,7 +22,7 @@ export const TUBE_SIMULATION = {
   },
   render: { raySteps: 12, transportStepsLow: 6, transportStepsHigh: 16,
     copperSaturation: 2.3, copperSettledSaturation: 2.05 },
-  bubbles: { capacity: 384, samplesPerNO: 5400, attachedSeconds: [0.9, 1.75] },
+  bubbles: { capacity: 384, samplesPerNO: 8200, attachedSeconds: [0.9, 1.75] },
   gas: { oxygenDefault: true as boolean, noOxidationRate: 0.48 },
   barium: {
     // Artistic acceleration of size-dependent settling; chemistry stays local.

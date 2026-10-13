@@ -774,10 +774,10 @@ void main() {
   const headGeometry = new THREE.CylinderGeometry(headRadius, headRadius, lip.y - box.min.y, 32, 1, true);
   headGeometry.translate(center.x, (lip.y + box.min.y) / 2, center.z);
   const headMaterial = new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, side: THREE.FrontSide, toneMapped: false,
+    transparent: true, depthWrite: false, depthTest: false, side: THREE.FrontSide, toneMapped: false,
     uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uSurfaceGas: { value: 0 }, uFront: { value: 0 }, uMouth: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
       uMouthHeight: { value: lip.y - box.max.y },
-      uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color(TUBE_VISUALS.gasColor) } },
+      uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color("#8d654a") } },
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 void main() { vP = position; vN = normalize(normalMatrix * normal);
 vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
@@ -824,7 +824,7 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   });
   const headspace = new THREE.Mesh(headGeometry, headMaterial);
   headspace.name = "TubeNO2Headspace";
-  headspace.renderOrder = 3;
+  headspace.renderOrder = 4.2;
   headspace.visible = false;
   headspace.raycast = () => {};
   group.add(headspace);
@@ -1433,6 +1433,8 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
           absorption.uniforms.uCuCurrent.value = copperField.current;
           absorption.uniforms.uCuBlend.value = copperField.alpha;
           absorption.uniforms.uCuCompletion.value = p;
+          absorption.uniforms.uCuMeanDensity.value = copperField.meanCopperDensity;
+          absorption.uniforms.uCuSurfaceDensity.value = copperField.surfaceCopperDensity;
           absorption.uniforms.uCuTime.value = time;
           // Copper composites after absorption. A sphere proxy here would
           // hide concentration in front of the irregular metal surface.
@@ -1612,6 +1614,8 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
           activeLiquid.uniforms.uCuCurrent.value = copperField.current;
           activeLiquid.uniforms.uCuBlend.value = copperField.alpha;
           activeLiquid.uniforms.uCuCompletion.value = p;
+          activeLiquid.uniforms.uCuMeanDensity.value = copperField.meanCopperDensity;
+          activeLiquid.uniforms.uCuSurfaceDensity.value = copperField.surfaceCopperDensity;
           activeLiquid.uniforms.uCuTime.value = time;
           activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
           activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, copperHeight, 2 * radius);
@@ -1917,14 +1921,14 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       silverLinks.visible = linkCount > 0 && p > 0;
       // Only NO2 absorbs brown light. The gas renderer clips every fragment
       // below the actual, tilted meniscus in its fragment shader.
-      const brownDensity = kind === "copper-nitric" ? Math.min(0.32, gasState.no2 * 0.48) : 0;
+      const brownDensity = kind === "copper-nitric" ? Math.min(0.58, gasState.no2 * 1.65) : 0;
       headspace.visible = brownDensity > 0.001;
       gas.visible = brownDensity > 0.12;
       gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * brownDensity * 0.5;
       gasMaterial.uniforms.uTime.value = time;
       gasMaterial.uniforms.uWorldUp.value.copy(gravity);
-      headMaterial.uniforms.uDensity.value = brownDensity * 0.85;
-      headMaterial.uniforms.uSurfaceGas.value = brownDensity * 0.035;
+      headMaterial.uniforms.uDensity.value = brownDensity * 1.20;
+      headMaterial.uniforms.uSurfaceGas.value = brownDensity * 0.09;
       headMaterial.uniforms.uFront.value = 1;
       headMaterial.uniforms.uMouth.value = 1;
       headMaterial.uniforms.uMouthHeight.value = up.value.dot(lip) - level.value;

@@ -20,15 +20,16 @@ export function cameraInTubeSpace(camera: THREE.Camera, tube: THREE.Object3D,
 
 export const copperFieldGLSL = `
 uniform sampler3D uCuPrevious, uCuCurrent;
-uniform float uCuBlend, uCuCompletion, uCuTime;
+uniform float uCuBlend, uCuCompletion, uCuTime, uCuMeanDensity, uCuSurfaceDensity;
 uniform vec3 uCuBoundsMin, uCuBoundsSize;
 float copperField(vec3 p) {
   vec3 uvw = (p - uCuBoundsMin) / uCuBoundsSize;
   if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return 0.0;
   float density = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
   float c = max(0.0, density);
-  float contrast = 90.0 * pow(max(c - 0.004, 0.0), 1.6);
-  return contrast * mix(1.0, 0.55, smoothstep(0.7, 1.0, uCuCompletion));
+  // Resolve excess above the conserved bulk concentration. The field creates
+  // the stream shapes; the mean only separates their optical depth from wash.
+  return 31.0 * pow(max(c - uCuMeanDensity * 0.65 - 0.0015, 0.0), 1.22);
 }`;
 
 export const permanganateTongueGLSL = `
@@ -69,6 +70,7 @@ export class TubeAbsorptionMaterial extends THREE.ShaderMaterial {
         uCuCurrent: { value: null as THREE.Data3DTexture | null }, uCuBlend: { value: 0 },
         uMnField: { value: null as THREE.Data3DTexture | null },
         uCuCompletion: { value: 0 },
+        uCuMeanDensity: { value: 0 }, uCuSurfaceDensity: { value: 0 },
         uCuTime: { value: 0 },
         uCuBoundsMin: { value: bounds.min },
         uCuBoundsSize: { value: bounds.size },
@@ -125,8 +127,11 @@ void main() {
     if (h < 0.0 || h > height || dot(q.xz, q.xz) > wall || dot(uUp, q) > uLevel) continue;
     if (uKind < 1.5) {
       float frontWeight = 2.3 * exp(-2.0 * (float(i) + 0.5) / uSteps);
+      float bulk = 0.45 * pow(max(uCuMeanDensity, 0.0), 0.68);
+      float plume = copperField(q);
       opticalDepth += mix(vec3(1.0, 0.26, 0.008), vec3(0.95, 0.20, 0.07),
-        smoothstep(0.65, 0.95, uCuCompletion)) * max(0.0, copperField(q)) * frontWeight * 1.55 * distance / (uSteps * radius);
+        smoothstep(0.65, 0.95, uCuCompletion)) * (bulk + plume * frontWeight)
+        * 1.55 * distance / (uSteps * radius);
     } else if (uKind > 2.5) {
       float c = permanganateVolume(q);
       // Beer-Lambert: retained dissolved MnO4- alone determines transmission.

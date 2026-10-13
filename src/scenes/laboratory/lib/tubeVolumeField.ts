@@ -214,6 +214,9 @@ export class TubeVolumeField {
   private accumulator = 0;
   private time = 0;
   private pending = 0;
+  /** Texture-space concentrations derived from the conserved Cu(II) field. */
+  meanCopperDensity = 0;
+  surfaceCopperDensity = 0;
   private lastProgress = 0;
   private readonly step: number;
   readonly profile = { masks: 0, maskMs: 0, flowMs: 0, copperMs: 0, acidMs: 0, bubblesMs: 0, textureMs: 0, steps: 0, sources: 0, sourceMs: 0 };
@@ -250,7 +253,7 @@ export class TubeVolumeField {
       + patch * 2.43), 3);
   }
   surfaceActivityAt(point: THREE.Vector3) {
-    const width2 = (this.mask.radius * 0.38) ** 2;
+    const width2 = (this.mask.radius * 0.30) ** 2;
     let activity = 0.01;
     for (let patch = 0; patch < this.sourcePatchCentres.length; patch++)
       activity += this.patchPulse(patch)
@@ -499,7 +502,7 @@ export class TubeVolumeField {
       centres.push(best);
     }
     this.sourcePatchCentres = centres;
-    const width = m.radius * 0.38;
+    const width = m.radius * 0.30;
     for (let s = 0; s < this.sourceCells.length; s++) {
       const i = this.sourceCells[s];
       const point = m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
@@ -627,10 +630,20 @@ export class TubeVolumeField {
     const m = this.mask, v = this.species["Cu2+"].values;
     // Normalize by a whole-tube amount, not by max voxel, so hue preserves mass.
     const scale = m.data.length * TUBE_SIMULATION.field.opticalDensityScale;
+    let bulk = 0, surface = 0, surfaceCells = 0;
+    let topRow = -1;
+    for (let a = 0; a < m.activeCount; a++)
+      topRow = Math.max(topRow, Math.floor(m.active[a] / m.nx) % m.ny);
     for (let i = 0; i < v.length; i++) {
       if (!m.data[i]) { this.pixels[i] = 0; continue; }
       this.pixels[i] = Math.max(0, finite(v[i]) * scale);
+      bulk += this.pixels[i];
+      if (Math.floor(i / m.nx) % m.ny >= topRow - 2) {
+        surface += this.pixels[i]; surfaceCells++;
+      }
     }
+    this.meanCopperDensity = bulk / Math.max(1, m.activeCount);
+    this.surfaceCopperDensity = surface / Math.max(1, surfaceCells);
     this.current.needsUpdate = true;
   }
   dispose() { this.previous.dispose(); this.current.dispose(); }

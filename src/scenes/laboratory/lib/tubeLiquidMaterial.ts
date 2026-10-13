@@ -65,6 +65,7 @@ export class TubeLiquidMaterial extends LiquidMaterial {
       uTracerMode: { value: 0 },
       uCuBlend: { value: 0 },
       uCuCompletion: { value: 0 },
+      uCuMeanDensity: { value: 0 }, uCuSurfaceDensity: { value: 0 },
       uCuTime: { value: 0 },
       uCuBoundsMin: { value: new THREE.Vector3() },
       uCuBoundsSize: { value: new THREE.Vector3(1, 1, 1) },
@@ -152,11 +153,13 @@ float dyeHalo = 0.0;
 float tracerLayer = 0.0;
 float tracerJet = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
-  // The body colour follows actual dissolved Cu(II), leaving clear channels
-  // between concentrated parcels. Its full authored strength is still 0.82.
+  // The conserved mean supplies a light blue wash; local concentration keeps
+  // stronger, irregular streams readable through that wash.
   float blue = copperField(vTubePoint);
-  localMix = clamp(blue + 0.82 * smoothstep(0.015, 0.82, p)
-    * smoothstep(0.015, 0.25, blue), 0.0, 1.0);
+  float wash = 0.12 * smoothstep(0.002, 0.055, uCuMeanDensity);
+  float surfaceWash = smoothstep(0.001, 0.025, uCuSurfaceDensity);
+  localMix = 0.82 * clamp(max(wash, vCap > 0.5 ? surfaceWash : 0.0)
+    + 0.48 * smoothstep(0.06, 1.05, blue), 0.0, 1.0);
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   // Integrate conserved fine-particle concentration through the liquid chord.
   vec3 ray = normalize(vTubePoint - uCameraLocal);

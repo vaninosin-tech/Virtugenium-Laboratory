@@ -45,7 +45,7 @@ export class TubeNOBubbles {
     const births = Math.min(32, Math.floor(this.accumulator + 1e-9));
     this.accumulator = Math.max(0, this.accumulator - births);
     const siteWeights = births && surfaceActivity
-      ? sources.map(point => Math.max(0.001, surfaceActivity(point))) : [];
+      ? sources.map(point => 0.25 + Math.max(0, surfaceActivity(point))) : [];
     const totalWeight = siteWeights.reduce((sum, value) => sum + value, 0);
     for (let b = 0; b < births && sources.length; b++) {
       let slot = -1;
