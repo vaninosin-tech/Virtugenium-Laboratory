@@ -33,10 +33,10 @@ export const TUBE_SIMULATION = {
     coarseSettlingSpeed: 0.0028,
   },
   silver: {
-    settlingAcceleration: 3,
+    settlingAcceleration: 1.5,
     settlingSpeeds: [0.00018, 0.00048, 0.00095],
-    suspensionOpticalScale: 3.3,
-    flocMassFraction: 0.48,
-    coarseSettlingSpeed: 0.02,
+    suspensionOpticalScale: 16,
+    flocMassFraction: 0.78,
+    coarseSettlingSpeed: 0.05,
   },
 } as const;

@@ -6,6 +6,7 @@ import { TubeBariumField } from "./tubeBariumField";
 import { TubeSilverField } from "./tubeSilverField";
 import { BariumSedimentField, BariumSedimentGeometry } from "./tubeBariumSediment";
 import { SilverSedimentField, SilverSedimentGeometry } from "./tubeSilverSediment";
+import { makeSilverVolumeMaterial } from "./tubeSilverVolumeMaterial";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
@@ -230,7 +231,7 @@ uniform sampler3D uBaField; uniform float uBaActive;
 varying vec3 vBackdropPoint; varying float vBackdropCap; varying float vBackdropWave;
 ${bariumCloudGLSL}
 vec3 transmitThroughTube(vec3 background) {
-  if (uOpticalKind < 2.5 || uOpticalKind > 3.5) return background;
+  if (uOpticalKind < 1.5 || uOpticalKind > 3.5) return background;
   vec3 ray = normalize(vBackdropPoint - uOpticalCamera);
   float radius = ${radius.toFixed(7)};
   float bottom = ${minY.toFixed(7)};
@@ -266,14 +267,17 @@ vec3 transmitThroughTube(vec3 background) {
       float concentration = mixed * (0.79 + 0.21 * (1.0 - h));
       concentration = mix(concentration, 1.0, smoothstep(0.72, 1.0, uOpticalProgress));
       transmission *= exp(-mix(vec3(0.75, 0.30, 0.32), vec3(3.6, 1.15, 0.28), smoothstep(0.55, 1.0, uOpticalProgress)) * concentration * distance / (6.0 * radius));
-    } else if (uOpticalKind > 2.5) {
+    } else if (uOpticalKind > 1.5) {
       vec3 uvw = clamp(vec3((q.x + radius) / (2.0 * radius), h,
         (q.z + radius) / (2.0 * radius)), 0.0, 1.0);
       float density = uBaActive > 0.5 ? texture(uBaField, uvw).r : 0.0;
-      scattering += density * distance / (6.0 * radius) * 3.0;
+      if (uOpticalKind < 2.5) density = max(0.0, density - 0.4);
+      scattering += density * distance / (6.0 * radius)
+        * (uOpticalKind < 2.5 ? 3.5 : 3.0);
     }
   }
-  return mix(background * transmission, vec3(0.94), 1.0 - exp(-scattering));
+  vec3 scatteredLight = uOpticalKind < 2.5 ? vec3(0.76, 0.82, 0.85) : vec3(0.94);
+  return mix(background * transmission, scatteredLight, 1.0 - exp(-scattering));
 }
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
 if (vBackdropCap < 0.5 && dot(uBackdropUp, vBackdropPoint) > uBackdropLevel + 0.0004) discard;`)
@@ -697,34 +701,22 @@ float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
    abs(dot(normalize(normal), normalize(vViewPosition)))), 1.0, uPowder);
  #include <opaque_fragment>`);
   };
-  // Irregular overlapping pieces form a single soft cotton mass.
-  const curdGeometry = new THREE.IcosahedronGeometry(1, 3);
-  const vertices = curdGeometry.getAttribute("position");
-  for (let i = 0; i < vertices.count; i++) {
-    const x = vertices.getX(i), y = vertices.getY(i), z = vertices.getZ(i);
-    const curl = Math.sin(x * 5.8 + y * 3.7) * Math.cos(z * 6.4 - y * 4.1);
-    const tear = Math.sin(z * 12.1 + x * 8.8) * Math.sin(y * 13.0 - z * 5.0);
-    const tail = Math.max(0, Math.sin(x * 3.1 + z * 5.7) * Math.cos(y * 4.9));
-    const lump = 0.68 + 0.46 * curl + 0.23 * tear + 0.30 * tail * Math.max(0, y)
-      + 0.07 * Math.sin(x * 24 + z * 19);
-    vertices.setXYZ(i, x * lump + 0.12 * y * y * Math.sin(z * 7),
-      y * lump * (0.65 + 0.42 * Math.sin(x * 5 + z * 4)), z * lump);
-  }
-  // Open small irregular gaps in the lobed surface rather than stacking
-  // round subparticles to suggest porosity.
-  for (let i = 0; i + 2 < vertices.count; i += 3) {
-    const x = (vertices.getX(i) + vertices.getX(i + 1) + vertices.getX(i + 2)) / 3;
-    const y = (vertices.getY(i) + vertices.getY(i + 1) + vertices.getY(i + 2)) / 3;
-    const z = (vertices.getZ(i) + vertices.getZ(i + 1) + vertices.getZ(i + 2)) / 3;
-    if (Math.sin(x * 13 + z * 7) * Math.sin(y * 17 - z * 6) < 0.77) continue;
-    for (let vertex = i; vertex < i + 3; vertex++) vertices.setXYZ(vertex, x, y, z);
-  }
-  curdGeometry.computeVertexNormals();
+  const curdGeometry = new THREE.SphereGeometry(1, 18, 14);
+  const silverVolume = makeSilverVolumeMaterial(radius, box.min.y);
   const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e8f7fa", transparent: true, opacity: 0.85, roughness: 0.04, metalness: 0, depthWrite: false, depthTest: true, side: THREE.DoubleSide });
   const pourAirMaterial = new THREE.MeshBasicMaterial({ color: "#e8f7fa", transparent: true,
     opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
-  const flocMaterial = new THREE.MeshLambertMaterial({ color: "#f3f4f1", transparent: true,
-    opacity: 0.87, depthWrite: false, side: THREE.DoubleSide });
+  const flocMaterial = new THREE.MeshLambertMaterial({ color: "#f2f3f0", side: THREE.FrontSide,
+    transparent: true, opacity: kind === "silver-chloride" ? 0 : 0.72, depthWrite: false });
+  flocMaterial.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace("#include <normal_fragment_maps>",
+      `#include <normal_fragment_maps>
+float cottonFacing = abs(dot(normalize(normal), normalize(vViewPosition)));
+diffuseColor.a *= 0.20 + 0.80 * smoothstep(0.04, 0.72, cottonFacing);`)
+      .replace("#include <opaque_fragment>",
+        "outgoingLight = mix(outgoingLight, vec3(0.90), 0.52);\n#include <opaque_fragment>");
+  };
+  flocMaterial.customProgramCacheKey = () => "silver-soft-edge-v2";
   const up = { value: new THREE.Vector3(0, 1, 0) };
   const level = { value: box.max.y };
   bubbleMaterial.onBeforeCompile = shader => {
@@ -862,6 +854,27 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   flakes.renderOrder = 1;
   if (kind === "silver-chloride") flakes.geometry = curdGeometry;
   flakes.name = "TubePrecipitate";
+  const silverCotton = makePool(silverVolume.material, 360);
+  silverCotton.geometry = curdGeometry;
+  silverCotton.name = "TubeSilverCottonVolume";
+  silverCotton.renderOrder = 1.05;
+  const silverLinks = makePool(silverVolume.material, 48);
+  silverLinks.geometry = curdGeometry;
+  silverLinks.name = "TubeSilverConnections";
+  silverLinks.renderOrder = 0.9;
+  const silverBedCurds = makePool(silverVolume.material, 16);
+  silverBedCurds.geometry = curdGeometry;
+  silverBedCurds.name = "TubeSilverBedCurds";
+  silverBedCurds.renderOrder = 5.1;
+  const volumeCameraInverse = new THREE.Matrix4();
+  const updateSilverVolumeCamera: THREE.Object3D["onBeforeRender"] = (_renderer, _scene, camera) => {
+    volumeCameraInverse.copy(group.matrixWorld).invert();
+    silverVolume.camera.value.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(volumeCameraInverse);
+  };
+  flakes.onBeforeRender = updateSilverVolumeCamera;
+  silverCotton.onBeforeRender = updateSilverVolumeCamera;
+  silverLinks.onBeforeRender = updateSilverVolumeCamera;
+  silverBedCurds.onBeforeRender = updateSilverVolumeCamera;
   const bubbles = makePool(bubbleMaterial, NO_BUBBLE_CAPACITY);
   bubbles.renderOrder = 3.75;
   bubbles.name = "TubeNOBubbles";
@@ -891,7 +904,8 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
       metalness: 0, side: THREE.DoubleSide, transparent: true,
       opacity: 0.38, depthWrite: false })
     : new THREE.MeshBasicMaterial({ color: "#f8f9f7", toneMapped: false,
-      side: THREE.DoubleSide, depthWrite: true });
+      side: THREE.DoubleSide, depthWrite: true,
+      depthTest: kind !== "silver-chloride" });
   if (kind === "barium-sulfate") {
     bedMaterial.onBeforeCompile = shader => {
       shader.vertexShader = `attribute float sedimentThickness;
@@ -905,6 +919,17 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
           "outgoingLight = min(outgoingLight, vec3(0.58));\n#include <opaque_fragment>");
     };
     bedMaterial.customProgramCacheKey = () => "barium-sediment-film-v1";
+  } else if (kind === "silver-chloride") {
+    bedMaterial.onBeforeCompile = shader => {
+      shader.vertexShader = `attribute float sedimentThickness;
+varying float vSedimentThickness;
+${shader.vertexShader}`.replace("#include <begin_vertex>",
+        "#include <begin_vertex>\nvSedimentThickness = sedimentThickness;");
+      shader.fragmentShader = `varying float vSedimentThickness;
+${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
+        "#include <clipping_planes_fragment>\nif (vSedimentThickness < 0.000018) discard;");
+    };
+    bedMaterial.customProgramCacheKey = () => "silver-curd-bed-v1";
   }
   const bed = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(bedGeometry, bedMaterial);
   bed.renderOrder = 5;
@@ -914,6 +939,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
   bed.raycast = () => {};
   group.add(bed);
   const dummy = new THREE.Object3D();
+  const linkDirection = new THREE.Vector3();
   const random = (i: number) => ((Math.sin(i * 127.1 + 311.7) * 43758.5453) % 1 + 1) % 1;
   // Weight the exposed face in the default game close-up, while retaining
   // sites around the back for other viewing angles.
@@ -1355,6 +1381,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         updateTubeFlowDebug("AgCl", silverField.solver, silverField.tracer,
           silverField.species["Cl-"].values, silverField.pixels, silverField.sedimentMass,
           () => ({ suspensionMass: silverField.suspensionMass, formed: silverField.extent,
+            ageSeconds: silverField.ageSeconds,
             aggregateMass: silverField.coarseMass, massBalanceError: silverField.massBalanceError,
             silverRemaining: silverField.species["Ag+"].total,
             chlorideRemaining: silverField.species["Cl-"].total }),
@@ -1394,6 +1421,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       }
       inverse.copy(volume.matrixWorld).invert();
       if (cameraPosition) cameraLocal.copy(cameraPosition).applyMatrix4(inverse);
+      silverVolume.camera.value.copy(cameraLocal);
       if (absorption && absorptionWall && absorptionCap) {
         absorption.uniforms.uUp.value.copy(up.value);
         absorption.uniforms.uLevel.value = level.value;
@@ -1656,12 +1684,44 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       }
       // AgCl's deposit is made by the same settling flocs, never a smooth cap.
       bed.visible = !!bariumField && bariumField.sedimentMass > 0.02
-        || !!silverField && silverField.sedimentMass > 0.01;
+        || !!silverField && silverField.sedimentMass > 0.0002;
       if (bed.visible && bariumField) bedGeometry.update(bariumField.sedimentField);
       if (bed.visible && silverField) {
         bed.geometry = silverBedGeometry;
         silverBedGeometry.update(silverField.sedimentField);
       }
+      let bedCurdCount = 0;
+      if (bed.visible && silverField && p > 0) {
+        const field = silverField.sedimentField;
+        let total = 0, weightedX = 0, weightedZ = 0;
+        for (let z = 0; z < field.nz; z++) for (let x = 0; x < field.nx; x++) {
+          const mass = field.values[z * field.nx + x];
+          if (mass <= 0) continue;
+          total += mass;
+          weightedX += mass * ((x + 0.5) / field.nx * 2 - 1) * radius;
+          weightedZ += mass * ((z + 0.5) / field.nz * 2 - 1) * radius;
+        }
+        if (total > 0.0002) {
+          const x = THREE.MathUtils.clamp(weightedX / total * 0.4, -radius * 0.2, radius * 0.2);
+          const z = THREE.MathUtils.clamp(weightedZ / total * 0.4, -radius * 0.2, radius * 0.2);
+          const height = radius * Math.min(7.5, 1.15 + 12.0 * Math.sqrt(total));
+          const width = radius * Math.min(1.28, 0.88 + 0.85 * Math.sqrt(total));
+          place(silverBedCurds, bedCurdCount++, x, box.min.y + height * 0.50, z,
+            width, height * 0.55, width * 0.9);
+          for (let n = 0; n < 4; n++) {
+            const angle = n * 2.39996 + 0.35;
+            const lobeX = x + Math.cos(angle) * radius * 0.35;
+            const lobeZ = z + Math.sin(angle) * radius * 0.26;
+            const radial = Math.min(radius * 0.9, Math.hypot(lobeX, lobeZ));
+            const floor = box.min.y + radius - Math.sqrt(radius * radius - radial * radial);
+            const lobeHeight = height * (0.63 + 0.10 * random(n + 41));
+            place(silverBedCurds, bedCurdCount++, lobeX, floor + lobeHeight * 0.48, lobeZ,
+              width * 0.48, lobeHeight * 0.57, width * 0.46);
+          }
+        }
+      }
+      silverBedCurds.count = bedCurdCount;
+      silverBedCurds.visible = bedCurdCount > 0;
       coarseParticles.visible = p > 0 && !!bariumField && bariumField.coarseMass > 0.0001;
       if (coarseParticles.visible && bariumField) {
         const candidates: number[] = [];
@@ -1742,9 +1802,11 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         const ingress = curds ? THREE.MathUtils.smoothstep(p * 8, 1 - random(i + 71) - 0.1, 1 - random(i + 71) + 0.1) : 1;
         if (flakes.visible && silverField) {
           const floc = silverField.flocs[i];
-          const scale = radius * Math.min(0.65, 0.25 + Math.cbrt(floc.mass) * 1.6);
-          place(flakes, i, floc.position.x * 0.78, floc.position.y, floc.position.z * 0.78,
-            scale, scale * (0.8 + 0.4 * floc.porosity), scale * 0.85);
+          const scale = radius * Math.min(0.85, 0.24 + 1.05 * Math.cbrt(floc.mass / 0.12));
+          const bend = 1 + 0.12 * Math.sin(time * 1.8 + floc.shape * 0.7)
+            * Math.min(1, floc.velocity.length() / 0.01);
+          place(flakes, i, floc.position.x * 0.55, floc.position.y, floc.position.z * 0.55,
+            scale * bend, scale * (1.45 + 0.28 * floc.porosity) / bend, scale * 0.88);
         } else if (flakes.visible) {
           const individualSettled = curds && options.pour
             ? THREE.MathUtils.smoothstep(pourAge, 0.45 + random(i + 205) * 0.55,
@@ -1799,6 +1861,60 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
             radius * (0.04 + random(i + 73) * 0.05) * pulse * foamFade);
         }
       }
+      let cottonCount = 0;
+      const cloudBands = Array.from({ length: 4 }, () => ({ mass: 0, x: 0, y: 0, z: 0 }));
+      if (flakes.visible && silverField) {
+        const liquidHeight = Math.max(radius * 2, level.value - box.min.y);
+        for (const floc of silverField.flocs) {
+          const band = Math.min(3, Math.max(0,
+            Math.floor((floc.position.y - box.min.y) / liquidHeight * 4)));
+          const cloud = cloudBands[band];
+          cloud.mass += floc.mass;
+          cloud.x += floc.mass * floc.position.x;
+          cloud.y += floc.mass * floc.position.y;
+          cloud.z += floc.mass * floc.position.z;
+        }
+        for (let band = 0; band < cloudBands.length; band++) {
+          const cloud = cloudBands[band];
+          if (cloud.mass < 0.002) continue;
+          const x = cloud.x / cloud.mass * 0.55;
+          const y = cloud.y / cloud.mass;
+          const z = cloud.z / cloud.mass * 0.55;
+          const fullness = Math.min(1, Math.cbrt(cloud.mass / 0.10));
+          const width = radius * (0.67 + 0.55 * fullness);
+          const height = radius * (0.70 + 0.45 * fullness);
+          place(silverCotton, cottonCount++, x, y, z, width, height, width * 0.9);
+          for (let lobe = 0; lobe < 3; lobe++) {
+            const angle = band * 1.7 + lobe * 2.39996;
+            const dx = Math.cos(angle) * width * 0.38;
+            const dz = Math.sin(angle) * width * 0.35;
+            const dy = lobe === 0 ? -height * 0.66 : (lobe === 1 ? height * 0.36 : -height * 0.18);
+            place(silverCotton, cottonCount++, x + dx, y + dy, z + dz,
+              width * 0.46, height * (lobe === 0 ? 0.62 : 0.43), width * 0.43);
+          }
+        }
+      }
+      silverCotton.count = cottonCount;
+      silverCotton.visible = cottonCount > 0 && p > 0;
+      let linkCount = 0;
+      for (let band = 3; band > 0; band--) {
+        const a = cloudBands[band], b = cloudBands[band - 1];
+        if (a.mass < 0.01 || b.mass < 0.01) continue;
+        const ax = a.x / a.mass * 0.55, ay = a.y / a.mass, az = a.z / a.mass * 0.55;
+        const bx = b.x / b.mass * 0.55, by = b.y / b.mass, bz = b.z / b.mass * 0.55;
+        if (ay - by > radius * 4.4) continue;
+        linkDirection.set(bx - ax, by - ay, bz - az);
+        const distance = linkDirection.length();
+        if (distance < radius * 1.7) continue;
+        linkDirection.normalize();
+        dummy.position.set((ax + bx) * 0.5, (ay + by) * 0.5, (az + bz) * 0.5);
+        dummy.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), linkDirection);
+        dummy.scale.set(radius * 0.13, distance * 0.37, radius * 0.13);
+        dummy.updateMatrix();
+        silverLinks.setMatrixAt(linkCount++, dummy.matrix);
+      }
+      silverLinks.count = linkCount;
+      silverLinks.visible = linkCount > 0 && p > 0;
       // Only NO2 absorbs brown light. The gas renderer clips every fragment
       // below the actual, tilted meniscus in its fragment shader.
       const brownDensity = kind === "copper-nitric" ? Math.min(0.32, gasState.no2 * 0.48) : 0;
@@ -1815,7 +1931,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       headMaterial.uniforms.uResidue.value = 0;
       headMaterial.uniforms.uTime.value = time;
       headMaterial.uniforms.uDetail.value = quality === "LOW" ? 0 : 1;
-      for (const mesh of [flakes, bubbles, gas, splash, condensate, foam]) if (mesh.visible) mesh.instanceMatrix.needsUpdate = true;
+      for (const mesh of [flakes, silverCotton, silverLinks, silverBedCurds, bubbles, gas, splash, condensate, foam]) if (mesh.visible) mesh.instanceMatrix.needsUpdate = true;
       if (waveSurface && hasLiquid) waveSurface.advance(dt);
       bottomCausticMaterial.uniforms.uWave.value = standCausticMaterial.uniforms.uWave.value =
         Math.max(surfaceActivity, waveSurface?.activity ?? 0);
@@ -1849,10 +1965,10 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         gasGeometry.dispose(); bedGeometry.dispose(); silverBedGeometry.dispose(); coarseGeometry.dispose(); coarseMaterial.dispose(); bedMaterial.dispose(); bottomCausticGeometry.dispose(); standCausticGeometry.dispose();
         bottomCausticMaterial.dispose(); standCausticMaterial.dispose();
         curdGeometry.dispose();
-        white.dispose(); flocMaterial.dispose(); bubbleMaterial.dispose(); pourAirMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
+        white.dispose(); flocMaterial.dispose(); silverVolume.material.dispose(); bubbleMaterial.dispose(); pourAirMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
         absorption?.dispose();
         dyedShellMaterial?.dispose();
-        for (const mesh of [coarseParticles, flakes, bubbles, pourAir, attachedBubbles, gas, splash, condensate, foam]) mesh.dispose();
+        for (const mesh of [coarseParticles, flakes, silverCotton, silverLinks, silverBedCurds, bubbles, pourAir, attachedBubbles, gas, splash, condensate, foam]) mesh.dispose();
       });
     },
   };

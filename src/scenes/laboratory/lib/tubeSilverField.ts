@@ -155,9 +155,9 @@ export class TubeSilverField {
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
       const targetBoost = calm ? TUBE_SIMULATION.silver.settlingAcceleration : 1;
       this.settlingBoost += (targetBoost - this.settlingBoost) * (1 - Math.exp(-step / 0.8));
-      if (calm) this.sedimentField.settle(step);
+      this.sedimentField.settle(step);
       for (let k = 0; k < 3; k++) {
-        this.solver.transport(this.suspension[k], step, 0.000006);
+        this.solver.transport(this.suspension[k], step, 0.000018);
         this.settle(this.suspension[k], step,
           TUBE_SIMULATION.silver.settlingSpeeds[k] * this.settlingBoost);
       }
@@ -170,14 +170,14 @@ export class TubeSilverField {
           this.suspension[0][i] + this.suspension[1][i] + this.suspension[2][i]);
         ba[i] -= formed; so[i] -= formed; this.extent += formed;
         this.productSource[i] = formed;
-        for (let k = 0; k < 3; k++) this.suspension[k][i] += formed * [0.58, 0.28, 0.14][k];
-        // A sparse fraction of fine particles coalesces only in dense local clouds.
-        if (this.suspension[0][i] * m.activeCount > 0.02) {
-          const aggregate = Math.min(this.suspension[0][i],
-            formed * TUBE_SIMULATION.silver.flocMassFraction);
-          this.suspension[0][i] -= aggregate;
-          this.coarse[i] += aggregate;
-        }
+        // Dense, freshly nucleated parcels flocculate locally. All visible
+        // lobes draw from this solid reservoir; dilute parcels remain fine.
+        const flocculation = THREE.MathUtils.smoothstep(
+          (formed + this.suspension[0][i]) * m.activeCount, 0.001, 0.035);
+        const aggregate = formed * TUBE_SIMULATION.silver.flocMassFraction * flocculation;
+        this.coarse[i] += aggregate;
+        const fine = formed - aggregate;
+        for (let k = 0; k < 3; k++) this.suspension[k][i] += fine * [0.58, 0.28, 0.14][k];
       }
       this.advanceFlocs(step, agitation);
       // Redispersion moves an actual fraction of the bottom reservoir into liquid.
@@ -192,9 +192,17 @@ export class TubeSilverField {
           break;
         }
       }
-      for (let i = 0; i < this.pixels.length; i++)
-        this.pixels[i] = m.data[i] ? (this.suspension[0][i] + this.suspension[1][i]
-          + this.suspension[2][i]) * m.activeCount * TUBE_SIMULATION.silver.suspensionOpticalScale : 0;
+      const suspensionMass = this.suspensionMass;
+      const opticalMix = THREE.MathUtils.clamp((suspensionMass - 0.12) * 4, 0, 0.55);
+      for (let i = 0; i < this.pixels.length; i++) {
+        const local = (this.suspension[0][i] + this.suspension[1][i]
+          + this.suspension[2][i]) * m.activeCount;
+        // Coarse-grain the conserved fine phase as mixing spreads through the
+        // liquid. The spatial mean remains the same, so no optical mass appears.
+        this.pixels[i] = m.data[i] ? ((1 - opticalMix) * local
+          + opticalMix * suspensionMass)
+          * TUBE_SIMULATION.silver.suspensionOpticalScale : 0;
+      }
       this.texture.needsUpdate = true;
     }
   }
@@ -203,24 +211,24 @@ export class TubeSilverField {
     const m = this.mask;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
-      if (this.coarse[i] < 0.000035) continue;
+      if (this.coarse[i] < 0.000015) continue;
       const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
       const z = Math.floor(i / (m.nx * m.ny));
       const position = m.point(x, y, z, new THREE.Vector3());
       let nearest: FlocAggregate | undefined;
-      let distance = m.radius * 0.7;
+      let distance = m.radius * 1.7;
       for (const floc of this.flocs) {
         const d = floc.position.distanceTo(position);
         if (d < distance) { nearest = floc; distance = d; }
       }
       const mass = this.coarse[i];
-      if (nearest) {
+      if (nearest && nearest.mass + mass < 0.12) {
         nearest.position.multiplyScalar(nearest.mass / (nearest.mass + mass))
           .addScaledVector(position, mass / (nearest.mass + mass));
         nearest.mass += mass;
       } else if (this.flocs.length < 72) {
         this.flocs.push({ position, velocity: new THREE.Vector3(), mass,
-          porosity: 0.48 + 0.35 * Math.abs(Math.sin(i * 17.17)), shape: i });
+          porosity: 0.22 + 0.50 * Math.abs(Math.sin(i * 17.17)), shape: i });
       } else continue;
       this.coarse[i] = 0;
     }
@@ -232,8 +240,11 @@ export class TubeSilverField {
       const i = m.index(ix, iy, iz);
       const flow = new THREE.Vector3(this.flow[i * 3], this.flow[i * 3 + 1], this.flow[i * 3 + 2]);
       const settling = TUBE_SIMULATION.silver.coarseSettlingSpeed * this.settlingBoost
-        * Math.sqrt(Math.max(0.3, floc.mass * 120)) * (1 - floc.porosity * 0.4);
-      floc.velocity.lerp(flow.addScaledVector(this.velocity.gravityUp, -settling), 1 - Math.exp(-dt * 7));
+        * Math.sqrt(Math.max(0.16, floc.mass * 28)) * (0.3 + 0.7 * (1 - floc.porosity))
+        * (1 + 3 * (1 - THREE.MathUtils.smoothstep(floc.porosity, 0.3, 0.65)));
+      const shear = Math.max(0, flow.distanceTo(floc.velocity) - 0.0015);
+      floc.velocity.lerp(flow.multiplyScalar(0.35).addScaledVector(this.velocity.gravityUp, -settling),
+        1 - Math.exp(-dt * 2));
       floc.position.addScaledVector(floc.velocity, dt);
       const radial = Math.hypot(floc.position.x, floc.position.z);
       if (radial > m.radius * 0.84) {
@@ -241,16 +252,56 @@ export class TubeSilverField {
         floc.position.z *= m.radius * 0.84 / radial;
       }
       const bowl = m.bottom + m.radius - Math.sqrt(Math.max(0, m.radius * m.radius - radial * radial));
+      // Shear strips material from porous clumps into a daughter and a fine
+      // concentration field. With little flow the connected core persists.
+      if (shear > 0 && floc.mass > 0.002) {
+        const detached = Math.min(floc.mass * 0.07,
+          floc.mass * shear * dt * 9);
+        floc.mass -= detached;
+        this.suspension[0][i] += detached * 0.55;
+        if (this.flocs.length < 72 && detached > 0.00004) {
+          const direction = new THREE.Vector3(
+            Math.sin(floc.shape * 2.17), -0.35, Math.cos(floc.shape * 2.17)).normalize();
+          const child = floc.position.clone().addScaledVector(direction, m.radius * 0.35);
+          this.flocs.push({ position: child, velocity: floc.velocity.clone(),
+            mass: detached * 0.45, porosity: Math.min(0.88, floc.porosity + 0.07),
+            shape: floc.shape + 97 + this.flocs.length });
+        } else this.suspension[0][i] += detached * 0.45;
+      }
       if (agitation > 0.08 && floc.mass > 0.0001) {
         const released = floc.mass * Math.min(0.25, agitation * dt * 1.6);
         floc.mass -= released;
         this.suspension[0][i] += released;
         floc.velocity.addScaledVector(this.velocity.gravityUp, agitation * dt * 0.006);
       }
-      if (floc.position.y <= bowl + m.radius * 0.055 && agitation < 0.08) {
+      const contact = m.radius * Math.min(0.5,
+        0.14 + 0.45 * Math.cbrt(floc.mass / 0.12));
+      if (floc.position.y <= bowl + contact && agitation < 0.08) {
         this.sedimentField.deposit(iz * m.nx + ix, floc.mass);
         this.flocs.splice(n, 1);
       } else floc.position.y = Math.max(bowl + m.radius * 0.03, floc.position.y);
+    }
+    // Nearby porous bodies coalesce into a connected cotton mass. The merge
+    // preserves product mass and momentum; its apparent volume follows mass.
+    for (let a = this.flocs.length - 1; a >= 0; a--) {
+      const first = this.flocs[a];
+      const reachA = m.radius * (0.12 + 0.48 * Math.cbrt(first.mass / 0.12));
+      for (let b = 0; b < a; b++) {
+        const second = this.flocs[b];
+        const reachB = m.radius * (0.12 + 0.48 * Math.cbrt(second.mass / 0.12));
+        if (first.position.distanceToSquared(second.position) > (reachA + reachB) ** 2 * 0.32
+          || first.velocity.distanceToSquared(second.velocity) > 0.02 ** 2) continue;
+        const total = first.mass + second.mass;
+        if (total > 0.12) continue;
+        second.position.multiplyScalar(second.mass / total)
+          .addScaledVector(first.position, first.mass / total);
+        second.velocity.multiplyScalar(second.mass / total)
+          .addScaledVector(first.velocity, first.mass / total);
+        second.porosity = (second.porosity * second.mass + first.porosity * first.mass) / total;
+        second.mass = total;
+        this.flocs.splice(a, 1);
+        break;
+      }
     }
   }
 

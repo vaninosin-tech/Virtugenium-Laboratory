@@ -158,10 +158,25 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   localMix = clamp(blue + 0.82 * smoothstep(0.015, 0.82, p)
     * smoothstep(0.015, 0.25, blue), 0.0, 1.0);
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
-  // AgCl scattering follows the conserved fine suspension volume.
-  vec3 uvw = clamp((vTubePoint - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);
-  float density = uBaActive > 0.5 ? texture(uBaField, uvw).r : 0.0;
-  cloud = 1.0 - exp(-density * 1.2);
+  // Integrate conserved fine-particle concentration through the liquid chord.
+  vec3 ray = normalize(vTubePoint - uCameraLocal);
+  vec2 edge = vTubePoint.xz;
+  float a = max(dot(ray.xz, ray.xz), 0.000001);
+  float b = dot(edge, ray.xz);
+  float radius = uCuBoundsSize.x * 0.5;
+  float distance = max(0.0, (-b + sqrt(max(0.0, b * b + a *
+    (radius * radius - dot(edge, edge))))) / a);
+  float upRay = dot(uUp, ray);
+  if (upRay > 0.00001) distance = min(distance,
+    max(0.0, (uLevel - dot(uUp, vTubePoint)) / upRay));
+  float opticalDepth = 0.0;
+  for (int k = 0; k < 8; k++) {
+    vec3 q = vTubePoint + ray * distance * (float(k) + 0.5) / 8.0;
+    vec3 uvw = clamp((q - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);
+    opticalDepth += (uBaActive > 0.5 ? max(0.0, texture(uBaField, uvw).r - 0.4) : 0.0)
+      * distance / (8.0 * radius);
+  }
+  cloud = 1.0 - exp(-opticalDepth * 1.7);
   localMix = cloud;
 } else if (uReactionKind > 2.5 && uReactionKind < 3.5) {
   vec3 ray = normalize(vTubePoint - uCameraLocal);
