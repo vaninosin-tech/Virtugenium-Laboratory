@@ -125,7 +125,7 @@ void main() {
     if (h < 0.0 || h > height || dot(q.xz, q.xz) > wall || dot(uUp, q) > uLevel) continue;
     if (uKind < 1.5) {
       opticalDepth += mix(vec3(1.0, 0.26, 0.008), vec3(0.95, 0.20, 0.07),
-        smoothstep(0.65, 0.95, uCuCompletion)) * max(0.0, copperField(q)) * distance / (uSteps * radius);
+        smoothstep(0.65, 0.95, uCuCompletion)) * max(0.0, copperField(q)) * 1.55 * distance / (uSteps * radius);
     } else if (uKind > 2.5) {
       float c = permanganateVolume(q);
       // Beer-Lambert: retained dissolved MnO4- alone determines transmission.

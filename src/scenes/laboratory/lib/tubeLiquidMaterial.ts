@@ -156,7 +156,7 @@ if (uReactionKind > 0.5 && uReactionKind < 1.5) {
   // the near-wall voxel is still clear. Keep the field's stronger local
   // filaments on top of this gradually growing body colour.
   localMix = clamp(max(copperField(vTubePoint),
-    0.62 * smoothstep(0.015, 0.82, p)), 0.0, 1.0);
+    0.82 * smoothstep(0.015, 0.82, p)), 0.0, 1.0);
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   // AgCl scattering follows the conserved fine suspension volume.
   vec3 uvw = clamp((vTubePoint - uCuBoundsMin) / uCuBoundsSize, 0.0, 1.0);
@@ -331,11 +331,11 @@ if (uReactionKind > 1.5 && uReactionKind < 2.5) {
   gl_FragColor.rgb = mix(gl_FragColor.rgb, milkPatch, cloud * 0.92);
   gl_FragColor.a = max(gl_FragColor.a, cloud * 0.95);
 }
-// BaSO4 suspension is an opaque milk on reference footage (exp3-*): the
-// background must not show through while the column is still cloudy.
+// Keep the scattered light in the integrated cloud response. Forcing a
+// second opaque white pass makes the rounded floor read as a lit disk.
 if (uReactionKind > 2.5 && uReactionKind < 3.5 && uTracerMode < 0.5 && vCap < 0.5) {
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.90), cloud * 0.70);
-  gl_FragColor.a = max(gl_FragColor.a, cloud * 0.94);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.78), cloud * 0.42);
+  gl_FragColor.a = max(gl_FragColor.a, cloud * 0.80);
 }`);
     };
   }

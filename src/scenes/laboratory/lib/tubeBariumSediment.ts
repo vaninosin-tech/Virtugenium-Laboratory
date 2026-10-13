@@ -54,10 +54,14 @@ export class BariumSedimentGeometry extends THREE.BufferGeometry {
     for (let ring = 0; ring <= this.rings; ring++) {
       const u = ring / this.rings;
       const r = this.radius * 0.96 * u;
-      const taper = 1 - THREE.MathUtils.smoothstep(u, 0.76, 1);
       const floor = this.bottom + this.radius - Math.sqrt(this.radius * this.radius - r * r);
       for (let sector = 0; sector <= this.sectors; sector++) {
         const angle = sector / this.sectors * Math.PI * 2;
+        // The deposited film ends at different radii around the bowl. A
+        // rotationally symmetric taper otherwise reads as a flat white coin.
+        const edge = 0.77 + 0.08 * Math.sin(angle * 3 + 0.4)
+          + 0.045 * Math.sin(angle * 7 - 0.8);
+        const taper = 1 - THREE.MathUtils.smoothstep(u, edge - 0.11, edge);
         const x = r * Math.cos(angle), z = r * Math.sin(angle);
         const gx = THREE.MathUtils.clamp((x / this.radius + 1) * field.nx * 0.5, 0, field.nx - 1);
         const gz = THREE.MathUtils.clamp((z / this.radius + 1) * field.nz * 0.5, 0, field.nz - 1);
