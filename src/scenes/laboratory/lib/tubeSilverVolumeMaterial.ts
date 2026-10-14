@@ -4,13 +4,17 @@ import * as THREE from "three";
 export function makeSilverVolumeMaterial(radius: number, bottom: number) {
   const camera = { value: new THREE.Vector3() };
   const material = new THREE.ShaderMaterial({
-    uniforms: { uCameraLocal: camera, uRadius: { value: radius }, uBottom: { value: bottom } },
+    uniforms: { uCameraLocal: camera, uRadius: { value: radius },
+      uBottom: { value: bottom }, uLevel: { value: bottom } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     vertexShader: `
       uniform vec3 uCameraLocal;
       varying vec3 vSurface;
       varying vec3 vEye;
-      varying vec3 vTubePoint;
+      varying vec3 vTubeCenter;
+      varying vec3 vBasisX;
+      varying vec3 vBasisY;
+      varying vec3 vBasisZ;
       void main() {
         vec3 a = instanceMatrix[0].xyz;
         vec3 b = instanceMatrix[1].xyz;
@@ -19,7 +23,10 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
         vEye = vec3(dot(delta, a) / dot(a, a), dot(delta, b) / dot(b, b),
           dot(delta, c) / dot(c, c));
         vSurface = position;
-        vTubePoint = (instanceMatrix * vec4(position, 1.0)).xyz;
+        vTubeCenter = instanceMatrix[3].xyz;
+        vBasisX = a;
+        vBasisY = b;
+        vBasisZ = c;
         gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
       }
     `,
@@ -27,9 +34,13 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
       precision highp float;
       uniform float uRadius;
       uniform float uBottom;
+      uniform float uLevel;
       varying vec3 vSurface;
       varying vec3 vEye;
-      varying vec3 vTubePoint;
+      varying vec3 vTubeCenter;
+      varying vec3 vBasisX;
+      varying vec3 vBasisY;
+      varying vec3 vBasisZ;
       float blob(vec3 p, vec3 center, vec3 axis) {
         vec3 q = (p - center) / axis;
         return exp(-2.35 * dot(q, q));
@@ -47,16 +58,16 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
         return d * grain;
       }
       void main() {
-        float radial = length(vTubePoint.xz);
-        if (radial > uRadius * 0.96) discard;
-        float bowl = uBottom + uRadius - sqrt(max(0.0, uRadius*uRadius - radial*radial));
-        if (vTubePoint.y < bowl) discard;
         vec3 direction = normalize(vSurface - vEye);
         float travel = max(0.0, -2.0 * dot(vSurface, direction));
         float integral = 0.0;
         for (int step = 0; step < 10; step++) {
           vec3 p = vSurface + direction * travel * (float(step) + 0.5) / 10.0;
-          integral += density(p);
+          vec3 tubePoint = vTubeCenter + vBasisX * p.x + vBasisY * p.y + vBasisZ * p.z;
+          float radial = length(tubePoint.xz);
+          float bowl = uBottom + uRadius - sqrt(max(0.0, uRadius*uRadius - radial*radial));
+          if (radial < uRadius * 0.96 && tubePoint.y >= bowl && tubePoint.y <= uLevel)
+            integral += density(p);
         }
         float opticalDepth = integral * travel * 0.75;
         float alpha = smoothstep(0.18, 1.05, opticalDepth) * smoothstep(0.0, 0.55, travel);

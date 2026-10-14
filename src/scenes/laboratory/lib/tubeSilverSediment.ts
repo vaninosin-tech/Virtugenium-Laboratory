@@ -66,8 +66,8 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
     const count = (this.rings + 1) * (this.sectors + 1);
     // A loose curd bed contains mostly trapped liquid, so its visible volume
     // grows nonlinearly with the conserved mass that has reached the bowl.
-    const pileHeight = this.radius * Math.min(6.5,
-      (0.45 + 11 * Math.sqrt(mass)) * (1 - field.compaction * 0.12));
+    const pileHeight = this.radius * Math.min(3.8,
+      (0.40 + 7 * Math.sqrt(mass)) * (1 - field.compaction * 0.12));
     for (let ring = 0; ring <= this.rings; ring++) {
       const u = ring / this.rings;
       const r = this.radius * 0.96 * u;

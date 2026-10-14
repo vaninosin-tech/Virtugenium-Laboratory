@@ -17,6 +17,7 @@ export interface FlocAggregate {
   mass: number;
   porosity: number;
   shape: number;
+  segregated?: boolean;
 }
 
 /** Fine suspension, rare coarse aggregates, and a conserved bottom reservoir. */
@@ -232,6 +233,20 @@ export class TubeSilverField {
       } else continue;
       this.coarse[i] = 0;
     }
+    // Compact pieces fall from a porous parent; both retain conserved mass.
+    const existing = this.flocs.length;
+    for (let n = 0; n < existing && this.flocs.length < 72; n++) {
+      const floc = this.flocs[n];
+      if (floc.segregated || floc.porosity < 0.45 || floc.mass < 0.004) continue;
+      const detached = floc.mass * 0.38;
+      floc.mass -= detached;
+      floc.segregated = true;
+      this.flocs.push({
+        position: floc.position.clone().addScaledVector(this.velocity.gravityUp, -m.radius * 0.6),
+        velocity: this.velocity.gravityUp.clone().multiplyScalar(-0.04),
+        mass: detached, porosity: 0.26, shape: floc.shape + 307, segregated: true,
+      });
+    }
     for (let n = this.flocs.length - 1; n >= 0; n--) {
       const floc = this.flocs[n];
       const ix = THREE.MathUtils.clamp(Math.floor((floc.position.x / m.radius + 1) * m.nx / 2), 0, m.nx - 1);
@@ -240,8 +255,8 @@ export class TubeSilverField {
       const i = m.index(ix, iy, iz);
       const flow = new THREE.Vector3(this.flow[i * 3], this.flow[i * 3 + 1], this.flow[i * 3 + 2]);
       const settling = TUBE_SIMULATION.silver.coarseSettlingSpeed * this.settlingBoost
-        * Math.sqrt(Math.max(0.16, floc.mass * 28)) * (0.3 + 0.7 * (1 - floc.porosity))
-        * (1 + 3 * (1 - THREE.MathUtils.smoothstep(floc.porosity, 0.3, 0.65)));
+        * Math.sqrt(Math.max(0.16, floc.mass * 28)) * (1 - floc.porosity) ** 2
+        * (0.2 + 9 * (1 - THREE.MathUtils.smoothstep(floc.porosity, 0.35, 0.65)));
       const shear = Math.max(0, flow.distanceTo(floc.velocity) - 0.0015);
       floc.velocity.lerp(flow.multiplyScalar(0.35).addScaledVector(this.velocity.gravityUp, -settling),
         1 - Math.exp(-dt * 2));
@@ -265,7 +280,7 @@ export class TubeSilverField {
           const child = floc.position.clone().addScaledVector(direction, m.radius * 0.35);
           this.flocs.push({ position: child, velocity: floc.velocity.clone(),
             mass: detached * 0.45, porosity: Math.min(0.88, floc.porosity + 0.07),
-            shape: floc.shape + 97 + this.flocs.length });
+            shape: floc.shape + 97 + this.flocs.length, segregated: true });
         } else this.suspension[0][i] += detached * 0.45;
       }
       if (agitation > 0.08 && floc.mass > 0.0001) {
@@ -298,6 +313,7 @@ export class TubeSilverField {
         second.velocity.multiplyScalar(second.mass / total)
           .addScaledVector(first.velocity, first.mass / total);
         second.porosity = (second.porosity * second.mass + first.porosity * first.mass) / total;
+        second.segregated = second.segregated || first.segregated;
         second.mass = total;
         this.flocs.splice(a, 1);
         break;

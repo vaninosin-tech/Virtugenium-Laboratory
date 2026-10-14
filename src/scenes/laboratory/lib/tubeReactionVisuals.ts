@@ -1422,6 +1422,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       inverse.copy(volume.matrixWorld).invert();
       if (cameraPosition) cameraLocal.copy(cameraPosition).applyMatrix4(inverse);
       silverVolume.camera.value.copy(cameraLocal);
+      silverVolume.material.uniforms.uLevel.value = level.value;
       if (absorption && absorptionWall && absorptionCap) {
         absorption.uniforms.uUp.value.copy(up.value);
         absorption.uniforms.uLevel.value = level.value;
@@ -1708,7 +1709,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         if (total > 0.0002) {
           const x = THREE.MathUtils.clamp(weightedX / total * 0.4, -radius * 0.2, radius * 0.2);
           const z = THREE.MathUtils.clamp(weightedZ / total * 0.4, -radius * 0.2, radius * 0.2);
-          const height = radius * Math.min(7.5, 1.15 + 12.0 * Math.sqrt(total));
+          const height = radius * Math.min(3.8, 0.80 + 6.5 * Math.sqrt(total));
           const width = radius * Math.min(1.28, 0.88 + 0.85 * Math.sqrt(total));
           place(silverBedCurds, bedCurdCount++, x, box.min.y + height * 0.50, z,
             width, height * 0.55, width * 0.9);
@@ -1886,7 +1887,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
           const z = cloud.z / cloud.mass * 0.55;
           const fullness = Math.min(1, Math.cbrt(cloud.mass / 0.10));
           const width = radius * (0.67 + 0.55 * fullness);
-          const height = radius * (0.70 + 0.45 * fullness);
+          const height = radius * (0.46 + 0.31 * fullness);
           place(silverCotton, cottonCount++, x, y, z, width, height, width * 0.9);
           for (let lobe = 0; lobe < 3; lobe++) {
             const angle = band * 1.7 + lobe * 2.39996;
@@ -1913,9 +1914,10 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         linkDirection.normalize();
         dummy.position.set((ax + bx) * 0.5, (ay + by) * 0.5, (az + bz) * 0.5);
         dummy.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), linkDirection);
-        dummy.scale.set(radius * 0.13, distance * 0.37, radius * 0.13);
+        dummy.scale.set(radius * 0.085, distance * 0.34, radius * 0.085);
         dummy.updateMatrix();
         silverLinks.setMatrixAt(linkCount++, dummy.matrix);
+        break;
       }
       silverLinks.count = linkCount;
       silverLinks.visible = linkCount > 0 && p > 0;
