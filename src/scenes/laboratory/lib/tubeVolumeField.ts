@@ -229,7 +229,7 @@ export class TubeVolumeField {
     this.mask = new LiquidMask(resolution.width, resolution.height, resolution.depth, radius, bottom, height);
     this.species = { "Cu2+": new SpeciesField("Cu2+", this.mask), HNO3: new SpeciesField("HNO3", this.mask) };
     this.velocity = new VelocityField(this.mask);
-    this.flowSolver = new TubeFlowSolver(this.mask, { lowDiffusion: true, pressureIterations: 10, eddyFraction: 0.002, ambientStrength: 0.2 });
+    this.flowSolver = new TubeFlowSolver(this.mask, { lowDiffusion: true, pressureIterations: 10, eddyFraction: 0.0005, ambientStrength: 0.2 });
     this.sources = sources.map(p => p.clone());
     const n = this.mask.data.length;
     this.wake = new Float32Array(n);
@@ -611,7 +611,9 @@ export class TubeVolumeField {
       let patch = 0;
       for (let active = 0; active < 6; active++)
         patch += this.sourcePatchWeights[s * 6 + active] * pulses[active];
-      weights[s] = 0.01 + patch;
+      // Concentrate a fixed Cu(II) budget in the currently active wet patches.
+      // A linear blend across all surface cells smears late sources into a halo.
+      weights[s] = 0.002 + patch * patch;
       weightSum += weights[s];
     }
     for (let s = 0; s < this.sourceCells.length; s++) {

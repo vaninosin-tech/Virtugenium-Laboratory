@@ -27,9 +27,11 @@ float copperField(vec3 p) {
   if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return 0.0;
   float density = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
   float c = max(0.0, density);
-  // Resolve excess above the conserved bulk concentration. The field creates
-  // the stream shapes; the mean only separates their optical depth from wash.
-  return 31.0 * pow(max(c - uCuMeanDensity * 0.65 - 0.0015, 0.0), 1.22);
+  // The conserved mean colours the bulk separately. Only real local excess
+  // contributes to the plume, so a uniformly blue field cannot paint one.
+  // A sublinear response preserves visible differences before transmission
+  // approaches zero in an already coloured solution.
+  return 18.0 * pow(max(c - uCuMeanDensity, 0.0), 0.9);
 }`;
 
 export const permanganateTongueGLSL = `
