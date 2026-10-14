@@ -92,7 +92,9 @@ vec3 tubeTransmission() {
       absorption += vec3(0.45, 1.25, 0.63) * texture2D(uImmersionDye, uv).r * 0.25;
     }
   }
-  absorption *= mix(1.0, 0.16, uImmersionCopperSurface);
+  // The blue solution shades the metal only slightly; keep its warm specular
+  // response legible while solids farther behind still receive full filtering.
+  absorption *= mix(1.0, 0.035, uImmersionCopperSurface);
   vec3 viewLight = exp(-absorption * path / max(uImmersionRadius, 0.0001));
   vec3 topLight = exp(-absorption * depth / max(uImmersionHeight, 0.0001) * 0.38);
   return viewLight * topLight;

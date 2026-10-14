@@ -29,7 +29,7 @@ import { useRuntimeQualityStore, type RuntimeQuality } from "./useRuntimeQuality
 
 export const TUBE_VISUALS = {
   copperColor: "#1f7cc2",
-  gasColor: "#967967",
+  gasColor: "#a97650",
   gasOpacity: 0.055,
   gasBuildSeconds: 4,
   gasDecaySeconds: 18,
@@ -777,7 +777,7 @@ void main() {
     transparent: true, depthWrite: false, depthTest: false, side: THREE.FrontSide, toneMapped: false,
     uniforms: { uUp: up, uLevel: level, uDensity: { value: 0 }, uSurfaceGas: { value: 0 }, uFront: { value: 0 }, uMouth: { value: 0 }, uResidue: { value: 0 }, uTime: { value: 0 }, uDetail: { value: 1 },
       uMouthHeight: { value: lip.y - box.max.y },
-      uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color("#8d654a") } },
+      uLip: { value: lip.y }, uRadius: { value: headRadius }, uColor: { value: new THREE.Color("#bd743d") } },
     vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vEye;
 void main() { vP = position; vN = normalize(normalMatrix * normal);
 vec4 mv = modelViewMatrix * vec4(position, 1.0); vEye = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
@@ -804,7 +804,11 @@ if (uDetail > 0.5) {
   motion = clamp(1.0 + (cloud - 0.5) * 1.25, 0.72, 1.28);
 }
 motion = mix(motion, 1.0, smoothstep(0.78, 1.0, h));
-float heightDensity = mix(0.10, 1.0, smoothstep(0.0, 0.92, h));
+// Open air first oxidises the gas at the meniscus and around the mouth.
+// The middle of the headspace stays mostly clear.
+float lowerCloud = 0.64 * exp(-pow((h - 0.15) / 0.20, 2.0));
+float mouthCloud = 0.72 * smoothstep(0.60, 0.94, h);
+float heightDensity = 0.09 + lowerCloud + mouthCloud;
 float facing = abs(dot(normalize(vN), normalize(vEye)));
 float edgeFade = smoothstep(0.0, 0.3, facing);
 float wallBand = (0.55 + 0.55 * pow(1.0 - facing, 0.55))
@@ -812,7 +816,7 @@ float wallBand = (0.55 + 0.55 * pow(1.0 - facing, 0.55))
 float lowerFade = smoothstep(-0.008, 0.025, aboveWater);
 float rise = mix(1.0 - smoothstep(uFront - 0.12, uFront + 0.08, h),
   uMouth, smoothstep(0.76, 1.0, h));
-float mist = (1.0 - exp(-uDensity * 1.55 * heightDensity)) * edgeFade
+float mist = (1.0 - exp(-uDensity * 1.05 * heightDensity)) * edgeFade
   * lowerFade * rise * motion;
 // A thin, dilute NO2 veil sits immediately above the bubbling meniscus.
 float surfaceBand = exp(-pow(aboveWater / max(uRadius * 0.65, 0.001), 2.0))
@@ -888,6 +892,7 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   const gas = makePool(gasMaterial);
   gas.geometry = gasGeometry;
   gas.name = "TubeNO2";
+  gas.renderOrder = 4.3;
   const condensate = makePool(dropletMaterial);
   condensate.name = "TubeCondensate";
   const splash = makePool(splashMaterial);
@@ -953,6 +958,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
   let disposed = false;
   let lastTime: number | undefined;
   const gasState = new GasState();
+  let airborneNO2 = 0, lastNO2 = 0;
   const noBubbles = new TubeNOBubbles();
   let lastGasProgress = 0;
   let surfaceActivity = 0;
@@ -992,9 +998,10 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         // side. Otherwise draw order makes them appear over the metal.
         object.material.depthWrite = true;
         object.material.needsUpdate = true;
-        // The absorption pass must filter the liquid in front of the metal.
-        // Depth writing by the metal still hides the far-side bubbles.
-        object.renderOrder = 0.25;
+        // Draw the warm metal after liquid absorption. Its immersion shader
+        // supplies a light water tint; the full blue volume would blacken it.
+        // Depth writing still hides bubbles on the far side of the granule.
+        object.renderOrder = 3.5;
       }
     }
   });
@@ -1145,9 +1152,9 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         copper.children.forEach((child, i) => {
           const etch = THREE.MathUtils.smoothstep(p * (0.8 + random(i + 150) * 0.38), 0.02, 0.9);
           if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-            child.material.color.set("#b8733f").lerp(new THREE.Color("#654b3b"), etch * 0.8);
-            child.material.roughness = THREE.MathUtils.lerp(0.24, 0.7, etch);
-            child.material.metalness = THREE.MathUtils.lerp(0.98, 0.78, etch);
+            child.material.color.set("#d58b68").lerp(new THREE.Color("#b8734c"), etch * 0.42);
+            child.material.roughness = THREE.MathUtils.lerp(0.25, 0.40, etch);
+            child.material.metalness = THREE.MathUtils.lerp(0.72, 0.60, etch);
           }
           // A bounding sphere encloses every rotated, irregular grain. Fit
           // that sphere inside the bowl instead of trusting its drop target.
@@ -1475,6 +1482,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       // backwards resets it; wall residue clears over several minutes.
       if (reverseTime) {
         gasState.reset(); noBubbles.reset(); lastGasProgress = 0; surfaceActivity = 0;
+        airborneNO2 = lastNO2 = 0;
         heatPulseAge = 0; waveSurface?.reset();
       }
       if (waveSurface && hasLiquid) {
@@ -1550,11 +1558,17 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         pourAir.instanceMatrix.needsUpdate = true;
       }
       const gasProgress = kind === "copper-nitric" ? reactionProgress ?? p : 0;
-      if (gasProgress < lastGasProgress - 1e-6) { gasState.reset(); noBubbles.reset(); lastGasProgress = 0; }
+      if (gasProgress < lastGasProgress - 1e-6) {
+        gasState.reset(); noBubbles.reset(); lastGasProgress = 0;
+        airborneNO2 = lastNO2 = 0;
+      }
       const deltaExtent = Math.max(0, gasProgress - lastGasProgress);
       lastGasProgress = gasProgress;
       gasState.oxygenAvailable = readDeveloperOxygen();
       gasState.advance(deltaExtent, dt);
+      airborneNO2 = airborneNO2 * Math.exp(-Math.max(0, dt) / 55)
+        + Math.max(0, gasState.no2 - lastNO2);
+      lastNO2 = gasState.no2;
       wettedSites.length = 0;
       if (kind === "copper-nitric" && copper && (deltaExtent > 0 || noBubbles.born > 0)) {
         for (let i = 0; i < bubbleSites.length; i++) {
@@ -1936,14 +1950,15 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       silverLinks.visible = linkCount > 0 && p > 0;
       // Only NO2 absorbs brown light. The gas renderer clips every fragment
       // below the actual, tilted meniscus in its fragment shader.
-      const brownDensity = kind === "copper-nitric" ? Math.min(0.58, gasState.no2 * 1.65) : 0;
+      const brownDensity = kind === "copper-nitric"
+        ? 0.48 * (1 - Math.exp(-airborneNO2 * 1.8)) : 0;
       headspace.visible = brownDensity > 0.001;
       gas.visible = brownDensity > 0.12;
-      gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * brownDensity * 0.5;
+      gasMaterial.uniforms.uOpacity.value = TUBE_VISUALS.gasOpacity * brownDensity * 3;
       gasMaterial.uniforms.uTime.value = time;
       gasMaterial.uniforms.uWorldUp.value.copy(gravity);
-      headMaterial.uniforms.uDensity.value = brownDensity * 1.20;
-      headMaterial.uniforms.uSurfaceGas.value = brownDensity * 0.09;
+      headMaterial.uniforms.uDensity.value = brownDensity * 1.35;
+      headMaterial.uniforms.uSurfaceGas.value = brownDensity * 0.12;
       headMaterial.uniforms.uFront.value = 1;
       headMaterial.uniforms.uMouth.value = 1;
       headMaterial.uniforms.uMouthHeight.value = up.value.dot(lip) - level.value;
