@@ -46,15 +46,17 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
         return exp(-2.35 * dot(q, q));
       }
       float density(vec3 p) {
-        p += vec3(0.11 * sin(7.0*p.y + 5.0*p.z),
-          0.10 * sin(8.0*p.x - 6.0*p.z),
-          0.09 * sin(9.0*p.y - 4.0*p.x));
-        float d = blob(p, vec3(-0.22, 0.20, 0.02), vec3(0.65, 0.68, 0.64));
-        d += blob(p, vec3(0.25, 0.10, -0.12), vec3(0.61, 0.68, 0.58));
-        d += blob(p, vec3(-0.18, -0.28, 0.13), vec3(0.57, 0.62, 0.58));
-        d += blob(p, vec3(0.14, -0.42, 0.07), vec3(0.44, 0.56, 0.48));
-        float grain = 0.78 + 0.25 * sin(13.0*p.x + 7.0*p.y) * sin(11.0*p.z - 8.0*p.y)
-          + 0.10 * sin(27.0*p.x - 18.0*p.z);
+        p += vec3(0.15 * sin(5.0*p.y + 4.0*p.z)
+            + 0.045 * sin(17.0*p.y - 11.0*p.z),
+          0.12 * sin(7.0*p.x - 5.0*p.z),
+          0.11 * sin(6.0*p.y - 3.0*p.x));
+        float d = 1.30 * blob(p, vec3(-0.24, 0.26, 0.03), vec3(0.72, 0.58, 0.65));
+        d += 0.98 * blob(p, vec3(0.32, 0.04, -0.18), vec3(0.53, 0.55, 0.55));
+        d += 0.78 * blob(p, vec3(-0.27, -0.32, 0.13), vec3(0.43, 0.54, 0.48));
+        d += 0.46 * blob(p, vec3(0.35, -0.70, 0.08), vec3(0.23, 0.62, 0.31));
+        d += 0.28 * blob(p, vec3(-0.55, -0.61, -0.10), vec3(0.18, 0.71, 0.24));
+        float grain = 0.88 + 0.19 * sin(11.0*p.x + 7.0*p.y) * sin(9.0*p.z - 6.0*p.y)
+          + 0.07 * sin(25.0*p.x - 18.0*p.z);
         return d * grain;
       }
       void main() {
@@ -70,7 +72,9 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
             integral += density(p);
         }
         float opticalDepth = integral * travel * 0.75;
-        float alpha = smoothstep(0.18, 1.05, opticalDepth) * smoothstep(0.0, 0.55, travel);
+        float core = smoothstep(0.34, 1.02, opticalDepth);
+        float wisps = 0.10 * smoothstep(0.05, 0.35, opticalDepth);
+        float alpha = min(1.0, core + wisps) * smoothstep(0.0, 0.55, travel);
         if (alpha < 0.012) discard;
         vec3 center = vSurface + direction * travel * 0.5;
         float fibers = sin(4.0 * center.x + 3.0 * center.y)

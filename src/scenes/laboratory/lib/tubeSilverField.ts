@@ -194,7 +194,7 @@ export class TubeSilverField {
         }
       }
       const suspensionMass = this.suspensionMass;
-      const opticalMix = THREE.MathUtils.clamp((suspensionMass - 0.12) * 4, 0, 0.55);
+      const opticalMix = THREE.MathUtils.clamp((suspensionMass - 0.10) * 7, 0, 0.78);
       for (let i = 0; i < this.pixels.length; i++) {
         const local = (this.suspension[0][i] + this.suspension[1][i]
           + this.suspension[2][i]) * m.activeCount;
@@ -238,12 +238,12 @@ export class TubeSilverField {
     for (let n = 0; n < existing && this.flocs.length < 72; n++) {
       const floc = this.flocs[n];
       if (floc.segregated || floc.porosity < 0.45 || floc.mass < 0.004) continue;
-      const detached = floc.mass * 0.38;
+      const detached = floc.mass * 0.58;
       floc.mass -= detached;
       floc.segregated = true;
       this.flocs.push({
         position: floc.position.clone().addScaledVector(this.velocity.gravityUp, -m.radius * 0.6),
-        velocity: this.velocity.gravityUp.clone().multiplyScalar(-0.04),
+        velocity: this.velocity.gravityUp.clone().multiplyScalar(-0.05),
         mass: detached, porosity: 0.26, shape: floc.shape + 307, segregated: true,
       });
     }
@@ -282,6 +282,14 @@ export class TubeSilverField {
             mass: detached * 0.45, porosity: Math.min(0.88, floc.porosity + 0.07),
             shape: floc.shape + 97 + this.flocs.length, segregated: true });
         } else this.suspension[0][i] += detached * 0.45;
+      }
+      // Unequal velocities across a porous curd strip its surface into fine
+      // suspended AgCl, even after the stronger jet shear has subsided.
+      if (floc.mass > 0.001) {
+        const released = floc.mass * Math.min(0.035,
+          dt * (0.024 + 1.8 * shear) * floc.porosity);
+        floc.mass -= released;
+        this.suspension[0][i] += released;
       }
       if (agitation > 0.08 && floc.mass > 0.0001) {
         const released = floc.mass * Math.min(0.25, agitation * dt * 1.6);

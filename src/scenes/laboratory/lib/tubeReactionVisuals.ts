@@ -276,7 +276,7 @@ vec3 transmitThroughTube(vec3 background) {
         * (uOpticalKind < 2.5 ? 3.5 : 3.0);
     }
   }
-  vec3 scatteredLight = uOpticalKind < 2.5 ? vec3(0.76, 0.82, 0.85) : vec3(0.94);
+  vec3 scatteredLight = uOpticalKind < 2.5 ? vec3(0.63, 0.71, 0.76) : vec3(0.94);
   return mix(background * transmission, scatteredLight, 1.0 - exp(-scattering));
 }
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>", `#include <clipping_planes_fragment>
@@ -1709,10 +1709,10 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         if (total > 0.0002) {
           const x = THREE.MathUtils.clamp(weightedX / total * 0.4, -radius * 0.2, radius * 0.2);
           const z = THREE.MathUtils.clamp(weightedZ / total * 0.4, -radius * 0.2, radius * 0.2);
-          const height = radius * Math.min(3.8, 0.80 + 6.5 * Math.sqrt(total));
+          const height = radius * Math.min(5.1, 0.90 + 8.5 * Math.sqrt(total));
           const width = radius * Math.min(1.28, 0.88 + 0.85 * Math.sqrt(total));
-          place(silverBedCurds, bedCurdCount++, x, box.min.y + height * 0.50, z,
-            width, height * 0.55, width * 0.9);
+          place(silverBedCurds, bedCurdCount++, x, box.min.y + height * 0.56, z,
+            width, height * 0.70, width * 0.9);
           for (let n = 0; n < 4; n++) {
             const angle = n * 2.39996 + 0.35;
             const lobeX = x + Math.cos(angle) * radius * 0.35;
@@ -1720,8 +1720,8 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
             const radial = Math.min(radius * 0.9, Math.hypot(lobeX, lobeZ));
             const floor = box.min.y + radius - Math.sqrt(radius * radius - radial * radial);
             const lobeHeight = height * (0.63 + 0.10 * random(n + 41));
-            place(silverBedCurds, bedCurdCount++, lobeX, floor + lobeHeight * 0.48, lobeZ,
-              width * 0.48, lobeHeight * 0.57, width * 0.46);
+            place(silverBedCurds, bedCurdCount++, lobeX, floor + lobeHeight * 0.52, lobeZ,
+              width * 0.48, lobeHeight * 0.69, width * 0.46);
           }
         }
       }
@@ -1868,11 +1868,18 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       }
       let cottonCount = 0;
       const cloudBands = Array.from({ length: 4 }, () => ({ mass: 0, x: 0, y: 0, z: 0 }));
+      const bandEdges = [0, 0.17, 0.43, 0.76, 1];
+      const bandWidths = [1.20, 0.72, 1.35, 1.08];
+      const bandHeights = [1.02, 0.72, 1.23, 0.92];
+      const wallSide = silverInlet.x < -radius * 0.12 ? -1 : 1;
       if (flakes.visible && silverField) {
         const liquidHeight = Math.max(radius * 2, level.value - box.min.y);
         for (const floc of silverField.flocs) {
-          const band = Math.min(3, Math.max(0,
-            Math.floor((floc.position.y - box.min.y) / liquidHeight * 4)));
+          const normalizedHeight = THREE.MathUtils.clamp(
+            (floc.position.y - box.min.y) / liquidHeight, 0, 1);
+          const band = normalizedHeight < bandEdges[1] ? 0
+            : normalizedHeight < bandEdges[2] ? 1
+              : normalizedHeight < bandEdges[3] ? 2 : 3;
           const cloud = cloudBands[band];
           cloud.mass += floc.mass;
           cloud.x += floc.mass * floc.position.x;
@@ -1882,20 +1889,24 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         for (let band = 0; band < cloudBands.length; band++) {
           const cloud = cloudBands[band];
           if (cloud.mass < 0.002) continue;
-          const x = cloud.x / cloud.mass * 0.55;
+          const x = THREE.MathUtils.clamp(cloud.x / cloud.mass * 0.55
+            + wallSide * radius * (0.19 + 0.08 * Math.sin(band * 2.4)),
+            -radius * 0.48, radius * 0.48);
           const y = cloud.y / cloud.mass;
           const z = cloud.z / cloud.mass * 0.55;
           const fullness = Math.min(1, Math.cbrt(cloud.mass / 0.10));
-          const width = radius * (0.67 + 0.55 * fullness);
-          const height = radius * (0.46 + 0.31 * fullness);
-          place(silverCotton, cottonCount++, x, y, z, width, height, width * 0.9);
-          for (let lobe = 0; lobe < 3; lobe++) {
-            const angle = band * 1.7 + lobe * 2.39996;
-            const dx = Math.cos(angle) * width * 0.38;
-            const dz = Math.sin(angle) * width * 0.35;
-            const dy = lobe === 0 ? -height * 0.66 : (lobe === 1 ? height * 0.36 : -height * 0.18);
+          const width = radius * (0.85 + 0.82 * fullness) * bandWidths[band];
+          const height = radius * (0.54 + 0.42 * fullness) * bandHeights[band];
+          place(silverCotton, cottonCount++, x, y, z, width, height, width * 0.80);
+          for (let lobe = 0; lobe < 4; lobe++) {
+            const angle = band * 1.39 + lobe * 1.83;
+            const dx = Math.cos(angle) * width * (lobe === 0 ? 0.38 : 0.48);
+            const dz = Math.sin(angle) * width * 0.30;
+            const dy = [-0.84, 0.39, -0.23, -1.24][lobe] * height;
             place(silverCotton, cottonCount++, x + dx, y + dy, z + dz,
-              width * 0.46, height * (lobe === 0 ? 0.62 : 0.43), width * 0.43);
+              width * [0.36, 0.61, 0.41, 0.22][lobe],
+              height * [0.86, 0.43, 0.56, 0.90][lobe],
+              width * [0.35, 0.48, 0.35, 0.18][lobe]);
           }
         }
       }
@@ -1905,8 +1916,10 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       for (let band = 3; band > 0; band--) {
         const a = cloudBands[band], b = cloudBands[band - 1];
         if (a.mass < 0.01 || b.mass < 0.01) continue;
-        const ax = a.x / a.mass * 0.55, ay = a.y / a.mass, az = a.z / a.mass * 0.55;
-        const bx = b.x / b.mass * 0.55, by = b.y / b.mass, bz = b.z / b.mass * 0.55;
+        const ax = a.x / a.mass * 0.55 + wallSide * radius * 0.2;
+        const ay = a.y / a.mass, az = a.z / a.mass * 0.55;
+        const bx = b.x / b.mass * 0.55 + wallSide * radius * 0.2;
+        const by = b.y / b.mass, bz = b.z / b.mass * 0.55;
         if (ay - by > radius * 4.4) continue;
         linkDirection.set(bx - ax, by - ay, bz - az);
         const distance = linkDirection.length();
@@ -1914,10 +1927,10 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         linkDirection.normalize();
         dummy.position.set((ax + bx) * 0.5, (ay + by) * 0.5, (az + bz) * 0.5);
         dummy.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), linkDirection);
-        dummy.scale.set(radius * 0.085, distance * 0.34, radius * 0.085);
+        dummy.scale.set(radius * (0.10 + 0.06 * Math.min(a.mass, b.mass) / 0.1),
+          distance * 0.43, radius * 0.09);
         dummy.updateMatrix();
         silverLinks.setMatrixAt(linkCount++, dummy.matrix);
-        break;
       }
       silverLinks.count = linkCount;
       silverLinks.visible = linkCount > 0 && p > 0;

@@ -344,7 +344,7 @@ if (uReactionKind > 3.5) {
 }
 #include <opaque_fragment>
 if (uReactionKind > 1.5 && uReactionKind < 2.5) {
-  vec3 milkPatch = mix(vec3(0.70, 0.81, 0.85), vec3(0.97, 0.98, 0.99),
+  vec3 milkPatch = mix(vec3(0.58, 0.69, 0.75), vec3(0.79, 0.84, 0.88),
     smoothstep(0.27, 0.75, n));
   gl_FragColor.rgb = mix(gl_FragColor.rgb, milkPatch, cloud * 0.92);
   gl_FragColor.a = max(gl_FragColor.a, cloud * 0.95);
