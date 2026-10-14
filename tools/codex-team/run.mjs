@@ -109,7 +109,7 @@ function header(task, attempt) {
     'First read docs/AGCL_INTERFACES.md, then inspect the current code. This is an unattended overnight run: work autonomously, iterate (write, run tests, fix) until the task is genuinely done or you are blocked, then stop.',
     'You may edit ONLY the paths listed under your worker in the "Module ownership" section of the contract. Anything else you want changed goes into the final report as an integration request.',
     'Do not commit, merge, switch branches, create worktrees, push, or touch files outside this worktree. The runner snapshots your changes automatically.',
-    'node_modules is a shared junction: do NOT run npm install/ci/update and do not modify it. Use `npx tsc --noEmit` and `npx vitest run --no-file-parallelism <paths>`.',
+    'node_modules is a shared junction: do NOT run npm install/ci/update and do not modify it. PowerShell blocks npx.ps1 in this sandbox, so call tools directly: `node node_modules/typescript/bin/tsc --noEmit` and `node node_modules/vitest/vitest.mjs run --no-file-parallelism <paths>`.',
     'Do not use --yolo or disable the sandbox. Do not fake videos, tests or results. Report limitations honestly.',
     'At the end, write a report: files modified, tests run with real pass/fail counts, remaining issues, integration blockers.',
     attempt > 1 ? `This is attempt ${attempt}: a previous attempt was interrupted. Inspect the current worktree state (git status, git diff) and continue; do not start over.` : '',
@@ -188,8 +188,8 @@ function postProcess(task, rec) {
     return r.status;
   };
   try {
-    rec.typecheckExit = verify('typecheck', 'npx', ['tsc', '--noEmit']);
-    rec.testsExit = verify('tests', 'npx', ['vitest', 'run', '--no-file-parallelism']);
+    rec.typecheckExit = verify('typecheck', 'node', ['node_modules/typescript/bin/tsc', '--noEmit']);
+    rec.testsExit = verify('tests', 'node', ['node_modules/vitest/vitest.mjs', 'run', '--no-file-parallelism']);
   } catch (e) { rec.verifyError = String(e.message || e); }
 }
 

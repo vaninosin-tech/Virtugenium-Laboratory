@@ -11,4 +11,4 @@ Prototype requirements (`src/scenes/laboratory/lib/night/agcl/`):
 
 Tests (`*.test.ts` beside the module or under `tests/night/agcl/`): mass conservation, fragmentation independent of wall-clock/start time, deformation precedes fragmentation, non-uniform settling, boundedness/no NaN, determinism, adapter round-trip to/from the `FlocAggregate` shape.
 
-Write `docs/night/agcl/REPORT.md`: model with equations and parameter meanings, what is physically motivated vs artistic, test results with real counts, limitations, and the exact adapter/integration requests for coordinator-only files. Run your tests and `npx tsc --noEmit` before finishing. Do not fake results.
+Write `docs/night/agcl/REPORT.md`: model with equations and parameter meanings, what is physically motivated vs artistic, test results with real counts, limitations, and the exact adapter/integration requests for coordinator-only files. Run your tests and `node node_modules/typescript/bin/tsc --noEmit` before finishing. Do not fake results.

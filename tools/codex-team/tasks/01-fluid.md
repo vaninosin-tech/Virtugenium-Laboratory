@@ -8,4 +8,4 @@ Build, in priority order:
 3. Profiling script (`tests/night/fluid/profile.mjs` or a vitest test that prints numbers): ms per `step` and `transport` at LOW and HIGH grids. Report only what you measured; no claims about real-time frame budgets beyond that.
 4. Diagnostics report `docs/night/fluid/REPORT.md`: measured numbers, ASCII/CSV tables (no binary images required), pass/fail/pending per check, reproduction commands, defects found, integration requests.
 
-Quality bar: every test must be able to fail for a real reason; no tests that only assert the code ran. Run the tests you added plus `npx tsc --noEmit` before finishing.
+Quality bar: every test must be able to fail for a real reason; no tests that only assert the code ran. Run the tests you added plus `node node_modules/typescript/bin/tsc --noEmit` before finishing.

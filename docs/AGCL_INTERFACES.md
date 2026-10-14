@@ -1,6 +1,6 @@
 # AgCl overnight interface contract
 
-Derived from the repository at the base commit of this run. Paths are relative to the repo root; library code lives in `src/scenes/laboratory/lib/` (abbreviated `lib/` below). Tests run with `npx vitest run --no-file-parallelism <path>`; typecheck with `npx tsc --noEmit`.
+Derived from the repository at the base commit of this run. Paths are relative to the repo root; library code lives in `src/scenes/laboratory/lib/` (abbreviated `lib/` below). Tests run with `node node_modules/vitest/vitest.mjs run --no-file-parallelism <path>`; typecheck with `node node_modules/typescript/bin/tsc --noEmit`.
 
 ## Why workers are restricted
 Another Codex session and other Claude sessions keep editing the main working tree (flow solver, pour channel, reaction visuals, experiment 1). Workers branch from a committed snapshot and cannot see uncommitted work. To avoid merge conflicts, no worker edits the shared production modules listed under "Coordinator-only". Work goes into NEW files, plus the narrow files each worker owns.
