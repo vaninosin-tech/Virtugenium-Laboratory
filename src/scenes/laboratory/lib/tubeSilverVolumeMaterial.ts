@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-/** Optical depth through a soft, porous AgCl body. The sphere is only a ray-entry proxy. */
+/** Optical depth through an existing AgCl aggregate instance. The sphere is only a ray-entry proxy. */
 export function makeSilverVolumeMaterial(radius: number, bottom: number) {
   const camera = { value: new THREE.Vector3() };
   const material = new THREE.ShaderMaterial({
@@ -20,8 +20,9 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
         vec3 b = instanceMatrix[1].xyz;
         vec3 c = instanceMatrix[2].xyz;
         vec3 delta = uCameraLocal - instanceMatrix[3].xyz;
-        vEye = vec3(dot(delta, a) / dot(a, a), dot(delta, b) / dot(b, b),
-          dot(delta, c) / dot(c, c));
+        vEye = vec3(dot(delta, a) / max(dot(a, a), 1e-12),
+          dot(delta, b) / max(dot(b, b), 1e-12),
+          dot(delta, c) / max(dot(c, c), 1e-12));
         vSurface = position;
         vTubeCenter = instanceMatrix[3].xyz;
         vBasisX = a;
@@ -41,46 +42,45 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
       varying vec3 vBasisX;
       varying vec3 vBasisY;
       varying vec3 vBasisZ;
-      float blob(vec3 p, vec3 center, vec3 axis) {
+      float lobe(vec3 p, vec3 center, vec3 axis) {
         vec3 q = (p - center) / axis;
-        return exp(-2.35 * dot(q, q));
+        return exp(-3.2 * dot(q, q));
       }
       float density(vec3 p) {
-        p += vec3(0.15 * sin(5.0*p.y + 4.0*p.z)
-            + 0.045 * sin(17.0*p.y - 11.0*p.z),
-          0.12 * sin(7.0*p.x - 5.0*p.z),
-          0.11 * sin(6.0*p.y - 3.0*p.x));
-        float d = 1.30 * blob(p, vec3(-0.24, 0.26, 0.03), vec3(0.72, 0.58, 0.65));
-        d += 0.98 * blob(p, vec3(0.32, 0.04, -0.18), vec3(0.53, 0.55, 0.55));
-        d += 0.78 * blob(p, vec3(-0.27, -0.32, 0.13), vec3(0.43, 0.54, 0.48));
-        d += 0.46 * blob(p, vec3(0.35, -0.70, 0.08), vec3(0.23, 0.62, 0.31));
-        d += 0.28 * blob(p, vec3(-0.55, -0.61, -0.10), vec3(0.18, 0.71, 0.24));
-        float grain = 0.88 + 0.19 * sin(11.0*p.x + 7.0*p.y) * sin(9.0*p.z - 6.0*p.y)
-          + 0.07 * sin(25.0*p.x - 18.0*p.z);
-        return d * grain;
+        // Shape varies with the supplied instance transform, never with time.
+        float seed = dot(vTubeCenter, vec3(173.1, 117.7, 203.9));
+        vec3 warp = vec3(0.045 * sin(5.0*p.y + seed),
+          0.04 * sin(4.0*p.x - seed), 0.045 * sin(5.0*p.y + 0.7*seed));
+        vec3 q = p + warp;
+        float d = 0.72 * lobe(q, vec3(0.0), vec3(0.82, 0.88, 0.80));
+        d += 0.55 * lobe(q, vec3(0.31, 0.15, -0.12), vec3(0.48, 0.57, 0.52));
+        d += 0.46 * lobe(q, vec3(-0.28, -0.12, 0.18), vec3(0.48, 0.50, 0.44));
+        d += 0.30 * lobe(q, vec3(0.02, -0.37, -0.13), vec3(0.48, 0.46, 0.45));
+        // A soft density field and overlapping lobes give each existing floc a
+        // dense core and a feathered edge without spawning extra particles.
+        return clamp(d, 0.0, 2.0);
       }
       void main() {
-        vec3 direction = normalize(vSurface - vEye);
-        float travel = max(0.0, -2.0 * dot(vSurface, direction));
+        vec3 ray = vSurface - vEye;
+        vec3 direction = ray / max(length(ray), 0.000001);
+        float travel = clamp(-2.0 * dot(vSurface, direction), 0.0, 2.0);
         float integral = 0.0;
-        for (int step = 0; step < 10; step++) {
-          vec3 p = vSurface + direction * travel * (float(step) + 0.5) / 10.0;
+        // Fixed 12-tap midpoint quadrature: bounded cost per visible fragment.
+        // Integrate optical depth in local sphere units; no time or grid phase.
+        for (int step = 0; step < 12; step++) {
+          vec3 p = vSurface + direction * travel * (float(step) + 0.5) / 12.0;
           vec3 tubePoint = vTubeCenter + vBasisX * p.x + vBasisY * p.y + vBasisZ * p.z;
           float radial = length(tubePoint.xz);
           float bowl = uBottom + uRadius - sqrt(max(0.0, uRadius*uRadius - radial*radial));
-          if (radial < uRadius * 0.96 && tubePoint.y >= bowl && tubePoint.y <= uLevel)
-            integral += density(p);
+          if (radial < uRadius * 0.98 && tubePoint.y >= bowl && tubePoint.y <= uLevel)
+            integral += clamp(density(p), 0.0, 2.0) * travel / 12.0;
         }
-        float opticalDepth = integral * travel * 0.75;
-        float core = smoothstep(0.34, 1.02, opticalDepth);
-        float wisps = 0.10 * smoothstep(0.05, 0.35, opticalDepth);
-        float alpha = min(1.0, core + wisps) * smoothstep(0.0, 0.55, travel);
-        if (alpha < 0.012) discard;
-        vec3 center = vSurface + direction * travel * 0.5;
-        float fibers = sin(4.0 * center.x + 3.0 * center.y)
-          * sin(5.0 * center.z - 3.0 * center.y);
-        float shade = 0.96 + 0.02 * fibers;
-        gl_FragColor = vec4(shade, shade, shade * 0.995, alpha);
+        float opticalDepth = clamp(integral * 2.8, 0.0, 32.0);
+        float alpha = clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
+        if (alpha < 0.008) discard;
+        // Forward scattered light stays below display white even where lobes overlap.
+        float shade = clamp(0.85 + 0.11 * exp(-opticalDepth * 0.6), 0.0, 1.0);
+        gl_FragColor = vec4(clamp(vec3(shade, shade, shade * 0.99), 0.0, 1.0), alpha);
       }
     `,
   });
