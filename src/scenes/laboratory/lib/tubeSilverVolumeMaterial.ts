@@ -72,7 +72,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       bool wet(vec3 p) {
         float radial = length(p.xz);
         float bowl = uBottom+uRadius-sqrt(max(0.0,uRadius*uRadius-radial*radial));
-        return radial < uRadius*0.985 && p.y >= bowl && dot(uUp,p) <= uLevel;
+        return radial < uRadius*0.985 && p.y >= bowl && dot(uUp,p) <= uLevel + 0.0007;
       }
       // Packed heaps are stored column by column; a small cross blur in x and z removes the column pattern.
       vec4 denseAt(vec3 g) {

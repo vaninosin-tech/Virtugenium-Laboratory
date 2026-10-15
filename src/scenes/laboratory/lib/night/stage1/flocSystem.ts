@@ -254,7 +254,9 @@ export class FlocSystem {
       const floor = this.floorHeight(Math.hypot(n.x, n.z)) + r;
       if (n.y < floor) { n.y = floor; n.vy = Math.max(0, n.vy); n.vx *= 0.2; n.vz *= 0.2; n.resting = true; } else n.resting = false;
       // The free surface holds a node: it cannot leave the liquid, it floats half in.
-      const ceiling = this.surfaceY - 0.6 * r;
+      // The meniscus is not flat for cotton: each lump floats at its own height (it may poke slightly above).
+      const own = Math.sin(this.nodes.indexOf(n) * 7.31) * 0.5 + 0.5;
+      const ceiling = this.surfaceY + (own - 0.55) * 1.4 * r;
       if (n.y > ceiling) { n.y = ceiling; n.vy = Math.min(0, n.vy); }
     }
   }
@@ -346,9 +348,16 @@ export class FlocSystem {
         targetB[at] += amountB * w;
       }
     };
-    for (const n of this.nodes) {
-      const r = nodeRadius(n.mass, c);
-      splat(n.x, n.y, n.z, r, n.mass * scale, mass, n.mass * scale, visual);
+    for (let index = 0; index < this.nodes.length; index++) {
+      const n = this.nodes[index], r = nodeRadius(n.mass, c);
+      // Deterministic irregularity: every node is a slightly different lump, so no two are alike and the raft is ragged.
+      const h = Math.sin(index * 12.9898) * 43758.5453, j = h - Math.floor(h);
+      const lump = 0.8 + 0.5 * j;
+      splat(n.x, n.y, n.z, r * lump, n.mass * scale, mass, n.mass * scale, visual);
+      // Wet cotton has hanging lobes: a lighter tuft below and to the side that follows the node's own motion.
+      const tuftMass = n.mass * 0.18, speed = Math.hypot(n.vx, n.vy, n.vz) + 1e-9;
+      const tx = n.x - n.vx / speed * r * 0.9 + (j - 0.5) * r, ty = n.y - Math.abs(n.vy) / speed * r * 0.9 - r * 0.4, tz = n.z - n.vz / speed * r * 0.9 + (0.5 - j) * r;
+      splat(tx, ty, tz, r * 0.6, 0, null, tuftMass * scale, visual);
     }
     for (const l of this.links) {
       const a = this.nodes[l.a], b = this.nodes[l.b];
