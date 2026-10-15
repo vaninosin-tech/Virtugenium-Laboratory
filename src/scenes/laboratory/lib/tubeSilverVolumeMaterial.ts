@@ -78,10 +78,12 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       }
       // Packed heaps are stored column by column; a small cross blur in x and z removes the column pattern.
       vec4 denseAt(vec3 g) {
-        vec3 d = vec3(1.0/float(textureSize(uDense,0).x),0.0,1.0/float(textureSize(uDense,0).z))*1.8;
-        vec4 c = texture(uDense,g)*0.4;
+        vec3 s = vec3(1.0/float(textureSize(uDense,0).x),1.0/float(textureSize(uDense,0).y),1.0/float(textureSize(uDense,0).z));
+        vec3 d = s*1.4;
+        vec4 c = texture(uDense,g)*0.32;
         c += (texture(uDense,g+vec3(d.x,0,0))+texture(uDense,g-vec3(d.x,0,0))
-            +texture(uDense,g+vec3(0,0,d.z))+texture(uDense,g-vec3(0,0,d.z)))*0.15;
+            +texture(uDense,g+vec3(0,0,d.z))+texture(uDense,g-vec3(0,0,d.z))
+            +texture(uDense,g+vec3(0,d.y,0))+texture(uDense,g-vec3(0,d.y,0)))*0.113;
         return c;
       }
       float solidAt(vec3 p) {
