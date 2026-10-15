@@ -1,5 +1,13 @@
 import * as THREE from "three";
 
+/** A 1x1x1 zero texture so the haze sampler is always valid. */
+function emptyHaze() {
+  const texture = new THREE.Data3DTexture(new Float32Array(1), 1, 1, 1);
+  texture.format = THREE.RedFormat; texture.type = THREE.FloatType;
+  texture.minFilter = texture.magFilter = THREE.NearestFilter; texture.unpackAlignment = 1; texture.needsUpdate = true;
+  return texture;
+}
+
 /** One bounded ray-marched volume for the conserved dense field and its source. */
 export function makeSilverVolumeMaterial(radius: number, bottom: number, height: number,
   dense?: THREE.Data3DTexture, overlap?: THREE.Data3DTexture) {
@@ -9,6 +17,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
+      uHaze: { value: emptyHaze() }, uHazeStrength: { value: 0.16 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     vertexShader: `
@@ -25,7 +34,8 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uniform vec3 uCameraLocal;
       uniform float uRadius, uBottom, uHeight, uLevel;
       uniform vec3 uUp;
-      uniform sampler3D uDense, uOverlap;
+      uniform sampler3D uDense, uOverlap, uHaze;
+      uniform float uHazeStrength;
       in vec3 vPoint;
       out vec4 outColor;
       float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453); }
@@ -115,6 +125,11 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
               if (wet(lit)) shadow += texture(uDense,uvw(lit)).r;
             }
           }
+          // Fine solid shed by the cotton tints the water: bluish white, built up gently.
+          float hazeValue = texture(uHaze,grid).r;
+          float hazeAlpha = 1.0-exp(-hazeValue*uHazeStrength*stepLength/uRadius);
+          accumulated += (1.0-alpha)*hazeAlpha*vec3(0.84,0.90,0.96);
+          alpha += (1.0-alpha)*hazeAlpha;
           float localAlpha = 1.0-exp(-(solid*30.0+mixing*0.012)*stepLength/uRadius);
           vec3 color = mix(vec3(0.91,0.93,0.91),
             vec3(1.0,0.998,0.99)*clamp(1.0-shadow*0.34,0.58,1.0)*(0.66+0.34*gShade),

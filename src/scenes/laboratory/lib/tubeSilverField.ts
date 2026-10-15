@@ -7,7 +7,11 @@ import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics
 import { silverStage } from "./silverStage";
 
 /** Stage-one precipitate partition: visible curd and conserved, optically hidden fine solid. */
-const STAGE_ONE_DENSE_FRACTION = 0.45;
+const STAGE_ONE_DENSE_FRACTION = 0.8;
+/** Surface film: layers that spread, thickness the film holds (normalised), peel rate, air that stays with the film. */
+const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.2, SURFACE_CAP = 1.1, SURFACE_PEEL = 0.1, SURFACE_AIR_KEPT = 0.35;
+/** Haze shed by cotton per second (base, extra in the dense core). */
+const HAZE_BASE = 0.015, HAZE_CORE = 0.05;
 
 /** R3 bookkeeping in normalized amounts. */
 export function reactR2(silver: number, chloride: number, fraction = 1) {
@@ -74,6 +78,7 @@ export class TubeSilverField {
     return typeof override === "number" ? override : 0.1;
   }
   private loadWeight = new Float64Array(0);
+  private topCell = new Int32Array(0);
   private heapHeight = new Float64Array(0);
   private heapFree = new Int32Array(0);
   private readonly packWeights = new Float64Array(6);
@@ -234,6 +239,9 @@ export class TubeSilverField {
         this.compactDense();
         this.packDense();
         this.repose();
+        this.spreadSurface();
+        this.peelSurface();
+        this.emitHaze(step);
       }
       const calm = this.delivered >= 0.999 && agitation < 0.02
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
@@ -509,6 +517,93 @@ export class TubeSilverField {
           this.heapHeight[n] += amount / cap;
         }
       }
+    }
+  }
+
+  /** Index of the highest wet cell of every column; -1 where the column holds no liquid. */
+  private surfaceTop(): Int32Array {
+    const m = this.mask, columns = m.nx * m.nz;
+    if (this.topCell.length !== columns) this.topCell = new Int32Array(columns);
+    for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
+      let top = -1;
+      for (let y = m.ny - 1; y >= 0; y--) { const i = x + y * m.nx + z * m.nx * m.ny; if (m.data[i]) { top = i; break; } }
+      this.topCell[z * m.nx + x] = top;
+    }
+    return this.topCell;
+  }
+
+  /** The stream hits the surface and the solid spreads along it as a thin film (conservative lateral diffusion). */
+  private spreadSurface() {
+    const m = this.mask, top = this.surfaceTop(), rows = m.nx;
+    const move = (from: number, to: number, fraction: number) => {
+      const amount = this.dense[from] * fraction;
+      if (amount <= 0) return;
+      for (const component of this.denseCoordinates) {
+        const portion = component[from] * fraction;
+        component[from] -= portion; component[to] += portion;
+      }
+      this.dense[from] -= amount; this.dense[to] += amount;
+    };
+    for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
+      const a = top[z * m.nx + x];
+      if (a < 0) continue;
+      for (let layer = 0; layer < SURFACE_LAYERS; layer++) {
+        const i = a - layer * rows;
+        if (i < 0 || !m.data[i]) continue;
+        for (const [dx, dz] of [[1, 0], [0, 1]]) {
+          const nx = x + dx, nz = z + dz;
+          if (nx >= m.nx || nz >= m.nz) continue;
+          const b = top[nz * m.nx + nx];
+          if (b < 0) continue;
+          const j = b - layer * rows;
+          if (j < 0 || !m.data[j]) continue;
+          const gap = this.dense[i] - this.dense[j];
+          if (Math.abs(gap) < 1e-12) continue;
+          const donor = gap > 0 ? i : j, taker = gap > 0 ? j : i;
+          move(donor, taker, SURFACE_SPREAD * Math.abs(gap) / Math.max(this.dense[donor], 1e-20));
+        }
+      }
+    }
+  }
+
+  /** A film thicker than the surface can hold is displaced: pieces are pushed below and wet as they go. */
+  private peelSurface() {
+    const m = this.mask, top = this.surfaceTop(), rows = m.nx;
+    const cap = SURFACE_CAP / m.activeCount, air = this.denseCoordinates[3];
+    for (let c = 0; c < top.length; c++) {
+      const a = top[c];
+      if (a < 0) continue;
+      for (let layer = 0; layer < SURFACE_LAYERS; layer++) {
+        const i = a - layer * rows, j = i - rows;
+        if (i < 0 || j < 0 || !m.data[i] || !m.data[j]) continue;
+        const excess = this.dense[i] - cap;
+        if (excess <= 0) continue;
+        const amount = excess * SURFACE_PEEL;
+        const fraction = amount / this.dense[i];
+        for (let k = 0; k < this.denseCoordinates.length; k++) {
+          const component = this.denseCoordinates[k];
+          const portion = component[i] * fraction * (k === 3 ? SURFACE_AIR_KEPT : 1);
+          component[i] -= portion; component[j] += portion;
+        }
+        this.dense[i] -= amount; this.dense[j] += amount;
+        if (air[i] > this.dense[i]) air[i] = this.dense[i];
+      }
+    }
+  }
+
+  /** The dense core of a mass sheds fine solid into the liquid: this is the haze that tints the water. */
+  private emitHaze(dt: number) {
+    const m = this.mask, air = this.denseCoordinates[3];
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], mass = this.dense[i];
+      if (mass <= 1e-20) continue;
+      const concentration = mass * m.activeCount;
+      const core = THREE.MathUtils.smoothstep(concentration, 0.5, 2.2);
+      const wet = 1 - Math.min(1, air[i] / mass);
+      const emitted = mass * Math.min(0.2, dt * (HAZE_BASE + HAZE_CORE * core) * (0.35 + 0.65 * wet));
+      const fraction = emitted / mass;
+      for (const component of this.denseCoordinates) component[i] -= component[i] * fraction;
+      this.dense[i] -= emitted; this.suspension[0][i] += emitted;
     }
   }
 

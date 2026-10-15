@@ -70,6 +70,7 @@ function restart() {
   field = new TubeSilverField("HIGH", RADIUS, BOTTOM, FIELD_HEIGHT);
   silver.material.uniforms.uDense.value = field.denseTexture;
   silver.material.uniforms.uOverlap.value = field.overlapTexture;
+  silver.material.uniforms.uHaze.value = field.texture;
   simTime = 0; poured = 0;
 }
 
