@@ -62,9 +62,11 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         float concentration = field.r/(field.r+0.23);
         float base = 1.05*concentration;
         float rim = 1.0-smoothstep(0.35,0.95,base);
-        float lump = billow3(q*3.0), big = billow3(q*1.7), fold = fbm3(q*5.0);
+        float lump = billow3(q*3.4), big = billow3(q*1.7), fold = fbm3(q*6.0);
         float f = base + (0.34+0.30*rim)*(lump-0.30) + 0.22*(big-0.30) + (0.10+0.16*rim)*(fold-0.5);
-        f += rim*0.30*(fbm3(q*8.0)-0.45);
+        // Fibres: elongated along the carrier flow direction stored in the field, torn at the rim only.
+        vec3 qf = q*vec3(9.0,4.0,9.0);
+        f += rim*0.34*(fbm3(qf)-0.45) + rim*0.12*(noise3(q*vec3(24.0,10.0,24.0))-0.5);
         return smoothstep(0.58,0.80,f);
       }
       vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
@@ -72,7 +74,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       bool wet(vec3 p) {
         float radial = length(p.xz);
         float bowl = uBottom+uRadius-sqrt(max(0.0,uRadius*uRadius-radial*radial));
-        return radial < uRadius*0.985 && p.y >= bowl && dot(uUp,p) <= uLevel + 0.0007;
+        return radial < uRadius*0.985 && p.y >= bowl && dot(uUp,p) <= uLevel + 0.0035;
       }
       // Packed heaps are stored column by column; a small cross blur in x and z removes the column pattern.
       vec4 denseAt(vec3 g) {
@@ -90,7 +92,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       void main() {
         vec3 direction = normalize(vPoint-uCameraLocal);
         vec3 boxMin = vec3(-uRadius*1.2,uBottom-uRadius*0.15,-uRadius*1.2);
-        vec3 boxMax = vec3(uRadius*1.2,uBottom+uHeight+uRadius*0.15,uRadius*1.2);
+        vec3 boxMax = vec3(uRadius*1.2,uBottom+uHeight+uRadius*0.6,uRadius*1.2);
         vec3 safeDirection = vec3(direction.x < 0.0 ? -1.0 : 1.0,
           direction.y < 0.0 ? -1.0 : 1.0, direction.z < 0.0 ? -1.0 : 1.0)
           * max(abs(direction),vec3(0.000001));

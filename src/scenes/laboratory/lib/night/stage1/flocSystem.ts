@@ -256,7 +256,7 @@ export class FlocSystem {
       // The free surface holds a node: it cannot leave the liquid, it floats half in.
       // The meniscus is not flat for cotton: each lump floats at its own height (it may poke slightly above).
       const own = Math.sin(this.nodes.indexOf(n) * 7.31) * 0.5 + 0.5;
-      const ceiling = this.surfaceY + (own - 0.55) * 1.4 * r;
+      const ceiling = this.surfaceY + (own - 0.45) * 3.2 * r;
       if (n.y > ceiling) { n.y = ceiling; n.vy = Math.min(0, n.vy); }
     }
   }

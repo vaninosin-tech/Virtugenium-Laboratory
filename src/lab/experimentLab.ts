@@ -59,6 +59,7 @@ scene.add(wall, bowl);
 const surface = new THREE.Mesh(new THREE.CircleGeometry(RADIUS, 48),
   new THREE.MeshBasicMaterial({ color: 0x9fb7c8, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }));
 surface.rotation.x = -Math.PI / 2;
+surface.renderOrder = -2;
 scene.add(surface);
 const stream = new THREE.Mesh(new THREE.CylinderGeometry(0.0005, 0.0007, 1, 12),
   new THREE.MeshBasicMaterial({ color: 0xe8f3ff, transparent: true, opacity: 0.85, depthWrite: false }));
@@ -67,7 +68,7 @@ scene.add(stream);
 
 const silver = makeSilverVolumeMaterial(RADIUS, BOTTOM, FIELD_HEIGHT);
 let field: TubeSilverField;
-const volume = new THREE.Mesh(new THREE.BoxGeometry(2.4 * RADIUS, FIELD_HEIGHT + 0.3 * RADIUS, 2.4 * RADIUS), silver.material);
+const volume = new THREE.Mesh(new THREE.BoxGeometry(2.4 * RADIUS, FIELD_HEIGHT + 0.75 * RADIUS, 2.4 * RADIUS), silver.material);
 volume.position.y = BOTTOM + FIELD_HEIGHT * 0.5;
 volume.renderOrder = -0.25;
 scene.add(volume);
