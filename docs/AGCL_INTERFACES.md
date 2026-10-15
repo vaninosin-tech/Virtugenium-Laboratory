@@ -23,3 +23,9 @@ Free movement of bottles; automatic bottle positioning on pour stays; pour is on
 
 ## WAVE 3 OVERRIDE (supersedes the ownership list above)
 One worker, `stage1`, owns everything listed under its job in `tools/codex-team/tasks.json` (silver field, silver material, silver visuals hunks, `lib/silverStage.ts`, `lib/night/stage1/`, `tests/night/stage1/`, `docs/night/stage1/`, and the silver parts of `tests/tubeReactionVisuals.test.ts`). The previous wave-2 render/physics branches were REJECTED by the customer and are NOT part of this base. Its task file `tools/codex-team/tasks/21-stage1.md` is authoritative.
+
+## WAVE 4 OVERRIDE (supersedes wave 3)
+Two workers run in parallel on disjoint files. The coordinator owns `src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts`; do NOT touch it.
+- `fieldA` owns: `lib/tubeSilverField.ts` and its test, `lib/tubeFlowSolver.ts` (optional-parameter additions only, defaults must not change behaviour for experiments 1, 3, 4) and its test, `lib/silverStage.ts`, `lib/night/stage1/`, `tests/night/stage1/`, `tests/night/wave4a/`, `docs/night/wave4a/`, `docs/night/stage1/`.
+- `pourB` owns: `src/scenes/laboratory/ui/PourStream.tsx`, `lib/tubeReactionVisuals.ts` (ONLY the pour stream, render order and stage-1 silver hunks), `tests/tubeReactionVisuals.test.ts`, `tests/night/wave4b/`, `docs/night/wave4b/`.
+Customer reference video frames: D:/Claude/virtugenium-night/wave3/docs/reference/agcl/ (ref-NN.png one per second, sheet.png). Current game frames of this branch: D:/Claude/virtugenium-night/frames/s19/sheet.png (left to right 0.2, 0.5, 1, 1.5, 2.5, 4, 7, 12 s after the first precipitate forms). Do not copy them into the repo.
