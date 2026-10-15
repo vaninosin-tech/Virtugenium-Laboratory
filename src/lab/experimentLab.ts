@@ -90,7 +90,7 @@ const levelAt = (t: number) => LEVEL_START + (LEVEL_END - LEVEL_START) * THREE.M
 function stepSim(dt: number) {
   const delivery = Math.min(1, simTime / pourSeconds);
   const level = levelAt(simTime);
-  inlet.set(RADIUS * 0.7, level - 0.0007, 0);
+  inlet.set(RADIUS * 0.7, level, 0);
   field.advance(dt, up, level, inlet, delivery, 0, 1, down);
   simTime += dt; poured = delivery;
 }

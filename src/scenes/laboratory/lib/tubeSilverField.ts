@@ -30,7 +30,7 @@ const FRACTAL_DIMENSION = 1.9;
 /** Surface raft: rows below the meniscus in which cotton is held, and the factor on its settling there. */
 const RAFT_ROWS = 3, RAFT_HOLD = 0.04;
 /** Settling law: speed of a unit aggregate (m/s), upper bound, growth time (s) and the flow speed that halves the size. */
-const AGG_V0 = 0.0016, AGG_MAX_SPEED = 0.008, AGG_GROWTH_TIME = 6, AGG_BREAK_SHEAR = 0.05;
+const AGG_V0 = 0.0011, AGG_MAX_SPEED = 0.008, AGG_GROWTH_TIME = 6, AGG_BREAK_SHEAR = 0.05;
 const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
 
 /** R3 bookkeeping in normalized amounts. */
@@ -973,7 +973,9 @@ export class TubeSilverField {
       const dz = p.z - inlet.z;
       const wall = THREE.MathUtils.smoothstep(Math.hypot(inlet.x, inlet.z) / m.radius, 0.38, 0.80);
       const width = m.radius * ((this.stageOne ? 0.30 : 0.20) + 0.06 * Math.min(3, jetStrength)) * (1 - 0.38 * wall);
-      const vertical = m.radius * ((this.stageOne ? 0.50 : 0.36) + 0.12 * Math.min(3, jetStrength));
+      // Stage 1: the solution is poured ONTO the liquid, so it first lies as a thin layer at the surface and
+      // is mixed downward by the stream momentum and by its own weight, not injected into the bulk.
+      const vertical = m.radius * (this.stageOne ? 0.14 : 0.36 + 0.12 * Math.min(3, jetStrength));
       weights[i] = p.y <= inlet.y && depth < vertical * 2
         ? Math.exp(-(dx * dx + dz * dz) / (width * width) - depth * depth / (vertical * vertical)) : 0;
       sum += weights[i];

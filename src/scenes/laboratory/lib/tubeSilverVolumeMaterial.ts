@@ -59,8 +59,8 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           noise3(q0*1.7+vec3(2.0,9.0,4.0)))-0.5;
         vec3 q = q0 + w*0.30;
         // Cotton is a very porous fractal aggregate: it becomes opaque at a low concentration.
-        float concentration = field.r/(field.r+0.16);
-        float base = 1.3*concentration;
+        float concentration = field.r/(field.r+0.23);
+        float base = 1.05*concentration;
         float rim = 1.0-smoothstep(0.35,0.95,base);
         float lump = billow3(q*3.0), big = billow3(q*1.7), fold = fbm3(q*5.0);
         float f = base + (0.34+0.30*rim)*(lump-0.30) + 0.22*(big-0.30) + (0.10+0.16*rim)*(fold-0.5);
@@ -152,7 +152,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           alpha += (1.0-alpha)*hazeAlpha;
           float localAlpha = 1.0-exp(-(solid*26.0+mixing*0.012)*stepLength/uRadius);
           vec3 color = mix(vec3(0.91,0.93,0.91),
-            vec3(1.0,1.0,0.995)*(0.74+0.22*lit+0.04*diffuse),
+            vec3(1.0,1.0,0.995)*(0.70+0.22*lit+0.10*diffuse),
             solid/(solid+mixing*0.10+0.00001));
           accumulated += (1.0-alpha)*localAlpha*color;
           alpha += (1.0-alpha)*localAlpha;
