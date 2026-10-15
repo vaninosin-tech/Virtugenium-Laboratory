@@ -8,8 +8,9 @@ import { makeSilverVolumeMaterial } from "../scenes/laboratory/lib/tubeSilverVol
  * It drives the same TubeSilverField and silver volume material as the game; the glass, the stream and the
  * pouring script are simplified.
  */
-const RADIUS = 0.007, BOTTOM = 0, FIELD_HEIGHT = 0.1105;
-const LEVEL_START = 0.062, LEVEL_END = 0.077;
+// Proportions of the reference video: the liquid column is about two tube diameters tall.
+const RADIUS = 0.007, BOTTOM = 0, FIELD_HEIGHT = 0.034;
+const LEVEL_START = 0.0262, LEVEL_END = 0.0278;
 // The reference video is time-lapsed: x1 up to 6.25 s of video, x5 until 9.4 s, x50 afterwards (on-screen labels).
 const SPEED_STEPS = [{ video: 6.25, real: 6.25 }, { video: 9.4, real: 6.25 + 3.15 * 5 }];
 const MAX_TIME = 180;
@@ -35,8 +36,8 @@ renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
 renderer.setClearColor(0x000000, 1);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(20, 1, 0.05, 2);
-const centerY = 0.0475;
-camera.position.set(0, centerY, 0.285);
+const centerY = 0.0215;
+camera.position.set(0, centerY, 0.135);
 camera.lookAt(0, centerY, 0);
 
 // Glass tube: open cylinder, hemispherical bottom, with a rim-lit transparent shader.
@@ -47,8 +48,8 @@ const glassMaterial = new THREE.ShaderMaterial({
   fragmentShader: `varying vec3 vN; varying vec3 vV;
     void main(){ float f = pow(1.0-abs(dot(normalize(vN),normalize(vV))),2.6); gl_FragColor = vec4(vec3(0.72,0.82,0.9), 0.03+0.55*f); }`,
 });
-const wall = new THREE.Mesh(new THREE.CylinderGeometry(RADIUS * 1.06, RADIUS * 1.06, 0.1, 64, 1, true), glassMaterial);
-wall.position.y = BOTTOM + RADIUS + 0.05;
+const wall = new THREE.Mesh(new THREE.CylinderGeometry(RADIUS * 1.06, RADIUS * 1.06, 0.045, 64, 1, true), glassMaterial);
+wall.position.y = BOTTOM + RADIUS + 0.0225;
 const bowl = new THREE.Mesh(new THREE.SphereGeometry(RADIUS * 1.06, 64, 24, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), glassMaterial);
 bowl.position.y = BOTTOM + RADIUS;
 scene.add(wall, bowl);
@@ -126,7 +127,7 @@ function draw() {
   const pouring = simTime < pourSeconds;
   stream.visible = pouring;
   if (pouring) {
-    const top = level + 0.06;
+    const top = level + 0.03;
     stream.scale.set(1, top - level + 0.003, 1);
     stream.position.set(inlet.x, (top + level - 0.003) / 2, 0);
   }
