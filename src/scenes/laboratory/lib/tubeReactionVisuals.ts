@@ -6,7 +6,8 @@ import { TubeBariumField } from "./tubeBariumField";
 import { TubeSilverField } from "./tubeSilverField";
 import { BariumSedimentField, BariumSedimentGeometry } from "./tubeBariumSediment";
 import { SilverSedimentField, SilverSedimentGeometry } from "./tubeSilverSediment";
-import { makeSilverVolumeMaterial } from "./tubeSilverVolumeMaterial";
+import { makeSilverVolumeMaterial, makeLegacySilverVolumeMaterial } from "./tubeSilverVolumeMaterial";
+import { silverStage } from "./silverStage";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
@@ -702,7 +703,9 @@ float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
  #include <opaque_fragment>`);
   };
   const curdGeometry = new THREE.SphereGeometry(1, 18, 14);
-  const silverVolume = makeSilverVolumeMaterial(radius, box.min.y);
+  const silverVolume = kind === "silver-chloride" && silverStage() === 1
+    ? makeSilverVolumeMaterial(radius, box.min.y, fieldHeight)
+    : makeLegacySilverVolumeMaterial(radius, box.min.y);
   const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e8f7fa", transparent: true, opacity: 0.85, roughness: 0.04, metalness: 0, depthWrite: false, depthTest: true, side: THREE.DoubleSide });
   const pourAirMaterial = new THREE.MeshBasicMaterial({ color: "#e8f7fa", transparent: true,
     opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
@@ -1063,6 +1066,19 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
   const silverField = kind === "silver-chloride" && hasLiquid
     ? new TubeSilverField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, fieldHeight) : null;
+  const stageOneSilver = !!silverField && silverStage() === 1;
+  const silverDenseGeometry = stageOneSilver ? new THREE.BoxGeometry(2 * radius, fieldHeight, 2 * radius) : null;
+  const silverDenseMesh = silverDenseGeometry
+    ? new THREE.Mesh(silverDenseGeometry, silverVolume.material) : null;
+  if (silverDenseMesh && silverField) {
+    silverDenseMesh.position.y = box.min.y + fieldHeight * 0.5;
+    silverDenseMesh.renderOrder = 1.05;
+    silverDenseMesh.name = "TubeSilverDenseField";
+    silverDenseMesh.onBeforeRender = updateSilverVolumeCamera;
+    silverVolume.material.uniforms.uDense.value = silverField.denseTexture;
+    silverVolume.material.uniforms.uOverlap.value = silverField.overlapTexture;
+    group.add(silverDenseMesh);
+  }
   const silverInlet = new THREE.Vector3();
   const impactPoint = new THREE.Vector3();
   const impactDirection = new THREE.Vector3();
@@ -1419,7 +1435,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       if (backdrop && backdropWall && backdropCap) {
         backdrop.up.value.copy(up.value);
         backdrop.level.value = level.value;
-        backdrop.tracerStrength.value = transport && !options.incomingDyed && transport.running ? 1 : 0;
+        backdrop.tracerStrength.value = !stageOneSilver && transport && !options.incomingDyed && transport.running ? 1 : 0;
         backdropWall.visible = refraction && quality !== "LOW" && !options.incomingDyed && !inertTracerOnly;
         // The top ray also crosses coloured liquid. Its transmitted backdrop
         // must use the same absorption/scattering as the cylindrical wall.
@@ -1430,6 +1446,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       if (cameraPosition) cameraLocal.copy(cameraPosition).applyMatrix4(inverse);
       silverVolume.camera.value.copy(cameraLocal);
       silverVolume.material.uniforms.uLevel.value = level.value;
+      if (stageOneSilver) silverVolume.material.uniforms.uUp.value.copy(up.value);
       if (absorption && absorptionWall && absorptionCap) {
         absorption.uniforms.uUp.value.copy(up.value);
         absorption.uniforms.uLevel.value = level.value;
@@ -1509,7 +1526,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
             radius * 0.025, 0.22);
         }
       }
-      film.visible = !!options.pour && pourAge < 2.5;
+      film.visible = !stageOneSilver && !!options.pour && pourAge < 2.5;
       if (film.visible) {
         const lower = box.min.y + size.y * fill;
         const top = lip.y - 0.004;
@@ -1541,7 +1558,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         if (waveSurface && pourAge > 0.65 && pourAge < 1.45 && Math.floor((pourAge - dt) * 8) !== Math.floor(pourAge * 8))
           waveSurface.impulse(0.22, 0.70, radius * 0.055, 0.22);
       }
-      pourAir.visible = !!options.pour && !options.incomingDyed && pourAge > 0.66 && pourAge < 2.15 && hasLiquid;
+      pourAir.visible = !stageOneSilver && !!options.pour && !options.incomingDyed && pourAge > 0.66 && pourAge < 2.15 && hasLiquid;
       pourAir.count = quality === "LOW" ? 6 : 12;
       if (pourAir.visible) {
         const surfaceY = box.min.y + size.y * fill;
@@ -1612,7 +1629,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
           curds ? 0.82 : 0.98) : 0;
       // The permanganate hold stays at p=0; its vivid reaction material must
       // already be visible before the decolorization front starts moving.
-      const reactionLiquidActive = !!liquid && (p > 0 || !!bariumField || !!silverField || kind === "permanganate-redox");
+      const reactionLiquidActive = !!liquid && !stageOneSilver && (p > 0 || !!bariumField || !!silverField || kind === "permanganate-redox");
       volume.material = reactionLiquidActive ? liquid : baseline;
       cap.material = volume.material;
       const activeLiquid = reactionLiquidActive ? liquid : base instanceof TubeLiquidMaterial ? base : null;
@@ -1648,7 +1665,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
           activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
           activeLiquid.uniforms.uCuBoundsSize.value.set(2 * radius, fieldHeight, 2 * radius);
         }
-        if (silverField) {
+        if (silverField && !stageOneSilver) {
           activeLiquid.uniforms.uBaField.value = silverField.texture;
           activeLiquid.uniforms.uBaActive.value = 1;
           activeLiquid.uniforms.uCuBoundsMin.value.set(-radius, box.min.y, -radius);
@@ -1658,7 +1675,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       if (transport) for (const material of [base, liquid]) {
         if (!(material instanceof TubeLiquidMaterial)) continue;
         material.uniforms.uTransport.value = transport.texture;
-        material.uniforms.uTransportActive.value = transport.running
+        material.uniforms.uTransportActive.value = !stageOneSilver && transport.running
           ? 1 - THREE.MathUtils.smoothstep(transport.age, 8, 12) : 0;
         material.uniforms.uTransportDye.value = options.incomingDyed ? 1 : 0;
         material.uniforms.uTransportAge.value = precipitate ? pourAge : transport.age;
@@ -1703,14 +1720,14 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       }
       // AgCl's deposit is made by the same settling flocs, never a smooth cap.
       bed.visible = !!bariumField && bariumField.sedimentMass > 0.02
-        || !!silverField && silverField.sedimentMass > 0.0002;
+        || !!silverField && !stageOneSilver && silverField.sedimentMass > 0.0002;
       if (bed.visible && bariumField) bedGeometry.update(bariumField.sedimentField);
       if (bed.visible && silverField) {
         bed.geometry = silverBedGeometry;
         silverBedGeometry.update(silverField.sedimentField);
       }
       let bedCurdCount = 0;
-      if (bed.visible && silverField && p > 0) {
+      if (bed.visible && silverField && !stageOneSilver && p > 0) {
         const field = silverField.sedimentField;
         let total = 0, weightedX = 0, weightedZ = 0;
         for (let z = 0; z < field.nz; z++) for (let x = 0; x < field.nx; x++) {
@@ -1762,7 +1779,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         coarseParticles.count = shown;
         coarseParticles.instanceMatrix.needsUpdate = true;
       }
-      flakes.visible = curds && !!silverField && silverField.flocs.length > 0;
+      flakes.visible = curds && !stageOneSilver && !!silverField && silverField.flocs.length > 0;
       flakes.count = silverField ? Math.min(count, silverField.flocs.length) : 0;
       let freeCount = 0, attachedCount = 0;
       const bubbleLimit = noBubbles.capacity;
@@ -1795,7 +1812,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       condensate.count = Math.floor(count / 3);
       dropletMaterial.opacity = (0.15 + temperature * 0.25)
         * THREE.MathUtils.smoothstep(temperature, 0.45, 0.72);
-      splash.visible = splashAge >= 0 && splashAge < 1;
+      splash.visible = !stageOneSilver && splashAge >= 0 && splashAge < 1;
       splash.count = Math.max(6, Math.floor(count / 2));
       // Dilute acid produces discrete popping bubbles, not a foam blanket.
       foam.visible = false;
@@ -1881,6 +1898,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         }
       }
       let cottonCount = 0;
+      if (!stageOneSilver) {
       const cloudBands = Array.from({ length: 4 }, () => ({ mass: 0, x: 0, y: 0, z: 0 }));
       const bandEdges = [0, 0.17, 0.43, 0.76, 1];
       const bandWidths = [1.20, 0.72, 1.35, 1.08];
@@ -1948,6 +1966,10 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       }
       silverLinks.count = linkCount;
       silverLinks.visible = linkCount > 0 && p > 0;
+      } else {
+        silverCotton.count = 0; silverCotton.visible = false;
+        silverLinks.count = 0; silverLinks.visible = false;
+      }
       // Only NO2 absorbs brown light. The gas renderer clips every fragment
       // below the actual, tilted meniscus in its fragment shader.
       const brownDensity = kind === "copper-nitric"
@@ -1998,7 +2020,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         filmGeometry.dispose(); filmMaterial.dispose(); transport?.dispose();
         gasGeometry.dispose(); bedGeometry.dispose(); silverBedGeometry.dispose(); coarseGeometry.dispose(); coarseMaterial.dispose(); bedMaterial.dispose(); bottomCausticGeometry.dispose(); standCausticGeometry.dispose();
         bottomCausticMaterial.dispose(); standCausticMaterial.dispose();
-        curdGeometry.dispose();
+        curdGeometry.dispose(); silverDenseGeometry?.dispose();
         white.dispose(); flocMaterial.dispose(); silverVolume.material.dispose(); bubbleMaterial.dispose(); pourAirMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
         absorption?.dispose();
         dyedShellMaterial?.dispose();

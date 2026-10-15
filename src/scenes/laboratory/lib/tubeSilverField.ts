@@ -4,6 +4,7 @@ import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { SilverSedimentField } from "./tubeSilverSediment";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
+import { silverStage } from "./silverStage";
 
 /** R3 bookkeeping in normalized amounts. */
 export function reactR2(silver: number, chloride: number, fraction = 1) {
@@ -31,6 +32,13 @@ export class TubeSilverField {
   readonly flocs: FlocAggregate[] = [];
   readonly tracer: Float64Array;
   readonly productSource: Float64Array;
+  readonly dense: Float64Array;
+  /** Conserved mass-weighted birth coordinates, advected with the solid. */
+  readonly denseCoordinates: Float64Array[];
+  readonly densePixels: Float32Array;
+  readonly denseTexture: THREE.Data3DTexture;
+  readonly overlapPixels: Float32Array;
+  readonly overlapTexture: THREE.Data3DTexture;
   readonly sedimentField: SilverSedimentField;
   readonly pixels: Float32Array;
   readonly texture: THREE.Data3DTexture;
@@ -46,19 +54,35 @@ export class TubeSilverField {
   private readonly priorUp = new THREE.Vector3(Infinity, Infinity, Infinity);
   private priorLevel = Infinity;
   private initialized = false;
+  private readonly stageOne: boolean;
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     readonly silverAmount = 1.15) {
     const size = quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
     this.mask = new LiquidMask(size.width, size.height, size.depth, radius, bottom, height);
     this.velocity = new VelocityField(this.mask);
-    this.solver = new TubeFlowSolver(this.mask);
+    this.stageOne = silverStage() === 1;
+    this.solver = new TubeFlowSolver(this.mask, this.stageOne ? { lowDiffusion: true } : {});
     this.species = { "Ag+": new SpeciesField("Ag+", this.mask),
       "Cl-": new SpeciesField("Cl-", this.mask) };
     this.suspension = [0, 1, 2].map(() => new Float64Array(this.mask.data.length));
     this.coarse = new Float64Array(this.mask.data.length);
     this.tracer = new Float64Array(this.mask.data.length);
     this.productSource = new Float64Array(this.mask.data.length);
+    this.dense = new Float64Array(this.mask.data.length);
+    this.denseCoordinates = [0, 1, 2].map(() => new Float64Array(this.mask.data.length));
+    this.densePixels = new Float32Array(this.mask.data.length * 4);
+    this.overlapPixels = new Float32Array(this.mask.data.length);
+    this.denseTexture = new THREE.Data3DTexture(this.densePixels, this.mask.nx, this.mask.ny, this.mask.nz);
+    this.overlapTexture = new THREE.Data3DTexture(this.overlapPixels, this.mask.nx, this.mask.ny, this.mask.nz);
+    for (const texture of [this.denseTexture, this.overlapTexture]) {
+      texture.format = texture === this.denseTexture ? THREE.RGBAFormat : THREE.RedFormat;
+      texture.type = THREE.FloatType;
+      texture.minFilter = texture.magFilter = THREE.LinearFilter;
+      texture.wrapS = texture.wrapT = texture.wrapR = THREE.ClampToEdgeWrapping;
+      texture.unpackAlignment = 1;
+      texture.needsUpdate = true;
+    }
     this.sedimentField = new SilverSedimentField(this.mask.nx, this.mask.nz);
     this.next = new Float64Array(this.mask.data.length);
     this.flow = this.solver.flow;
@@ -78,7 +102,8 @@ export class TubeSilverField {
   get sedimentMass() { return this.sedimentField.mass; }
   get coarseMass() { return this.flocs.reduce((sum, floc) => sum + floc.mass, 0)
     + this.coarse.reduce((sum, amount) => sum + amount, 0); }
-  get totalSolidMass() { return this.suspensionMass + this.coarseMass + this.sedimentMass; }
+  get denseMass() { return this.dense.reduce((sum, amount) => sum + amount, 0); }
+  get totalSolidMass() { return this.denseMass + this.suspensionMass + this.coarseMass + this.sedimentMass; }
   get massBalanceError() { return this.totalSolidMass - this.extent; }
 
   diagnostics() {
@@ -91,7 +116,7 @@ export class TubeSilverField {
       else { lower += this.pixels[i]; lowerCount++; }
       speed += Math.hypot(this.flow[i * 3], this.flow[i * 3 + 1], this.flow[i * 3 + 2]);
     }
-    return { suspended: this.suspensionMass, coarse: this.coarseMass,
+    return { dense: this.denseMass, suspended: this.suspensionMass, coarse: this.coarseMass,
       settled: this.sedimentMass, formed: this.extent, massBalanceError: this.massBalanceError,
       silverRemaining: this.species["Ag+"].total, chlorideRemaining: this.species["Cl-"].total,
       upperTurbidity: upper / Math.max(1, upperCount),
@@ -116,7 +141,7 @@ export class TubeSilverField {
         this.solver.refreshMask();
         this.priorUp.copy(up); this.priorLevel = level;
         // Keep amounts in the closed liquid when a moving meniscus vacates cells.
-        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension, this.coarse, this.tracer]) {
+        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension, this.coarse, this.tracer, this.dense, ...this.denseCoordinates]) {
           for (let i = 0; i < old.length; i++) {
             if (!old[i] || m.data[i] || values[i] === 0) continue;
             let nearest = -1, distance = Infinity;
@@ -149,9 +174,15 @@ export class TubeSilverField {
         amount > 0 ? 0.2 * Math.min(3, Math.max(0.4, jetStrength)) : 0,
         agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined);
       const kinetic = this.solver.diagnostics().energy;
-      const ionMixing = 0.00012 + agitation * 0.000003;
+      const ionMixing = (this.stageOne ? 0.000002 : 0.00012) + agitation * 0.000003;
       for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing);
       this.solver.transport(this.tracer, step, ionMixing);
+      if (this.stageOne) {
+        this.solver.transport(this.dense, step, 0.000001);
+        for (const coordinate of this.denseCoordinates)
+          this.solver.transport(coordinate, step, 0.000001);
+        this.settleDense(step);
+      }
       const calm = this.delivered >= 0.999 && agitation < 0.02
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
       const targetBoost = calm ? TUBE_SIMULATION.silver.settlingAcceleration : 1;
@@ -171,6 +202,13 @@ export class TubeSilverField {
           this.suspension[0][i] + this.suspension[1][i] + this.suspension[2][i]);
         ba[i] -= formed; so[i] -= formed; this.extent += formed;
         this.productSource[i] = formed;
+        if (this.stageOne) {
+          this.dense[i] += formed;
+          this.denseCoordinates[0][i] += formed * ((i % m.nx + 0.5) / m.nx);
+          this.denseCoordinates[1][i] += formed * ((Math.floor(i / m.nx) % m.ny + 0.5) / m.ny);
+          this.denseCoordinates[2][i] += formed * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
+          continue;
+        }
         // Dense, freshly nucleated parcels flocculate locally. All visible
         // lobes draw from this solid reservoir; dilute parcels remain fine.
         const flocculation = THREE.MathUtils.smoothstep(
@@ -180,7 +218,7 @@ export class TubeSilverField {
         const fine = formed - aggregate;
         for (let k = 0; k < 3; k++) this.suspension[k][i] += fine * [0.58, 0.28, 0.14][k];
       }
-      this.advanceFlocs(step, agitation);
+      if (!this.stageOne) this.advanceFlocs(step, agitation);
       // Redispersion moves an actual fraction of the bottom reservoir into liquid.
       if (agitation > 0.02) for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
         const column = z * m.nx + x;
@@ -205,6 +243,50 @@ export class TubeSilverField {
           * TUBE_SIMULATION.silver.suspensionOpticalScale : 0;
       }
       this.texture.needsUpdate = true;
+      if (this.stageOne) {
+        for (let i = 0; i < this.dense.length; i++) {
+          const mass = this.dense[i];
+          const offset = i * 4;
+          this.densePixels[offset] = mass * m.activeCount;
+          for (let axis = 0; axis < 3; axis++)
+            this.densePixels[offset + axis + 1] = mass > 1e-20
+              ? this.denseCoordinates[axis][i] / mass : 0;
+          this.overlapPixels[i] = this.productSource[i] * m.activeCount;
+        }
+        this.denseTexture.needsUpdate = true;
+        this.overlapTexture.needsUpdate = true;
+      }
+    }
+  }
+
+  /** Density-dependent hindered settling between wet cells; each transfer is conservative. */
+  private settleDense(dt: number) {
+    const m = this.mask;
+    const up = this.velocity.gravityUp;
+    const axis = Math.abs(up.y) >= Math.abs(up.x) && Math.abs(up.y) >= Math.abs(up.z) ? 1
+      : Math.abs(up.x) >= Math.abs(up.z) ? 0 : 2;
+    const sign = up.getComponent(axis) >= 0 ? -1 : 1;
+    const stride = axis === 0 ? 1 : axis === 1 ? m.nx : m.nx * m.ny;
+    const limit = axis === 0 ? m.nx : axis === 1 ? m.ny : m.nz;
+    const spacing = axis === 1 ? m.height / m.ny : 2 * m.radius / limit;
+    // A denser patch experiences more drag; settling is limited to one face per step.
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a];
+      const cell = axis === 0 ? i % m.nx : axis === 1
+        ? Math.floor(i / m.nx) % m.ny : Math.floor(i / (m.nx * m.ny));
+      if (cell + sign < 0 || cell + sign >= limit) continue;
+      const j = i + sign * stride;
+      if (!m.data[j] || this.dense[i] <= 0) continue;
+      const concentration = this.dense[i] * m.activeCount;
+      const speed = 0.0005 / (1 + 3 * concentration);
+      const fraction = Math.min(0.08, speed * dt / spacing);
+      const moved = this.dense[i] * fraction;
+      this.dense[i] -= moved; this.dense[j] += moved;
+      for (let component = 0; component < 3; component++) {
+        const values = this.denseCoordinates[component];
+        const part = values[i] * fraction;
+        values[i] -= part; values[j] += part;
+      }
     }
   }
 
@@ -362,5 +444,5 @@ export class TubeSilverField {
       (column, mass) => this.sedimentField.deposit(column, mass));
   }
 
-  dispose() { this.texture.dispose(); }
+  dispose() { this.texture.dispose(); this.denseTexture.dispose(); this.overlapTexture.dispose(); }
 }

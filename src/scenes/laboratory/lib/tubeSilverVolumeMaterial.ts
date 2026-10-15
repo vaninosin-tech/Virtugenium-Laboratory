@@ -1,7 +1,107 @@
 import * as THREE from "three";
 
+/** One bounded ray-marched volume for the conserved dense field and its source. */
+export function makeSilverVolumeMaterial(radius: number, bottom: number, height: number,
+  dense?: THREE.Data3DTexture, overlap?: THREE.Data3DTexture) {
+  const camera = { value: new THREE.Vector3() };
+  const material = new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    uniforms: { uCameraLocal: camera, uRadius: { value: radius },
+      uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
+      uDense: { value: dense }, uOverlap: { value: overlap },
+      uUp: { value: new THREE.Vector3(0, 1, 0) } },
+    transparent: true, depthWrite: false, side: THREE.FrontSide,
+    vertexShader: `
+      uniform float uBottom; uniform float uHeight;
+      out vec3 vPoint;
+      void main() {
+        vPoint = position + vec3(0.0, uBottom + uHeight * 0.5, 0.0);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      precision highp float;
+      precision highp sampler3D;
+      uniform vec3 uCameraLocal;
+      uniform float uRadius, uBottom, uHeight, uLevel;
+      uniform vec3 uUp;
+      uniform sampler3D uDense, uOverlap;
+      in vec3 vPoint;
+      out vec4 outColor;
+      float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453); }
+      float noise3(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        f = f*f*(3.0-2.0*f);
+        return mix(mix(mix(hash3(i), hash3(i+vec3(1,0,0)), f.x),
+          mix(hash3(i+vec3(0,1,0)), hash3(i+vec3(1,1,0)), f.x), f.y),
+          mix(mix(hash3(i+vec3(0,0,1)), hash3(i+vec3(1,0,1)), f.x),
+          mix(hash3(i+vec3(0,1,1)), hash3(i+vec3(1,1,1)), f.x), f.y), f.z);
+      }
+      float cotton(vec4 field) {
+        if (field.r <= 0.0) return 0.0;
+        vec3 p = field.gba;
+        float warp = noise3(p*4.0+vec3(3.1,0,0))-0.5;
+        p += vec3(warp,warp,-warp)*0.09;
+        float detail = 0.64*noise3(p*11.0)+0.25*noise3(p*23.0)
+          +0.11*noise3(p*47.0)-0.5;
+        return smoothstep(0.04,0.8,field.r)
+          * smoothstep(0.2,0.95,field.r+detail*0.4);
+      }
+      vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
+        (p.y-uBottom)/uHeight, p.z/(2.0*uRadius)+0.5); }
+      bool wet(vec3 p) {
+        float radial = length(p.xz);
+        float bowl = uBottom+uRadius-sqrt(max(0.0,uRadius*uRadius-radial*radial));
+        return radial < uRadius*0.98 && p.y >= bowl && dot(uUp,p) <= uLevel;
+      }
+      void main() {
+        vec3 direction = normalize(vPoint-uCameraLocal);
+        vec3 boxMin = vec3(-uRadius,uBottom,-uRadius);
+        vec3 boxMax = vec3(uRadius,uBottom+uHeight,uRadius);
+        vec3 safeDirection = vec3(direction.x < 0.0 ? -1.0 : 1.0,
+          direction.y < 0.0 ? -1.0 : 1.0, direction.z < 0.0 ? -1.0 : 1.0)
+          * max(abs(direction),vec3(0.000001));
+        vec3 a = (boxMin-uCameraLocal)/safeDirection;
+        vec3 b = (boxMax-uCameraLocal)/safeDirection;
+        float entry = max(0.0,max(max(min(a.x,b.x),min(a.y,b.y)),min(a.z,b.z)));
+        float exitDistance = min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z));
+        if (exitDistance <= entry) discard;
+        float stepLength = (exitDistance-entry)/48.0;
+        vec3 accumulated = vec3(0.0);
+        float alpha = 0.0;
+        // Fixed 48 primary taps and three light taps per occupied sample.
+        for (int step = 0; step < 48; step++) {
+          vec3 p = uCameraLocal+direction*(entry+(float(step)+0.5)*stepLength);
+          if (!wet(p)) continue;
+          vec3 grid = uvw(p);
+          vec4 field = texture(uDense,grid);
+          float solid = cotton(field);
+          float mixing = smoothstep(0.002,0.18,texture(uOverlap,grid).r);
+          float shadow = 0.0;
+          if (solid > 0.003) {
+            for (int lightStep = 1; lightStep <= 3; lightStep++) {
+              vec3 lit = p + vec3(0.42,0.78,0.36)*float(lightStep)*uRadius*0.18;
+              if (wet(lit)) shadow += texture(uDense,uvw(lit)).r;
+            }
+          }
+          float localAlpha = 1.0-exp(-(solid*7.0+mixing*0.15)*stepLength/uRadius);
+          vec3 color = mix(vec3(0.66,0.88,0.96),
+            vec3(0.96,0.965,0.96)*clamp(0.94-shadow*0.045,0.68,0.94),
+            solid/(solid+mixing*0.55+0.00001));
+          accumulated += (1.0-alpha)*localAlpha*color;
+          alpha += (1.0-alpha)*localAlpha;
+        }
+        if (alpha < 0.005) discard;
+        outColor = vec4(accumulated/max(alpha,0.00001),alpha);
+      }
+    `,
+  });
+  return { material, camera };
+}
+
+
 /** Optical depth through an existing AgCl aggregate instance. The sphere is only a ray-entry proxy. */
-export function makeSilverVolumeMaterial(radius: number, bottom: number) {
+export function makeLegacySilverVolumeMaterial(radius: number, bottom: number) {
   const camera = { value: new THREE.Vector3() };
   const material = new THREE.ShaderMaterial({
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },

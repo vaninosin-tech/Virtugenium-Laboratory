@@ -4,7 +4,6 @@ import { REAGENTS } from "../src/entities/laboratory/reagents";
 import { createTubeReactionVisuals } from "../src/scenes/laboratory/lib/tubeReactionVisuals";
 import { createTubeCopperGranules } from "../src/scenes/laboratory/lib/testTubeContents";
 import { TubeLiquidMaterial } from "../src/scenes/laboratory/lib/tubeLiquidMaterial";
-import { tubeEffectiveRadius, tubeLiquidHeight } from "../src/scenes/laboratory/lib/tubeLiquidLevel";
 import type { ReactionKind, TubeChemistry } from "../src/scenes/laboratory/lib/tubeReactions";
 import type { RuntimeQuality } from "../src/scenes/laboratory/lib/useRuntimeQualityStore";
 
@@ -93,17 +92,6 @@ function surfacePlane(f: Fixture) {
     .applyMatrix4(f.volume.matrixWorld);
 }
 function surfaceError(f: Fixture) { return surfacePlane(f).normal.angleTo(new THREE.Vector3(0, 1, 0)); }
-function particleBounds(pool: THREE.InstancedMesh) {
-  pool.geometry.computeBoundingBox();
-  const box = new THREE.Box3();
-  const matrix = new THREE.Matrix4();
-  for (let i = 0; i < pool.count; i++) {
-    pool.getMatrixAt(i, matrix);
-    box.union(pool.geometry.boundingBox!.clone().applyMatrix4(matrix));
-  }
-  return box;
-}
-
 const kinds: ReactionKind[] = ["copper-nitric", "silver-chloride", "barium-sulfate", "permanganate-redox"];
 describe("tube reaction rendering contract", () => {
   it("curves the calm rim while keeping the wave highlight dormant", () => {
@@ -192,8 +180,9 @@ describe("tube reaction rendering contract", () => {
     const f = fixture(kind, false, false, true);
     f.update(chemistry(0));
     const held = f.volume.material;
-    expect(held === f.baseline).toBe(kind === "copper-nitric");
+    expect(held === f.baseline).toBe(kind === "copper-nitric" || kind === "silver-chloride");
     const group = f.root.getObjectByName("TubeReactionVisuals")!;
+    expect(!!group.getObjectByName("TubeSilverDenseField")).toBe(kind === "silver-chloride");
     const meshes = group.children as THREE.Mesh[];
     const resources = meshes.map(mesh => ({ mesh, geometry: mesh.geometry, material: mesh.material,
       array: mesh instanceof THREE.InstancedMesh ? mesh.instanceMatrix.array : null }));
@@ -212,7 +201,7 @@ describe("tube reaction rendering contract", () => {
       expect(resource.mesh.geometry).toBe(resource.geometry);
       if (resource.mesh.name !== "TubeLiquidSurface") expect(resource.mesh.material).toBe(resource.material);
       if (resource.mesh instanceof THREE.InstancedMesh) expect(resource.mesh.instanceMatrix.array).toBe(resource.array);
-      if (kind === "silver-chloride" && ["TubePrecipitate", "TubeSediment"].includes(resource.mesh.name)) continue;
+      if (kind === "silver-chloride" && ["TubePrecipitate", "TubeSediment", "TubeSilverDenseField"].includes(resource.mesh.name)) continue;
       expect(resource.mesh.visible).toBe((["TubeLiquidSurface", "TubeBottomCaustic", "TubeStandCaustic"].includes(resource.mesh.name)
         && (kind !== "silver-chloride" || resource.mesh.name === "TubeLiquidSurface"))
 
@@ -266,26 +255,17 @@ describe("tube reaction rendering contract", () => {
     expect(plumeUp.angleTo(new THREE.Vector3(0, 1, 0))).toBeLessThan(1e-5);
   });
 
-  it("moves settled AgCl flocs toward the lower wall when the tube tilts", () => {
+  it("keeps stage-one AgCl in one field volume through a tilt", () => {
     const f = fixture("silver-chloride");
     const flocs = f.get<THREE.InstancedMesh>("TubePrecipitate");
-    const centerX = () => {
-      const matrix = new THREE.Matrix4();
-      let sum = 0;
-      for (let i = 0; i < flocs.count; i++) {
-        flocs.getMatrixAt(i, matrix);
-        sum += matrix.elements[12];
-      }
-      return sum / flocs.count;
-    };
     f.update(chemistry(0));
     f.advance(3, chemistry(0));
-    expect(flocs.count).toBeGreaterThan(0);
-    const upright = centerX();
+    expect(flocs.count).toBe(0);
+    expect(f.get("TubeSilverDenseField")).toBeDefined();
     f.root.rotation.z = THREE.MathUtils.degToRad(45);
     f.advance(2, chemistry(0));
-    expect(Number.isFinite(centerX())).toBe(true);
-    expect(Math.abs(centerX() - upright)).toBeGreaterThan(0.0001);
+    expect(flocs.count).toBe(0);
+    expect(f.get("TubeSediment").visible).toBe(false);
   });
 
   it("excites a spring on rapid tilt, then damps toward the horizontal surface", () => {
@@ -393,7 +373,7 @@ describe("tube reaction rendering contract", () => {
     }
   });
 
-  it("builds AgCl sediment from flocs at LOW and never adds gas to ionic reactions", () => {
+  it("keeps stage-one AgCl sediment hidden at LOW and never adds gas to ionic reactions", () => {
     const silver = fixture("silver-chloride");
     const barium = fixture("barium-sulfate");
     for (const f of [silver, barium]) {
@@ -407,10 +387,10 @@ describe("tube reaction rendering contract", () => {
       expect(f.get("TubeLiquidSurface").visible).toBe(true);
     }
     silver.advance(2, chemistry(0), "LOW");
-    const silverTop = particleBounds(silver.get<THREE.InstancedMesh>("TubePrecipitate")).max.y;
     const bariumBed = barium.get("TubeSediment");
-    expect(silverTop).toBeGreaterThan(0.055 * 0.10);
-    expect(silverTop).toBeLessThan(tubeLiquidHeight(3.5, tubeEffectiveRadius(0.055)));
+    expect(silver.get("TubeSilverDenseField")).toBeDefined();
+    expect(silver.get("TubePrecipitate").visible).toBe(false);
+    expect(silver.get("TubeSediment").visible).toBe(false);
     expect(barium.get("TubePrecipitate").visible).toBe(false);
     expect(bariumBed.visible).toBe(false);
     expect(bariumBed.material).toBeInstanceOf(THREE.MeshStandardMaterial);
@@ -419,29 +399,28 @@ describe("tube reaction rendering contract", () => {
     expect((silver.get("TubePrecipitate").material as THREE.MeshLambertMaterial).emissive.getHex()).toBe(0);
   });
 
-  it("starts some AgCl flocs at the meniscus and carries them to the bottom", () => {
+  it("routes AgCl to the dense volume while discrete instances remain hidden", () => {
     const f = fixture("silver-chloride");
     const flocs = f.get<THREE.InstancedMesh>("TubePrecipitate");
     f.update(chemistry(0));
     f.advance(1, chemistry(0));
-    expect(flocs.count).toBeGreaterThan(1);
-    expect(particleBounds(flocs).max.y).toBeGreaterThan(0.03);
+    expect(flocs.count).toBe(0);
+    expect(f.get("TubeSilverDenseField")).toBeDefined();
     f.advance(5, chemistry(0));
-    expect(f.get("TubeSediment").visible).toBe(true);
+    expect(f.get("TubeSediment").visible).toBe(false);
   });
 
   it("keeps precipitate opacity available for the transported onset and later stages", () => {
     const silver = fixture("silver-chloride");
     silver.update(chemistry(0.1 / 12));
-    expect(liquid(silver).uniforms.uCloudiness.value).toBeGreaterThan(0);
-    expect(liquid(silver).uniforms.uCloudiness.value).toBeCloseTo(1);
+    expect(silver.volume.material).toBe(silver.baseline);
     const flocs = silver.get<THREE.InstancedMesh>("TubePrecipitate");
     expect(flocs.visible).toBe(false);
     silver.advance(1, chemistry(0));
-    expect(flocs.visible).toBe(true);
-    expect(particleBounds(flocs).max.y).toBeGreaterThan(0);
+    expect(flocs.visible).toBe(false);
+    expect(silver.get("TubeSilverDenseField")).toBeDefined();
     silver.update(chemistry(1.2 / 12));
-    expect(liquid(silver).uniforms.uCloudiness.value).toBeCloseTo(1);
+    expect(silver.volume.material).toBe(silver.baseline);
 
     const barium = fixture("barium-sulfate");
     barium.update(chemistry(0.2 / 45));
