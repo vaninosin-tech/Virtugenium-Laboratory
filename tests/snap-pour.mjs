@@ -20,6 +20,10 @@ await page.goto(url);
 await page.getByText("Играть", { exact: true }).click();
 await page.getByText("Песочница (временно)").click();
 await page.waitForFunction(() => window.__sceneStore?.getState().cabinetPhase === "inspecting", null, { timeout: 90000 });
+await page.waitForFunction(async () => {
+  const { useLabBootStore } = await import("/src/features/lab-boot/lib/useLabBootStore.ts");
+  return useLabBootStore.getState().phase === "done";
+}, null, { timeout: 90000 });
 await page.evaluate(async mode => {
   const { useRuntimeQualityStore } = await import("/src/scenes/laboratory/lib/useRuntimeQualityStore.ts");
   useRuntimeQualityStore.getState().setMode(mode);
@@ -61,7 +65,7 @@ async function capture(name, reagent) {
   const crops = [];
   const clip = name.endsWith("neg20") ? { x: 750, y: 80, width: 280, height: 600 }
     : name.endsWith("pos20") ? { x: 510, y: 270, width: 350, height: 440 }
-      : { x: 700, y: 140, width: 230, height: 550 };
+      : { x: 1100, y: 330, width: 160, height: 310 };
   await page.evaluate(() => {
     window.__pourFrameTimes = [];
     const begun = performance.now();

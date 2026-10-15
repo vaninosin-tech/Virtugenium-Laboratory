@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>3D-демо четырёх опытов — исправленные уравнения</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:#09111f;color:#e7f1ff}*{box-sizing:border-box}body{margin:0;background:linear-gradient(130deg,#09111f,#101e34);min-height:100vh}.shell{max-width:1200px;margin:0 auto;padding:22px}.header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px}.eyebrow{font-size:11px;font-weight:800;letter-spacing:.15em;color:#81c8ff;text-transform:uppercase}.header h1{font-size:25px;line-height:1.1;margin:7px 0 4px}.sub{font-size:13px;color:#9dacc4;line-height:1.55}.tag{font-size:11px;color:#8eb3d1;border:1px solid #34506a;border-radius:20px;padding:8px 12px;white-space:nowrap}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 15px}.tab{font:inherit;font-size:12px;font-weight:700;border:1px solid #2b4565;border-radius:12px;padding:10px 13px;color:#a8bcd1;background:#10243c;cursor:pointer}.tab.active{background:#2467a5;border-color:#5eb5ef;color:#fff}.content{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:16px}.stage{position:relative;border:1px solid #253a56;border-radius:20px;background:radial-gradient(ellipse at 50% 38%,#1d3957,#091421 69%);overflow:hidden;min-height:525px}#view{display:block;width:100%;height:525px;touch-action:none;cursor:grab}#view:active{cursor:grabbing}.hint{position:absolute;bottom:14px;left:16px;right:16px;font-size:12px;color:#96acc4;pointer-events:none;display:flex;justify-content:space-between;gap:10px}.pill{background:#0a1523bd;border:1px solid #30475f;border-radius:30px;padding:7px 10px}.sidebar{display:flex;flex-direction:column;gap:12px}.panel{border:1px solid #283c58;background:#101f33;border-radius:15px;padding:17px}.panel h2{font-size:14px;margin:0 0 10px}.panel p{font-size:12px;color:#a4b5c9;line-height:1.65;margin:0}.control{margin-top:15px}.label{display:flex;justify-content:space-between;color:#cfdeea;font-size:12px;margin-bottom:9px}.value{color:#80d0ff}input[type=range]{width:100%;accent-color:#66c6ff}button{font:inherit}.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:13px}.action{font-size:12px;font-weight:700;padding:11px 6px;border:1px solid #335675;border-radius:10px;color:#d4ecff;background:#183552;cursor:pointer}.action.main{background:#3a8bcb;color:#fff;border-color:#65b9f2}.readout{display:grid;grid-template-columns:1fr auto;gap:9px;font-size:12px;color:#b9c9df;padding-top:12px;border-top:1px solid #2a3c55;margin-top:13px}.reading{color:#8cddfa;font-variant-numeric:tabular-nums}.note{font-size:11px;line-height:1.55;color:#8f9eb3;padding:0 4px}.fail{display:none;position:absolute;inset:0;place-items:center;padding:40px;text-align:center;background:#0c1c2c;color:#fff}@media(max-width:770px){.shell{padding:12px}.content{grid-template-columns:1fr}.stage{min-height:390px}#view{height:400px}.tag{display:none}.header h1{font-size:21px}.sidebar{display:grid;grid-template-columns:1fr 1fr}.note{grid-column:1/-1}}@media(max-width:520px){.sidebar{display:flex}.tab{font-size:11px;padding:8px}}
+</style></head>
+<body><div class="shell"><header class="header"><div><div class="eyebrow">Visual chemistry · 3D visual prototype · заданные реакции</div><h1>Поведение реакций внутри пробирки</h1><div class="sub">Объёмные поля · фиксированная химия · нагрев · осадки · обесцвечивание</div></div><div class="tag">WebGL2 · без внешних библиотек</div></header>
+<nav class="tabs" id="tabs"><button class="tab active" data-id="0">01 · Cu + разб. HNO₃</button><button class="tab" data-id="1">02 · AgCl</button><button class="tab" data-id="2">03 · BaSO₄</button><button class="tab" data-id="3">04 · KMnO₄</button></nav>
+<div class="content"><div class="stage"><canvas id="view"></canvas><div id="fail" class="fail">Для объёмной визуализации требуется WebGL2. Откройте файл в актуальном браузере с доступным аппаратным ускорением.</div><div class="hint"><span class="pill">↔ Вращай мышью / пальцем</span><span class="pill" id="state">Готово к запуску</span></div></div><section class="sidebar"><div class="panel"><h2 id="title">Опыт 1: голубые потоки Cu²⁺</h2><p id="desc">Голубая окраска зарождается рядом с медью и переносится объёмными потоками. Нагрев усиливает конвекцию.</p><div class="control"><div class="label"><span>Нагрев</span><span id="heatLabel" class="value">0%</span></div><input id="heat" type="range" min="0" max="100" value="0"></div><div class="control" id="oxygenWrap"><label class="label" style="display:flex;align-items:center;gap:10px"><input id="oxygen" type="checkbox" checked> Кислород в газовой области (для NO₂)</label></div><div class="control" id="doseWrap" style="display:none"><div class="label"><span>Избыток окрашенного реагента</span><span id="doseLabel" class="value">50%</span></div><input id="dose" type="range" min="20" max="180" value="50"></div><div class="actions"><button class="action main" id="go">▶ Запустить</button><button class="action" id="shake">↝ Встряхнуть</button><button class="action" id="pause">⏸ Пауза</button><button class="action" id="reset">↺ Сброс</button></div><div class="readout"><span>Время симуляции</span><strong class="reading" id="clock">0,0 с</strong><span>Нагрев жидкости</span><strong class="reading" id="warm">0%</strong><span id="statTitle">Окраска в жидкости</span><strong class="reading" id="stat">0%</strong></div></div><div class="panel"><h2>Уравнение</h2><p id="equation" style="font-weight:700;color:#d5eaf9"></p><p id="ionic" style="margin-top:8px;font-size:11px"></p><p id="gasNote" style="margin-top:8px;font-size:11px;color:#9fc6de"></p></div><div class="panel"><h2>На что смотреть</h2><p id="watch">Поверни пробирку: голубые области должны иметь объём, а не быть нарисованы на переднем стекле. При нагреве потоки становятся активнее.</p></div><div class="note">Это отдельная визуальная модель и не точная CFD либо измеренная скорость реакции. В ней не моделируется проведение реальных опытов. Время, размеры и количества настроены для сравнения эффектов. Ниже описана архитектура для переноса в Three.js.</div></section></div></div>
+<script>
+const chemistryDescriptions=[
+ ['3Cu + 8HNO₃(разб.) → 3Cu(NO₃)₂ + 2NO↑ + 4H₂O','3Cu + 8H⁺ + 2NO₃⁻ → 3Cu²⁺ + 2NO + 4H₂O','NO бесцветен. Бурый NO₂ появляется лишь при отдельном 2NO + O₂ → 2NO₂.'],
+ ['AgNO₃ + NaCl → AgCl↓ + NaNO₃','Ag⁺ + Cl⁻ → AgCl↓','Белый творожистый осадок. Мелкая взвесь и рыхлые хлопья сосуществуют.'],
+ ['BaCl₂ + K₂SO₄ → BaSO₄↓ + 2KCl','Ba²⁺ + SO₄²⁻ → BaSO₄↓','Белый мелкодисперсный осадок. В отличие от AgCl — без обязательных крупных хлопьев.'],
+ ['5Na₂SO₃ + 2KMnO₄ + 3H₂SO₄ → 5Na₂SO₄ + 2MnSO₄ + K₂SO₄ + 3H₂O','5SO₃²⁻ + 2MnO₄⁻ + 6H⁺ → 5SO₄²⁻ + 2Mn²⁺ + 3H₂O','Только MnO₄⁻ окрашен. Основная реакция без осадка и газа; SO₂ — отдельный необязательный побочный путь.']
+];
+function showChemistry(id){const a=chemistryDescriptions[id];document.getElementById('equation').textContent=a[0];document.getElementById('ionic').textContent='Ионное: '+a[1];document.getElementById('gasNote').textContent=a[2];document.getElementById('oxygenWrap').style.display=id===0?'block':'none';}
+showChemistry(0);
+document.querySelectorAll('.tab').forEach((b)=>b.addEventListener('click',()=>showChemistry(+b.dataset.id)));
+</script>
+<script>
+(()=>{
+const canvas=document.getElementById('view'),error=document.getElementById('fail');
+const gl=canvas.getContext('webgl2',{alpha:false,antialias:true,premultipliedAlpha:false});
+if(!gl){error.style.display='grid';return;}
+const vertex=`#version 300 es
+in vec2 pos;out vec2 uv;void main(){uv=pos*.5+.5;gl_Position=vec4(pos,0.,1.);}`;
+const fragment=`#version 300 es
+precision highp float;precision highp sampler3D;
+in vec2 uv;out vec4 fragColor;
+uniform vec2 resolution;uniform float yaw,pitch,clock,heat,sediment,oxygen,gasLevel,bubbleActivity;uniform int mode;uniform sampler3D field;
+float hash(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+float noise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);}
+float tube(vec3 p,float radius){if(p.y<-.73)return length(vec3(p.x,p.y+.73,p.z))-radius;return max(length(p.xz)-radius,p.y-1.01);}
+float liquid(vec3 p){return max(tube(p,.423),p.y-.43);}
+vec3 lookRay(vec3 ro,vec2 s){vec3 w=normalize(-ro),u=normalize(cross(w,vec3(0,1,0))),v=cross(u,w);return normalize(w+u*s.x*.88+v*s.y*.88);}
+float hitCylinder(vec3 ro,vec3 rd,float r){float a=dot(rd.xz,rd.xz),b=dot(ro.xz,rd.xz),c=dot(ro.xz,ro.xz)-r*r;float d=b*b-a*c;if(d<0.)return -1.;float t=(-b-sqrt(d))/a;float y=ro.y+rd.y*t;if(t>0.&&y>-.73&&y<1.0)return t;return -1.;}
+float hitSphere(vec3 ro,vec3 rd,vec3 c,float r){vec3 o=ro-c;float b=dot(o,rd),h=b*b-dot(o,o)+r*r;if(h<0.)return -1.;float t=-b-sqrt(h);return t>0.?t:-1.;}
+void main(){vec2 v=(uv-.5)*2.;v.x*=resolution.x/resolution.y;
+vec3 ro=vec3(sin(yaw)*cos(pitch),sin(pitch),cos(yaw)*cos(pitch))*3.05;
+vec3 rd=lookRay(ro,v);
+float halo=exp(-length(v-vec2(0.,-.1))*2.3);
+vec3 bg=mix(vec3(.033,.070,.128),vec3(.081,.156,.244),clamp(uv.y,0.,1.));bg+=vec3(.015,.034,.06)*halo;
+vec3 sum=vec3(0);float trans=1.;
+float dt=.039;float t=1.75;
+for(int k=0;k<92;k++){
+vec3 p=ro+rd*t;
+if(mode==0&&oxygen>.5&&p.y>.43&&p.y<.99&&tube(p,.423)<0.){
+  float un=noise(p*vec3(7.,6.,9.)+vec3(0.,clock*.15,0.));
+  float brown=gasLevel*(.010+.050*un)*smoothstep(.43,.6,p.y);
+  sum+=trans*vec3(.66,.26,.085)*brown;
+  trans*=1.-brown;
+}
+if(liquid(p)<0.){
+if(mode==0){vec3 q=vec3(p.x/.22,(p.y+.86)/.14,(p.z+.01)/.15);float d=length(q+vec3(.09*sin(p.y*38.),0.,0.));if(d<1.){float shine=.65+.35*max(0.,dot(normalize(vec3(.5,.7,.9)),normalize(q)));vec3 copper=vec3(.77,.35,.16)*shine;sum+=trans*copper;trans=0.;break;}}
+if(mode==1||mode==2){float sedTop=-1.13+min(.23,sediment*(mode==1?.22:.13));float rough=(noise(p*vec3(19.,25.,19.))-.5)*(mode==1?.07:.025);if(p.y<sedTop+rough){vec3 sColor=mode==1?vec3(.92,.95,.96):vec3(.89,.93,.96);sum+=trans*sColor*.20;trans*=.80;}}
+vec3 vfield=texture(field,vec3((p.x+.45)/.9,(p.y+1.16)/1.66,(p.z+.45)/.9)).rgb;
+float f=max(0.,vfield.r),fl=max(0.,vfield.g),vio=max(0.,vfield.b);
+if(mode==0){
+  // Optical hints of colourless NO bubbles in 3D liquid; visual sprites, not a gas-amount solver.
+  for(int bi=0;bi<6;bi++){
+    float b=float(bi);
+    float rise=fract(clock*(.12+.028*mod(b,3.))+b*.231);
+    vec3 centre=vec3(.055*sin(2.4*b)+.014*sin(clock*.9+b),-.84+rise*1.22,.045*cos(2.1*b));
+    float r=.010+.005*mod(b,3.);
+    float ring=1.-smoothstep(.003,.009,abs(length(p-centre)-r));
+    float op=ring*bubbleActivity*.07;
+    sum+=trans*vec3(.77,.91,1.)*op;
+    trans*=1.-op;
+  }
+  float d=clamp(f*(.085+0.025*noise(p*14.)),0.,.24);vec3 c=mix(vec3(.24,.78,1.),vec3(.07,.45,.96),clamp(f*.7,0.,1.));sum+=trans*c*d;trans*=1.-d;}
+if(mode==1||mode==2){float fine=clamp(f*(mode==1?.16:.29),0.,.45);float fluff=clamp(fl*(.42+.23*noise(p*vec3(34.,17.,29.))),0.,.78);float a=clamp(fine+fluff,0.,.88);vec3 c=mix(vec3(.87,.94,.98),vec3(1.),fluff);sum+=trans*c*a;trans*=1.-a;}
+if(mode==3){float a=clamp(vio*.18,0.,.54);vec3 c=mix(vec3(.97,.24,.62),vec3(.37,.10,.74),clamp(vio*.62,0.,1.));sum+=trans*c*a;trans*=1.-a;}
+sum+=trans*vec3(.07,.15,.21)*.0018;trans*=.9982;
+}
+t+=dt;
+}
+vec3 result=sum+trans*bg;
+float tc=hitCylinder(ro,rd,.48),tb=hitSphere(ro,rd,vec3(0.,-.73,0.),.48);
+float hit=tc;
+if(tb>0.&&(hit<0.||tb<hit)){vec3 hp=ro+rd*tb;if(hp.y<-.70)hit=tb;}
+if(hit>0.){vec3 hp=ro+rd*hit;vec3 normal=hp.y<-.73?normalize(hp-vec3(0.,-.73,0.)):normalize(vec3(hp.x,0.,hp.z));float edge=pow(1.-abs(dot(normal,-rd)),3.);float glint=pow(max(dot(reflect(-normalize(vec3(-.7,1.,1.)),normal),-rd),0.),18.);result=mix(result,vec3(.54,.77,.99),.07+edge*.45+glint*.16);}
+float topT=(.43-ro.y)/rd.y;
+if(topT>0.){vec3 p=ro+rd*topT;if(length(p.xz)<.423){float rim=pow(clamp(length(p.xz)/.423,0.,1.),12.);result=mix(result,vec3(.50,.78,.92),rim*.24+.035);}}
+float topGlass=(.99-ro.y)/rd.y;
+if(topGlass>0.){vec3 p=ro+rd*topGlass;float rim=1.-smoothstep(.01,.038,abs(length(p.xz)-.48));result+=rim*vec3(.27,.43,.55);}
+result=pow(clamp(result,0.,1.),vec3(.91));
+fragColor=vec4(result,1.);
+}`;
+function shader(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;}
+let prog;try{prog=gl.createProgram();gl.attachShader(prog,shader(gl.VERTEX_SHADER,vertex));gl.attachShader(prog,shader(gl.FRAGMENT_SHADER,fragment));gl.linkProgram(prog);if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(prog));}catch(e){console.error(e);error.textContent='Ошибка WebGL шейдера: '+e.message;error.style.display='grid';return;}
+gl.useProgram(prog);const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);const a=gl.getAttribLocation(prog,'pos');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
+const loc={};for(const key of ['resolution','yaw','pitch','clock','heat','sediment','mode','field','oxygen','gasLevel','bubbleActivity'])loc[key]=gl.getUniformLocation(prog,key);
+const NX=30,NY=64,NZ=30,N=NX*NY*NZ,SIZE=NX*NY*NZ*3;
+let A=new Float32Array(N),R=new Float32Array(N),H=new Float32Array(N),P=new Float32Array(N),Q=new Float32Array(N),TA=new Float32Array(N),TR=new Float32Array(N),TH=new Float32Array(N),TP=new Float32Array(N),TQ=new Float32Array(N);let data=new Uint8Array(SIZE), tex=gl.createTexture();gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_3D,tex);gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_WRAP_R,gl.CLAMP_TO_EDGE);gl.texImage3D(gl.TEXTURE_3D,0,gl.RGB8,NX,NY,NZ,0,gl.RGB,gl.UNSIGNED_BYTE,data);gl.uniform1i(loc.field,0);
+// 3D texture is x fastest, then y, then z.
+const ix=(x,y,z)=>x+NX*(y+NY*z),clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+let mode=0,time=0,running=false,paused=false,heatWanted=0,heatActual=0,shake=0,sediment=0,dose=.50,oxygen=1,copperStock=.33,acidStock=.88,noGas=0,no2Gas=0,noRate=0,flocs=[],rng=717,flocTimer=0,seed=0,angle=.24,pitch=.08,prev=0,carry=0,mean=0;
+function rand(){rng=(1664525*rng+1013904223)>>>0;return rng/4294967296;}
+function sample(arr,x,y,z){let fx=clamp((x+.45)/.90*(NX-1),0,NX-1.001),fy=clamp((y+1.16)/1.66*(NY-1),0,NY-1.001),fz=clamp((z+.45)/.90*(NZ-1),0,NZ-1.001);let x0=fx|0,y0=fy|0,z0=fz|0,dx=fx-x0,dy=fy-y0,dz=fz-z0;
+let a0=ix(x0,y0,z0),a1=ix(x0,y0,z0+1),v00=arr[a0]*(1-dx)+arr[a0+1]*dx,v01=arr[a0+NX]*(1-dx)+arr[a0+NX+1]*dx,v10=arr[a1]*(1-dx)+arr[a1+1]*dx,v11=arr[a1+NX]*(1-dx)+arr[a1+NX+1]*dx;return ((v00*(1-dy)+v01*dy)*(1-dz)+(v10*(1-dy)+v11*dy)*dz);}
+function inside(x,y,z){return (y>=-.73?x*x+z*z<.423*.423:x*x+z*z+(y+.73)*(y+.73)<.423*.423)&&y<.43;}
+function blob(arr,cx,cy,cz,amount,rad=.055){let dxr=Math.ceil(rad*NX/.9*2.2),dyr=Math.ceil(rad*NY/1.66*2.2),cxI=Math.round((cx+.45)/.90*(NX-1)),cyI=Math.round((cy+1.16)/1.66*(NY-1)),czI=Math.round((cz+.45)/.90*(NZ-1));for(let z=Math.max(0,czI-dxr);z<=Math.min(NZ-1,czI+dxr);z++)for(let y=Math.max(0,cyI-dyr);y<=Math.min(NY-1,cyI+dyr);y++)for(let x=Math.max(0,cxI-dxr);x<=Math.min(NX-1,cxI+dxr);x++){let wx=-.45+x*.9/(NX-1),wy=-1.16+y*1.66/(NY-1),wz=-.45+z*.9/(NZ-1);if(!inside(wx,wy,wz))continue;let d=((wx-cx)*(wx-cx)+(wy-cy)*(wy-cy)+(wz-cz)*(wz-cz))/(rad*rad);if(d<5)arr[ix(x,y,z)]+=amount*Math.exp(-d*1.2);}}
+function reset(){A.fill(0);R.fill(0);H.fill(0);P.fill(0);Q.fill(0);TA.fill(0);TR.fill(0);TH.fill(0);TP.fill(0);TQ.fill(0);flocs=[];time=0;sediment=0;heatActual=0;shake=0;mean=0;flocTimer=0;copperStock=.33;acidStock=.88;noGas=0;no2Gas=0;noRate=0;running=false;paused=false;rng=717+mode*1741;for(let z=0;z<NZ;z++)for(let y=0;y<NY;y++)for(let x=0;x<NX;x++){let wx=-.45+x*.9/(NX-1),wy=-1.16+y*1.66/(NY-1),wz=-.45+z*.9/(NZ-1);if(inside(wx,wy,wz))R[ix(x,y,z)]=(mode==1||mode==2)?1.05:(mode==3?1.10:0);if(mode==3)H[ix(x,y,z)]=1.32;}upload();document.getElementById('state').textContent='Готово к запуску';document.getElementById('go').textContent='▶ Запустить';}
+function velocity(x,y,z){let r=Math.hypot(x,z),ph=Math.atan2(z,x),wave=Math.sin(y*9+time*1.5+Math.cos(ph*3))*Math.cos(x*9+z*7);let swirl=.009+.017*shake+.011*heatActual;let vx=swirl*(-z*2.1)+.006*wave+shake*.04*Math.sin(time*20+y*8),vz=swirl*(x*2.1)+.006*Math.cos(y*10+time*1.3)+shake*.04*Math.cos(time*16+x*13);
+let vy=heatActual*(.14*Math.exp(-r*r/0.075)-.041)+.005*Math.sin(x*13+z*9+time*2);
+if(mode!=0&&time<2.3)vy-=.25*Math.exp(-(x*x+z*z)/.024)*clamp((y+.1)/.7,0,1);
+return [vx,vy,vz];}
+function tick(dt){time+=dt;heatActual+=(heatWanted-heatActual)*Math.min(1,dt*(heatWanted>heatActual?.7:.16));shake=Math.max(0,shake-dt*.31);
+if(mode==0){
+  // Stoichiometric normalized reaction extent: 3Cu + 8HNO3 -> 3Cu(II) + 2NO + 4H2O.
+  const xi=Math.min(copperStock/3,acidStock/8,dt*.0027*(1+heatActual*1.4));
+  copperStock=Math.max(0,copperStock-3*xi);
+  acidStock=Math.max(0,acidStock-8*xi);
+  noGas+=2*xi;
+  noRate=dt>0?2*xi/dt:0;
+  if(xi>0){
+    let ox=.055*Math.sin(time*.8),oz=.035*Math.cos(time*.6);
+    for(let k=0;k<3;k++)blob(P,ox+(rand()-.5)*.12,-.76+(rand()-.5)*.08,oz+(rand()-.5)*.10,xi*630,.068);
+  }
+  // Separate gas reaction on contact with oxygen: 2 NO + O2 -> 2 NO2.
+  if(oxygen>0&&noGas>0){const eta=Math.min(noGas/2,dt*.08*noGas/2);noGas-=2*eta;no2Gas+=2*eta;}
+}
+if(mode==1||mode==2||mode==3){if(time<2.2){let power=mode==3?dose*1.7:1.7;for(let k=0;k<2;k++)blob(mode==3?P:A,.055+(rand()-.5)*.04,.29+(rand()-.5)*.06,(rand()-.5)*.04,power*dt*2,.065);}}
+let depos=0,produced=0;
+for(let z=0;z<NZ;z++)for(let y=0;y<NY;y++)for(let x=0;x<NX;x++){
+const i=ix(x,y,z),wx=-.45+x*.9/(NX-1),wy=-1.16+y*1.66/(NY-1),wz=-.45+z*.9/(NZ-1);
+if(!inside(wx,wy,wz)){TA[i]=0;TR[i]=0;TH[i]=0;TP[i]=0;continue;}
+const vel=velocity(wx,wy,wz),bx=wx-vel[0]*dt,by=wy-vel[1]*dt,bz=wz-vel[2]*dt;
+let aa=mode==0?0:sample(A,bx,by,bz),rr=mode==0?0:sample(R,bx,by,bz),hh=mode==3?sample(H,bx,by,bz):0,settle=mode==1?.009:mode==2?.025:0,pp=sample(P,bx,by+settle*dt,bz);
+if(mode==1||mode==2){let reaction=Math.min(aa,rr,Math.max(0,7.5*aa*rr*dt));aa-=reaction;rr-=reaction;pp+=reaction*2.8;produced+=reaction;}
+if(mode==3){
+  // Ionic equation: 2 MnO4- + 5 SO3(2-) + 6 H+ -> 2 Mn(2+) + 5 SO4(2-)
+  let extent=Math.min(pp/2,rr/5,hh/6,Math.max(0,28.*pp*rr*hh*dt));
+  pp-=2*extent;rr-=5*extent;hh-=6*extent;produced+=extent;
+}
+if((mode==1||mode==2)&&wy<-1.02){let fraction=dt*(mode==1?.25:.4);let moved=pp*fraction;pp-=moved;depos+=moved;}
+TA[i]=Math.max(0,aa);TR[i]=Math.max(0,rr);TH[i]=Math.max(0,hh);TP[i]=Math.max(0,pp);
+}
+[A,TA]=[TA,A];[R,TR]=[TR,R];[H,TH]=[TH,H];[P,TP]=[TP,P];
+if(mode==1&&time<19&&time>.8){flocTimer+=dt;while(flocTimer>.42&&flocs.length<38){flocTimer-=.42;flocs.push({x:(rand()-.5)*.20,z:(rand()-.5)*.20,y:clamp(.20-time*.025,-.9,.27),r:.055+rand()*.06,phase:rand()*6.3});}}
+if(mode==1){Q.fill(0);for(const fl of flocs){fl.y-=dt*(.027+heatActual*.01);fl.x+=dt*.013*Math.sin(time*1.5+fl.phase);fl.z+=dt*.012*Math.cos(time*1.1+fl.phase);if(fl.x*fl.x+fl.z*fl.z>.1){fl.x*=.97;fl.z*=.97;}if(fl.y<=-1.01){sediment=Math.min(1.6,sediment+.024);fl.y=-1.2;continue;}blob(Q,fl.x,fl.y,fl.z,.45,fl.r);blob(Q,fl.x+fl.r*.45,fl.y-fl.r*.25,fl.z,.3,fl.r*.7);}flocs=flocs.filter(x=>x.y> -1.08);}
+if(mode==1||mode==2)sediment=clamp(sediment+depos*1.8/450,0,1.7);
+mean=0;for(let i=0;i<N;i++)mean+=mode==3?P[i]:P[i]+Q[i];mean=mean/N;
+upload();}
+function upload(){for(let i=0;i<N;i++){let j=i*3;data[j]=clamp(P[i]*140,0,255);data[j+1]=clamp(Q[i]*150,0,255);data[j+2]=clamp(P[i]*155,0,255);}gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_3D,tex);gl.texSubImage3D(gl.TEXTURE_3D,0,0,0,0,NX,NY,NZ,gl.RGB,gl.UNSIGNED_BYTE,data);}
+function resize(){const dpr=Math.min(window.devicePixelRatio||1,1.3),b=canvas.getBoundingClientRect(),w=Math.floor(b.width*dpr),h=Math.floor(b.height*dpr);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);}}
+const labels=[['Опыт 1: Cu + разб. HNO₃','Cu²⁺ создаёт голубые объёмные шлейфы, NO — бесцветные пузырьки. Только при наличии O₂ в газовом пространстве формируется бурый NO₂.','Голубизна возникает у меди, а бурый газ — не внутри жидкости. Нагрев меняет объёмное течение.'],['Опыт 2: рыхлый AgCl','Сначала молочная взвесь, потом облако неоднородных творожистых хлопьев и рыхлый осадок на дне.','Различай мелкую муть и более крупные рыхлые агрегаты. Нагрев — вторичный параметр, а не принудительная генерация хлопьев.'],['Опыт 3: мелкий BaSO₄','Быстро возникающая белая мелкокристаллическая взвесь; после реакции она постепенно оседает, освобождая верхние слои.','Должна оставаться мелкая молочная муть без крупных ватных комков. Белизна определяется количеством взвеси.'],['Опыт 4: MnO₄⁻ + SO₃²⁻ + H⁺','Фиолетовые трёхмерные языки исчезают при локальной реакции с сульфитом в кислой среде, соотношение 2:5:6.','Реакция не даёт белой мути и видимого газа. При избытке MnO₄⁻ часть окраски сохраняется.']];
+function select(m){mode=m;document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',Number(b.dataset.id)===m));document.getElementById('title').textContent=labels[m][0];document.getElementById('desc').textContent=labels[m][1];document.getElementById('watch').textContent=labels[m][2];document.getElementById('doseWrap').style.display=m==3?'block':'none';document.getElementById('statTitle').textContent=m===0?'Окраска в жидкости':m===3?'Фиолетовая окраска':'Взвесь + хлопья';reset();}
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>select(Number(b.dataset.id)));
+document.getElementById('go').onclick=()=>{if(!running){reset();running=true;paused=false;document.getElementById('go').textContent='↺ Новый запуск';}else {reset();running=true;document.getElementById('go').textContent='↺ Новый запуск';}};
+document.getElementById('pause').onclick=()=>{if(!running)return;paused=!paused;document.getElementById('pause').textContent=paused?'▶ Продолжить':'⏸ Пауза';};
+document.getElementById('reset').onclick=reset;
+document.getElementById('shake').onclick=()=>{if(running)shake=1;};
+document.getElementById('heat').oninput=e=>{heatWanted=e.target.value/100;document.getElementById('heatLabel').textContent=e.target.value+'%';};
+document.getElementById('dose').oninput=e=>{dose=Number(e.target.value)/100;document.getElementById('doseLabel').textContent=e.target.value+'%';};document.getElementById('oxygen').onchange=e=>{oxygen=e.target.checked?1:0;};
+let drag=false,lastX=0,lastY=0;canvas.addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId);});canvas.addEventListener('pointermove',e=>{if(!drag)return;angle+=(e.clientX-lastX)*.008;pitch=clamp(pitch+(e.clientY-lastY)*.006,-.52,.52);lastX=e.clientX;lastY=e.clientY;});canvas.addEventListener('pointerup',()=>drag=false);canvas.addEventListener('pointercancel',()=>drag=false);
+function draw(now){resize();let dt=Math.min((now-prev)/1000,.05);prev=now;if(running&&!paused){carry+=dt;let n=0;while(carry>=.065&&n<3){tick(.065);carry-=.065;n++;}}
+gl.useProgram(prog);gl.uniform2f(loc.resolution,canvas.width,canvas.height);gl.uniform1f(loc.yaw,angle);gl.uniform1f(loc.pitch,pitch);gl.uniform1f(loc.clock,time);gl.uniform1f(loc.heat,heatActual);gl.uniform1f(loc.sediment,sediment);gl.uniform1i(loc.mode,mode);gl.uniform1f(loc.oxygen,oxygen);gl.uniform1f(loc.gasLevel,mode===0&&running?Math.min(1,no2Gas*8):0);gl.uniform1f(loc.bubbleActivity,mode===0&&running?Math.min(1.6,noRate/.0054):0);gl.drawArrays(gl.TRIANGLES,0,6);
+document.getElementById('clock').textContent=time.toFixed(1).replace('.',',')+' с';document.getElementById('warm').textContent=Math.round(heatActual*100)+'%';document.getElementById('stat').textContent=Math.round(clamp(mean*130+sediment*12,0,100))+'%';document.getElementById('state').textContent=running?(paused?'На паузе':'Реакция идёт'):'Готово к запуску';requestAnimationFrame(draw);}
+reset();requestAnimationFrame(draw);
+})();
+</script><script>
+// Accessible fallback for browsers where WebGL2 is blocked. It is deliberately labelled
+// as a schematic 2D rendering and is NOT the volumetric WebGL2 reference.
+(()=>{
+const canvas=document.getElementById('view');if(canvas.getContext('webgl2'))return;
+document.getElementById('fail').style.display='none';
+const ctx=canvas.getContext('2d');if(!ctx)return;
+const badge=document.querySelector('.tag');badge.textContent='Схематичный 2D-резерв · WebGL2 недоступен';
+let mode=0,active=false,paused=false,t=0,heat=0,heatT=0,shake=0,dose=.5,previous=0,seed=0,particles=[],sed=0,orbit=0;
+const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
+function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;}
+function res(){seed=13579;active=false;paused=false;t=0;heatT=0;shake=0;sed=0;particles=[];document.getElementById('go').textContent='▶ Запустить';}
+const labels=[['Опыт 1: Cu + разб. HNO₃','Cu²⁺ окрашивает жидкость в голубой, бесцветный NO образует пузырьки; бурый NO₂ — отдельная реакция с O₂.','Это схематичный 2D-резерв без симуляции газовой стехиометрии.'],['Опыт 2: рыхлый AgCl','Сначала тонкая белая муть, затем рыхлые неправильные хлопья и осадок на дне.','Форма хлопьев неоднородна; не заменяй их одинаковыми белыми шариками.'],['Опыт 3: мелкий BaSO₄','Мелкая взвесь рассеивает свет. Затем жидкость постепенно просветляется сверху вниз.','Молочная муть должна находиться внутри жидкости, а не лежать на стекле.'],['Опыт 4: MnO₄⁻ + SO₃²⁻ + H⁺','Малиново-фиолетовый MnO₄⁻ расходуется в кислой среде при локальном контакте с сульфитом.','Основная реакция без осадка и газа; запасной 2D-режим упрощён.']];
+function setMode(m){mode=m;document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',Number(b.dataset.id)===m));document.getElementById('title').textContent=labels[m][0];document.getElementById('desc').textContent=labels[m][1];document.getElementById('watch').textContent=labels[m][2];document.getElementById('doseWrap').style.display=m===3?'block':'none';document.getElementById('statTitle').textContent=mode===0?'Окраска в жидкости':mode===3?'Фиолетовая окраска':'Взвесь + хлопья';res();}
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>setMode(+b.dataset.id));
+document.getElementById('go').onclick=()=>{res();active=true;document.getElementById('go').textContent='↺ Новый запуск';};
+document.getElementById('reset').onclick=res;
+document.getElementById('pause').onclick=()=>{if(!active)return;paused=!paused;document.getElementById('pause').textContent=paused?'▶ Продолжить':'⏸ Пауза';};
+document.getElementById('shake').onclick=()=>{shake=1;for(const a of particles)a.vy-=.2;};
+document.getElementById('heat').oninput=e=>{heat=+e.target.value/100;document.getElementById('heatLabel').textContent=e.target.value+'%';};
+document.getElementById('dose').oninput=e=>{dose=+e.target.value/100;document.getElementById('doseLabel').textContent=e.target.value+'%';};
+canvas.addEventListener('pointermove',e=>{if(e.buttons)orbit=clamp(orbit+e.movementX*.002,-.5,.5);});
+function rgb(r,g,b,a){return `rgba(${r},${g},${b},${a})`;}
+function particle(){let a={x:clamp(.5+(rand()-.5)*(mode===0?.16:.12),.14,.86),y:mode===0?.84:.09,size:.022+rand()*.05,phase:rand()*8,ttl:4+rand()*6,age:0,vy:mode===0?-(.055+rand()*.065):(.025+rand()*.055)};if(mode===1)a.size=.025+rand()*.05;if(mode===2)a.size=.025+rand()*.055;if(mode===3)a.size=.04+rand()*.04;particles.push(a);}
+function roundedTubePath(x,y,w,h){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+h-w*.45);ctx.bezierCurveTo(x,y+h-w*.10,x+w*.23,y+h,x+w*.5,y+h);ctx.bezierCurveTo(x+w*.77,y+h,x+w,y+h-w*.10,x+w,y+h-w*.45);ctx.lineTo(x+w,y);ctx.closePath();}
+function blurblob(x,y,rx,ry,col){const gr=ctx.createRadialGradient(x,y,0,x,y,Math.max(rx,ry));gr.addColorStop(0,col);gr.addColorStop(1,'rgba(255,255,255,0)');ctx.save();ctx.translate(x,y);ctx.scale(rx/Math.max(rx,ry),ry/Math.max(rx,ry));ctx.translate(-x,-y);ctx.fillStyle=gr;ctx.beginPath();ctx.arc(x,y,Math.max(rx,ry),0,Math.PI*2);ctx.fill();ctx.restore();}
+function draw(now){const dt=Math.min((now-previous)/1000,.04);previous=now;
+if(active&&!paused){t+=dt;heatT+=(heat-heatT)*dt*(heat>heatT?.5:.14);shake=Math.max(0,shake-dt*.45);let spawn=(mode===0?(2+heatT*4):mode===1?(t<8?7:1):mode===2?(t<5?14:1):(t<3?9:0));if(mode===3)spawn*=dose;for(let i=0;i<spawn*dt;i++)if(rand()<spawn*dt/(Math.floor(spawn*dt)+1)||i===0&&rand()<spawn*dt)particle();
+for(const a of particles){a.age+=dt;a.x+=dt*(.016*Math.sin(t*1.2+a.phase+a.y*10)+heatT*.04*Math.sin(a.y*9+t*2)+shake*(rand()-.5)*.15);a.y+=dt*(a.vy*(mode===0?1+heatT*1.7:1)+shake*(rand()-.5)*.13);if(mode===3)a.age+=dt*(1.3+shake*2);a.x=clamp(a.x,.07,.93);}
+if(mode===1||mode===2){let old=particles.length;particles=particles.filter(a=>a.y<.93&&a.age<a.ttl);sed=clamp(sed+(old-particles.length)*.004,0,1);}else particles=particles.filter(a=>a.age<a.ttl&&a.y>0);}
+const dpr=Math.min(window.devicePixelRatio||1,1.5),r=canvas.getBoundingClientRect(),w=Math.floor(r.width*dpr),h=Math.floor(r.height*dpr);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}ctx.clearRect(0,0,w,h);
+let cx=w*.50,top=h*.09,TW=Math.min(w*.32,h*.38),TH=Math.min(h*.77,TW*2.75),xx=cx-TW/2;
+const glow=ctx.createRadialGradient(cx,h*.43,TW*.1,cx,h*.43,TW*2.1);glow.addColorStop(0,'rgba(74,156,233,.15)');glow.addColorStop(1,'rgba(7,14,24,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,w,h);
+ctx.save();ctx.translate(cx,top+TH*.5);ctx.rotate(orbit*.12);ctx.translate(-cx,-(top+TH*.5));
+roundedTubePath(xx,top,TW,TH);ctx.save();ctx.clip();
+let base=ctx.createLinearGradient(xx,top,xx+TW,top);base.addColorStop(0,'rgba(97,165,207,.14)');base.addColorStop(.4,'rgba(61,134,180,.035)');base.addColorStop(.7,'rgba(105,185,225,.05)');base.addColorStop(1,'rgba(122,202,245,.12)');ctx.fillStyle=base;ctx.fillRect(xx,top,TW,TH);
+const ly=top+TH*.29,LH=TH*.71;
+ctx.beginPath();ctx.rect(xx+TW*.05,ly,TW*.90,LH);ctx.clip();ctx.fillStyle='rgba(91,174,210,.07)';ctx.fillRect(xx,ly,TW,LH);
+if(mode===0&&active){let coverage=clamp(t/35,0,.75);ctx.fillStyle=`rgba(24,119,207,${coverage*.12})`;ctx.fillRect(xx,ly,TW,LH);}
+if(mode===2&&active){let cloud=clamp(t/5,0,.9),clearing=clamp((t-7)/32,0,.80),grad=ctx.createLinearGradient(0,ly,0,ly+LH);grad.addColorStop(0,`rgba(240,249,255,${cloud*(.56-clearing*.55)})`);grad.addColorStop(.72,`rgba(242,251,255,${cloud*.72})`);grad.addColorStop(1,`rgba(250,252,255,${cloud*.80})`);ctx.fillStyle=grad;ctx.fillRect(xx,ly,TW,LH);}
+for(let k=0;k<particles.length;k++){const a=particles[k],px=xx+a.x*TW,py=ly+a.y*LH,sz=a.size*TW,fade=clamp(1-a.age/a.ttl,0,1);
+if(mode===0){let vx=Math.sin(a.phase+a.age*2.2)*.6*sz;ctx.strokeStyle=rgb(24,166,251,.05+.25*fade);ctx.lineWidth=sz*.8;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(px,py);ctx.bezierCurveTo(px+vx,py+sz*2,px-vx*2,py+sz*4,px+vx,py+sz*7);ctx.stroke();blurblob(px,py,sz*2,sz*4,`rgba(45,188,255,${.18*fade})`);}
+if(mode===1){blurblob(px,py,sz*2.2,sz*2.8,`rgba(244,250,255,${.38*fade})`);if(a.age>.8){for(let j=0;j<4;j++){let ang=(j*2.1+a.phase),rx=sz*(.9+Math.sin(j+3)*.5),ry=sz*(1.2+Math.sin(j+1)*.4);blurblob(px+Math.cos(ang)*sz*.8,py+Math.sin(ang)*sz*.8,rx,ry,`rgba(249,251,254,${.46*fade})`);}}}
+if(mode===2){blurblob(px,py,sz*2.5,sz*3.5,`rgba(242,250,255,${.23*fade})`);}
+if(mode===3){let f=clamp(fade*Math.exp(-a.age*(dose>1.05?.08:1.4)),0,1);blurblob(px,py,sz*2.3,sz*5,`rgba(170,35,225,${f*.40})`);blurblob(px,py,sz,sz*3,`rgba(222,43,150,${f*.38})`);}}
+if(mode===0){ctx.save();ctx.translate(cx,top+TH*.89);ctx.rotate(-.21);ctx.fillStyle='#b76a3e';ctx.shadowColor='#f1a271';ctx.shadowBlur=11;ctx.beginPath();ctx.ellipse(0,0,TW*.15,TW*.055,0,0,2*Math.PI);ctx.fill();ctx.restore();}
+if(mode===1||mode===2){let sh=clamp(sed*(mode===1?.19:.10),0,.22)*TH;ctx.fillStyle=mode===1?'#e6edf1':'#e9f2fa';ctx.beginPath();ctx.moveTo(xx+TW*.02,top+TH);ctx.lineTo(xx+TW*.04,top+TH-sh*.65);for(let j=1;j<=12;j++){let x=xx+TW*(.04+j*.076),y=top+TH-sh*(.66+.25*Math.sin(j*2.3)*(mode===1?1:.3));ctx.lineTo(x,y);}ctx.lineTo(xx+TW*.98,top+TH);ctx.closePath();ctx.fill();}
+ctx.restore();
+ctx.strokeStyle='rgba(158,217,247,.53)';ctx.lineWidth=2.4*dpr;roundedTubePath(xx,top,TW,TH);ctx.stroke();ctx.strokeStyle='rgba(226,250,255,.3)';ctx.lineWidth=1*dpr;ctx.beginPath();ctx.ellipse(cx,top,TW*.5,TW*.087,0,0,2*Math.PI);ctx.stroke();
+ctx.strokeStyle='rgba(196,239,253,.41)';ctx.lineWidth=1.2*dpr;ctx.beginPath();ctx.ellipse(cx,ly,TW*.445,TW*.055,0,0,Math.PI);ctx.stroke();
+let spec=ctx.createLinearGradient(xx,0,xx+TW,0);spec.addColorStop(0,'rgba(251,255,255,.28)');spec.addColorStop(.2,'rgba(255,255,255,0)');spec.addColorStop(.86,'rgba(255,255,255,0)');spec.addColorStop(1,'rgba(251,255,255,.22)');ctx.fillStyle=spec;roundedTubePath(xx,top,TW,TH);ctx.fill();
+ctx.restore();
+document.getElementById('clock').textContent=t.toFixed(1).replace('.',',')+' с';document.getElementById('warm').textContent=Math.round(heatT*100)+'%';document.getElementById('stat').textContent=clamp(Math.round(mode===0?t*2.1:mode===3?particles.length*.6:particles.length*.9+sed*24),0,100)+'%';document.getElementById('state').textContent=active?(paused?'На паузе':'Схематичная анимация'):'Готово к запуску';requestAnimationFrame(draw);}
+requestAnimationFrame(draw);
+})();
+</script></body></html>
