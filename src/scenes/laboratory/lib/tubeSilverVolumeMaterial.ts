@@ -17,7 +17,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
-      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uHazeStrength: { value: 9.0 },
+      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uHazeStrength: { value: 14.0 },
       uTintStrength: { value: 9.0 }, uTime: { value: 0 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
@@ -117,15 +117,23 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           float tintValue = texture(uTint,grid).r;
           float smokeDensity = 0.0;
           if (smokeValue > 0.0004) {
-            // Smoke: thin filaments of a ridged noise, warped and drifting slowly upward.
+            // Smoke: the feathery pattern of the fifth Codex iteration (shred/hair noises on coordinates
+            // stretched along the flow), driven by the smoke shed from the cotton core.
             vec3 sq = vec3(p.x,p.y-uBottom,p.z)/uRadius;
-            vec3 swirl = vec3(noise3(sq*1.3+vec3(0.0,uTime*0.05,0.0)), noise3(sq*1.3+vec3(5.0,2.0,uTime*0.04)),
-              noise3(sq*1.3+vec3(1.0,uTime*0.03,7.0)))-0.5;
-            float wisp = 1.0-abs(2.0*noise3(sq*vec3(2.4,1.1,2.4)+swirl*1.8+vec3(0.0,-uTime*0.07,0.0))-1.0);
-            smokeDensity = smokeValue*(0.10+2.4*pow(wisp,4.0));
+            vec3 st = sq*vec3(1.0,0.32,1.0)+vec3(0.0,-uTime*0.03,0.0);
+            vec3 warp = vec3(noise3(st*1.25+vec3(3.1,7.2,1.7)), noise3(st*1.35+vec3(9.7,2.3,5.1)),
+              noise3(st*1.18+vec3(4.8,8.4,2.7)))-0.5;
+            vec3 broad = st+warp*0.32;
+            float lobe = noise3(broad*0.9), fold = noise3(broad*2.4+vec3(4.0,1.0,8.0));
+            vec3 fibre = st+warp*0.07;
+            float shred = noise3(fibre*10.0+vec3(8.0,3.0,5.0)), hair = noise3(fibre*23.0+vec3(1.0,6.0,9.0));
+            float concentration = smokeValue*8.0*(0.70+0.65*lobe+0.18*fold);
+            float body = smoothstep(0.055,0.32,concentration);
+            float fuzz = smoothstep(0.25,0.65,0.45*fold+0.38*shred+0.17*hair);
+            smokeDensity = body*(0.35+0.65*fuzz)*min(1.0,smokeValue*3.0);
           }
           float hazeAlpha = 1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius);
-          accumulated += (1.0-alpha)*hazeAlpha*mix(vec3(0.70,0.82,0.94),vec3(0.90,0.93,0.97),clamp(smokeDensity*6.0,0.0,1.0));
+          accumulated += (1.0-alpha)*hazeAlpha*mix(vec3(0.50,0.58,0.68),vec3(0.64,0.68,0.74),clamp(smokeDensity*8.0,0.0,1.0));
           alpha += (1.0-alpha)*hazeAlpha;
           float localAlpha = 1.0-exp(-(solid*26.0+mixing*0.012)*stepLength/uRadius);
           vec3 color = mix(vec3(0.91,0.93,0.91),
