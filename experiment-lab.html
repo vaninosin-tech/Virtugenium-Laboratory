@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>AgCl: стенд опыта</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #cfd8dc; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 12px; top: 10px; white-space: pre; pointer-events: none; text-shadow: 0 0 4px #000; }
+  #help { position: fixed; left: 12px; bottom: 10px; opacity: .65; pointer-events: none; }
+</style></head>
+<body>
+<canvas id="view"></canvas>
+<div id="hud"></div>
+<div id="help">Пробел: пауза · R: заново · 1/2/3: скорость x0.5/x1/x2 · P: налив медленно/быстро · ?t=секунды: показать момент</div>
+<script type="module" src="/src/lab/experimentLab.ts"></script>
+</body></html>
