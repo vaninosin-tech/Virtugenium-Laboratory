@@ -5,6 +5,7 @@ import { SilverSedimentField } from "./tubeSilverSediment";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
 import { silverStage } from "./silverStage";
+import { DEFAULT_FLOC_CONFIG, FlocSystem } from "./night/stage1/flocSystem";
 
 /** Stage-one precipitate partition: visible curd and conserved, optically hidden fine solid. */
 const STAGE_ONE_DENSE_FRACTION = 0.8;
@@ -31,6 +32,8 @@ const FRACTAL_DIMENSION = 1.9;
 const RAFT_ROWS = 3, RAFT_HOLD = 0.04;
 /** Settling law: speed of a unit aggregate (m/s), upper bound, growth time (s) and the flow speed that halves the size. */
 const AGG_V0 = 0.0011, AGG_MAX_SPEED = 0.008, AGG_GROWTH_TIME = 6, AGG_BREAK_SHEAR = 0.05;
+/** Rate (per unit relative concentration per second) at which fine solid joins flocs (Smoluchowski-like, ~ c). */
+const FLOC_AGGREGATION = 8;
 const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
 
 /** R3 bookkeeping in normalized amounts. */
@@ -88,6 +91,11 @@ export class TubeSilverField {
   private priorLevel = Infinity;
   private initialized = false;
   private readonly stageOne: boolean;
+  /** Stage 3: the cotton is a set of cohesive Lagrangian flocs (FlocSystem) instead of a concentration field. */
+  readonly flocMode: boolean;
+  flocSystem!: FlocSystem;
+  private flocMass = new Float32Array(0);
+  private flocVisual = new Float32Array(0);
   private readonly down = new THREE.Vector3();
   private get ionDiffusivity() {
     const override = (globalThis as { __silverMix?: unknown }).__silverMix;
@@ -123,7 +131,8 @@ export class TubeSilverField {
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     readonly silverAmount = 1.15) {
-    this.stageOne = silverStage() === 1;
+    this.flocMode = silverStage() === 3;
+    this.stageOne = silverStage() === 1 || this.flocMode;
     // Stage 1 carries a connected dense phase and needs the finer field grid.
     const size = this.stageOne ? (quality === "LOW" ? TUBE_SIMULATION.field.LOW : TUBE_SIMULATION.field.HIGH)
       : quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
@@ -182,7 +191,7 @@ export class TubeSilverField {
   get sedimentMass() { return this.sedimentField.mass; }
   get coarseMass() { return this.flocs.reduce((sum, floc) => sum + floc.mass, 0)
     + this.coarse.reduce((sum, amount) => sum + amount, 0); }
-  get denseMass() { return this.dense.reduce((sum, amount) => sum + amount, 0); }
+  get denseMass() { return this.flocMode ? (this.flocSystem?.totalMass ?? 0) : this.dense.reduce((sum, amount) => sum + amount, 0); }
   get totalSolidMass() { return this.denseMass + this.suspensionMass + this.coarseMass + this.sedimentMass; }
   get massBalanceError() { return this.totalSolidMass - this.extent; }
 
@@ -245,7 +254,9 @@ export class TubeSilverField {
       }
       const amount = Math.max(0, Math.min(1, delivery) - this.delivered);
       this.inject(inlet, amount, jetStrength);
-      if (this.stageOne) {
+      if (this.flocMode) {
+        if (this.flocMass.length) for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; this.loadWeight[i] = this.flocMass[i] / m.activeCount; }
+      } else if (this.stageOne) {
         // Flocs that trapped air at the surface float until the liquid wets them.
         const wetting = Math.exp(-step / 18), air = this.denseCoordinates[3];
         for (let a = 0; a < m.activeCount; a++) {
@@ -271,7 +282,7 @@ export class TubeSilverField {
       const ionEddy = this.stageOne ? this.ionEddy : undefined;
       for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing, ionEddy);
       this.solver.transport(this.tracer, step, ionMixing, ionEddy);
-      if (this.stageOne) {
+      if (this.stageOne && !this.flocMode) {
         this.holdFilm();
         this.solver.transport(this.dense, step, 0);
         for (const coordinate of this.denseCoordinates)
@@ -310,6 +321,7 @@ export class TubeSilverField {
           this.suspension[0][i] + this.suspension[1][i] + this.suspension[2][i]);
         ba[i] -= formed; so[i] -= formed; this.extent += formed;
         this.productSource[i] = formed;
+        if (this.flocMode) { this.suspension[0][i] += formed; continue; }
         if (this.stageOne) {
           if (formed <= 0) continue;
           const curd = formed * STAGE_ONE_DENSE_FRACTION;
@@ -332,6 +344,7 @@ export class TubeSilverField {
         const fine = formed - aggregate;
         for (let k = 0; k < 3; k++) this.suspension[k][i] += fine * [0.58, 0.28, 0.14][k];
       }
+      if (this.flocMode) this.advanceFlocSystem(step);
       if (!this.stageOne) this.advanceFlocs(step, agitation);
       // Redispersion moves an actual fraction of the bottom reservoir into liquid.
       if (agitation > 0.02) for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
@@ -363,7 +376,18 @@ export class TubeSilverField {
       }
       if (this.stageOne) { this.tintTexture.needsUpdate = true; this.chipTexture.needsUpdate = true; }
       this.texture.needsUpdate = true;
-      if (this.stageOne) {
+      if (this.flocMode) {
+        for (let i = 0; i < this.flocVisual.length; i++) {
+          const offset = i * 4;
+          this.densePixels[offset] = this.flocVisual[i];
+          this.densePixels[offset + 1] = (i % m.nx + 0.5) / m.nx;
+          this.densePixels[offset + 2] = (Math.floor(i / m.nx) % m.ny + 0.5) / m.ny;
+          this.densePixels[offset + 3] = (Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz;
+          this.overlapPixels[i] = this.productSource[i] * m.activeCount;
+        }
+        this.denseTexture.needsUpdate = true;
+        this.overlapTexture.needsUpdate = true;
+      } else if (this.stageOne) {
         for (let i = 0; i < this.dense.length; i++) {
           const mass = this.dense[i];
           const offset = i * 4;
@@ -652,6 +676,48 @@ export class TubeSilverField {
         this.dense[donor] -= moved; this.dense[taker] += moved;
       }
     }
+  }
+
+  /** Primary particles flocculate where the fine solid is concentrated (rate ~ concentration), then the flocs move. */
+  private advanceFlocSystem(dt: number) {
+    const m = this.mask, smoothing = this.suspension[0];
+    if (!this.flocSystem) {
+      this.flocSystem = new FlocSystem({ ...DEFAULT_FLOC_CONFIG, radius: m.radius, bottom: m.bottom, height: m.height });
+      this.flocMass = new Float32Array(m.data.length); this.flocVisual = new Float32Array(m.data.length);
+    }
+    const point = this.scratch;
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], fine = smoothing[i];
+      if (fine <= 1e-12) continue;
+      const rate = Math.min(0.6, FLOC_AGGREGATION * fine * m.activeCount * dt);
+      const moved = fine * rate;
+      if (moved <= 1e-12) continue;
+      smoothing[i] -= moved;
+      const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
+      m.point(x, y, z, point);
+      this.flocSystem.addMass(point.x, point.y, point.z, moved);
+    }
+    this.flocSystem.step(dt, (x, y, z, out) => this.sampleFlow(x, y, z, out), this.velocity.gravityUp.y);
+    this.flocSystem.rasterize(this.flocMass, this.flocVisual, m.nx, m.ny, m.nz, m.activeCount);
+  }
+
+  /** Trilinear carrier velocity at a point, weighted by wet cells; false when no wet cell is near. */
+  private sampleFlow(x: number, y: number, z: number, out: [number, number, number]): boolean {
+    const m = this.mask, R = m.radius;
+    const gx = (x + R) / (2 * R) * m.nx - 0.5, gy = (y - m.bottom) / m.height * m.ny - 0.5, gz = (z + R) / (2 * R) * m.nz - 0.5;
+    const x0 = Math.floor(gx), y0 = Math.floor(gy), z0 = Math.floor(gz);
+    let wx = 0, wy = 0, wz = 0, wsum = 0;
+    for (let dz = 0; dz <= 1; dz++) for (let dy = 0; dy <= 1; dy++) for (let dx = 0; dx <= 1; dx++) {
+      const xi = x0 + dx, yi = y0 + dy, zi = z0 + dz;
+      if (xi < 0 || yi < 0 || zi < 0 || xi >= m.nx || yi >= m.ny || zi >= m.nz) continue;
+      const i = m.index(xi, yi, zi);
+      if (!m.data[i]) continue;
+      const w = (dx ? gx - x0 : 1 - (gx - x0)) * (dy ? gy - y0 : 1 - (gy - y0)) * (dz ? gz - z0 : 1 - (gz - z0));
+      wx += this.flow[i * 3] * w; wy += this.flow[i * 3 + 1] * w; wz += this.flow[i * 3 + 2] * w; wsum += w;
+    }
+    if (wsum < 1e-6) { out[0] = out[1] = out[2] = 0; return false; }
+    out[0] = wx / wsum; out[1] = wy / wsum; out[2] = wz / wsum;
+    return true;
   }
 
   /** Index of the highest wet cell of every column; -1 where the column holds no liquid. */
