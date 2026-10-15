@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { silverSedimentThickness } from "./night/render/silverOptics";
 
 /** Conserved bottom reservoir, indexed by the liquid field's x/z columns. */
 export class SilverSedimentField {
@@ -40,64 +41,63 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
   private readonly sectors = 40;
   constructor(private readonly radius: number, private readonly bottom: number) {
     super();
-    const count = (this.rings + 1) * (this.sectors + 1);
+    const count = 1 + this.rings * this.sectors;
     this.position = new Float32Array(count * 2 * 3);
     this.thickness = new Float32Array(count * 2);
     this.setAttribute("position", new THREE.BufferAttribute(this.position, 3).setUsage(THREE.DynamicDrawUsage));
     this.setAttribute("sedimentThickness", new THREE.BufferAttribute(this.thickness, 1).setUsage(THREE.DynamicDrawUsage));
     const indices: number[] = [];
-    const stride = this.sectors + 1;
-    for (let ring = 0; ring < this.rings; ring++) for (let sector = 0; sector < this.sectors; sector++) {
-      const a = ring * stride + sector, b = a + stride;
-      indices.push(a, a + 1, b, a + 1, b + 1, b);
-      indices.push(count + a, count + b, count + a + 1,
-        count + a + 1, count + b, count + b + 1);
+    const vertex = (ring: number, sector: number) => 1 + (ring - 1) * this.sectors + sector % this.sectors;
+    for (let sector = 0; sector < this.sectors; sector++) {
+      const a = vertex(1, sector), b = vertex(1, sector + 1);
+      indices.push(0, b, a, count, count + a, count + b);
+    }
+    for (let ring = 1; ring < this.rings; ring++) for (let sector = 0; sector < this.sectors; sector++) {
+      const a = vertex(ring, sector), b = vertex(ring, sector + 1);
+      const c = vertex(ring + 1, sector), d = vertex(ring + 1, sector + 1);
+      indices.push(a, b, c, b, d, c);
+      indices.push(count + a, count + c, count + b, count + b, count + c, count + d);
     }
     for (let sector = 0; sector < this.sectors; sector++) {
-      const a = this.rings * stride + sector, b = a + 1;
-      indices.push(a, count + a, b, b, count + a, count + b);
+      const a = vertex(this.rings, sector), b = vertex(this.rings, sector + 1);
+      indices.push(a, b, count + a, b, count + b, count + a);
     }
     this.setIndex(indices);
   }
 
   update(field: SilverSedimentField) {
-    const mass = field.mass;
-    if (mass <= 0) return;
-    const count = (this.rings + 1) * (this.sectors + 1);
-    // A loose curd bed contains mostly trapped liquid, so its visible volume
-    // grows nonlinearly with the conserved mass that has reached the bowl.
-    const pileHeight = this.radius * Math.min(5.1,
-      (0.50 + 9.0 * Math.sqrt(mass)) * (1 - field.compaction * 0.12));
+    const count = 1 + this.rings * this.sectors;
     for (let ring = 0; ring <= this.rings; ring++) {
       const u = ring / this.rings;
       const r = this.radius * 0.96 * u;
-      const taper = 1 - THREE.MathUtils.smoothstep(u, 0.76, 1);
+      const taper = 1 - THREE.MathUtils.smoothstep(u, 0.82, 1);
       const floor = this.bottom + this.radius - Math.sqrt(this.radius * this.radius - r * r);
-      for (let sector = 0; sector <= this.sectors; sector++) {
+      for (let sector = 0; sector < (ring === 0 ? 1 : this.sectors); sector++) {
         const angle = sector / this.sectors * Math.PI * 2;
         const x = r * Math.cos(angle), z = r * Math.sin(angle);
-        const gx = THREE.MathUtils.clamp((x / this.radius + 1) * field.nx * 0.5, 0, field.nx - 1);
-        const gz = THREE.MathUtils.clamp((z / this.radius + 1) * field.nz * 0.5, 0, field.nz - 1);
+        const gx = (x / this.radius + 1) * field.nx * 0.5 - 0.5;
+        const gz = (z / this.radius + 1) * field.nz * 0.5 - 0.5;
         const ix = Math.floor(gx), iz = Math.floor(gz);
         let local = 0, weight = 0;
         for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
           const sx = ix + dx, sz = iz + dz;
           if (sx < 0 || sx >= field.nx || sz < 0 || sz >= field.nz) continue;
-          const w = Math.exp(-(dx * dx + dz * dz) * 0.43);
+          const distanceSq = (sx - gx) ** 2 + (sz - gz) ** 2;
+          const w = Math.exp(-distanceSq * 0.75);
           const amount = field.values[sz * field.nx + sx];
-          local += amount * w;
+          local += Math.max(0, Number.isFinite(amount) ? amount : 0) * w;
           weight += w;
         }
-        const concentration = local / Math.max(weight * mass, 0.000001);
-        const profile = Math.pow(Math.max(0, 1 - u * u), 1.35);
-        const height = pileHeight * profile
-          * THREE.MathUtils.clamp(0.80 + concentration * 0.8, 0.80, 1.18);
-        const grain = 0.83 + 0.17 * Math.sin(sector * 5.9 + ring * 3.1)
-          + 0.14 * Math.sin(sector * 13.1 - ring * 6.3);
-        const i = ring * (this.sectors + 1) + sector;
-        this.position.set([x, floor + height * taper * grain, z], i * 3);
-        this.position.set([x, floor - 0.00003, z], (count + i) * 3);
-        this.thickness[i] = this.thickness[count + i] = height * taper;
+        // Fixed, broad curd variation modulates deposited mass; it does not
+        // move or create any layer when a column contains no sediment.
+        const grain = 0.91 + 0.055 * Math.sin(5 * angle + u * 11)
+          + 0.035 * Math.sin(9 * angle - u * 17);
+        const height = silverSedimentThickness(local / Math.max(weight, 1e-8),
+          this.radius, field.compaction) * taper * grain;
+        const i = ring === 0 ? 0 : 1 + (ring - 1) * this.sectors + sector;
+        this.position.set([x, floor + height, z], i * 3);
+        this.position.set([x, floor, z], (count + i) * 3);
+        this.thickness[i] = this.thickness[count + i] = height;
       }
     }
     this.attributes.position.needsUpdate = true;
