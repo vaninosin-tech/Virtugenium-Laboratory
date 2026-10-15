@@ -35,3 +35,4 @@ keystore.properties
 /_*.png
 .claude/settings.local.json
 .clauderc
+.codex-agent-runs/
