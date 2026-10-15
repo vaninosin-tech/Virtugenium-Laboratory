@@ -5,18 +5,23 @@ import { tubeLiquidHeight } from "../../tubeLiquidLevel";
 import { pouredMl } from "../../tubePourImpact";
 import { TUBE_SIMULATION } from "../../tubeSimulationConfig";
 
-export type GridQuality = "LOW" | "HIGH";
+export type Grid = "LOW" | "HIGH";
+export type GridQuality = Grid;
 export interface FluidRunOptions {
-  quality?: GridQuality;
+  grid?: Grid;
+  quality?: Grid;
   initialMl?: number;
+  up?: THREE.Vector3;
   tiltRadians?: number;
+  inletX?: number;
   impactX?: number;
   pourSteps?: number;
   coastSteps?: number;
-  diffusivity?: number;
+  pressureIterations?: number;
 }
 export interface FluidSample {
   step: number;
+  volumeMl: number;
   deliveredMl: number;
   level: number;
   activeCount: number;
@@ -30,71 +35,76 @@ export interface FluidSample {
 const radius = 0.007;
 const height = 0.055;
 const dt = TUBE_SIMULATION.field.stepSeconds;
+const diffusivity = TUBE_SIMULATION.jetFlow.molecularDiffusivity;
 
 export function nearestWetCell(mask: LiquidMask, point: THREE.Vector3): number {
-  let seed = -1, distance = Infinity;
+  let seed = -1, nearest = Infinity;
   for (let a = 0; a < mask.activeCount; a++) {
     const i = mask.active[a];
     const p = mask.point(i % mask.nx, Math.floor(i / mask.nx) % mask.ny,
       Math.floor(i / (mask.nx * mask.ny)));
-    const d = p.distanceToSquared(point);
-    if (d < distance) { distance = d; seed = i; }
+    const distance = p.distanceToSquared(point);
+    if (distance < nearest) { nearest = distance; seed = i; }
   }
-  if (seed < 0) throw new Error("Liquid mask has no wet cells");
+  if (seed < 0) throw new RangeError("initial fill contains no wet cells");
   return seed;
 }
 
 export function tracerCentroid(mask: LiquidMask, tracer: Float64Array): [number, number, number] {
-  const centre: [number, number, number] = [0, 0, 0];
-  let mass = 0;
+  let mass = 0, x = 0, y = 0, z = 0;
   for (let a = 0; a < mask.activeCount; a++) {
     const i = mask.active[a], v = tracer[i];
     const p = mask.point(i % mask.nx, Math.floor(i / mask.nx) % mask.ny,
       Math.floor(i / (mask.nx * mask.ny)));
-    centre[0] += v * p.x; centre[1] += v * p.y; centre[2] += v * p.z;
-    mass += v;
+    mass += v; x += v * p.x; y += v * p.y; z += v * p.z;
   }
-  return centre.map(v => v / mass) as [number, number, number];
+  return [x / mass, y / mass, z / mass];
 }
 
-/** One continuous 1 ml pour followed by coasting, sampled at the fixed solver step. */
 export function runFluidPour(options: FluidRunOptions = {}) {
-  const quality = options.quality ?? "HIGH";
-  const grid = TUBE_SIMULATION.jetFlow[quality];
-  const mask = new LiquidMask(grid.width, grid.height, grid.depth, radius, 0, height);
-  const solver = new TubeFlowSolver(mask);
-  const tracer = new Float64Array(mask.data.length);
+  const grid = TUBE_SIMULATION.jetFlow[options.grid ?? options.quality ?? "HIGH"];
   const initialMl = options.initialMl ?? 2.5;
-  const tilt = options.tiltRadians ?? 0;
-  const up = new THREE.Vector3(Math.sin(tilt), Math.cos(tilt), 0);
-  const impactX = options.impactX ?? 0;
+  const up = (options.up ?? new THREE.Vector3(Math.sin(options.tiltRadians ?? 0),
+    Math.cos(options.tiltRadians ?? 0), 0)).clone().normalize();
   const pourSteps = options.pourSteps ?? 20;
   const coastSteps = options.coastSteps ?? 60;
-  const diffusivity = options.diffusivity ?? 2e-7;
-  if (pourSteps < 1 || coastSteps < 0) throw new Error("Invalid step counts");
-  const initialLevel = tubeLiquidHeight(initialMl, radius);
-  mask.update(up, initialLevel);
-  solver.refreshMask();
-  const seed = nearestWetCell(mask, new THREE.Vector3(impactX, initialLevel - radius * 0.25, 0));
+  if (pourSteps <= 0 || !Number.isInteger(pourSteps) || coastSteps < 0 || !Number.isInteger(coastSteps))
+    throw new RangeError("pourSteps must be positive and coastSteps nonnegative integers");
+  const mask = new LiquidMask(grid.width, grid.height, grid.depth, radius, 0, height);
+  mask.update(up, tubeLiquidHeight(initialMl, radius));
+  const solver = new TubeFlowSolver(mask, { pressureIterations: options.pressureIterations });
+  const inlet = new THREE.Vector3(options.inletX ?? options.impactX ?? 0,
+    tubeLiquidHeight(initialMl, radius) - radius * 0.25, 0);
+  const tracer = new Float64Array(mask.data.length);
+  const seed = nearestWetCell(mask, inlet);
   tracer[seed] = 1;
-  const samples: FluidSample[] = [];
   const direction = up.clone().negate();
+  const samples: FluidSample[] = [];
+  const sample = (step: number, volumeMl: number) => {
+    let mass = 0;
+    for (let a = 0; a < mask.activeCount; a++) {
+      const i = mask.active[a], v = tracer[i];
+      mass += v;
+    }
+    const diagnostics = solver.diagnostics();
+    samples.push({ step, volumeMl, deliveredMl: volumeMl - initialMl,
+      level: tubeLiquidHeight(volumeMl, radius),
+      activeCount: mask.activeCount, mass,
+      centroid: tracerCentroid(mask, tracer),
+      energy: diagnostics.energy, meanAbsDivergence: diagnostics.meanAbsDivergence,
+      movingFraction: diagnostics.movingFraction });
+  };
+  sample(0, initialMl);
   for (let step = 1; step <= pourSteps + coastSteps; step++) {
-    const fraction = Math.min(1, step / pourSteps);
-    const previousFraction = Math.min(1, (step - 1) / pourSteps);
-    const deliveredMl = pouredMl(fraction);
-    const incrementMl = deliveredMl - pouredMl(previousFraction);
-    const level = tubeLiquidHeight(initialMl + deliveredMl, radius);
-    mask.update(up, level);
+    const deliveredMl = pouredMl(Math.min(step, pourSteps) / pourSteps);
+    const previousMl = pouredMl(Math.min(step - 1, pourSteps) / pourSteps);
+    const volumeMl = initialMl + deliveredMl;
+    mask.update(up, tubeLiquidHeight(volumeMl, radius));
     solver.refreshMask();
-    const inlet = new THREE.Vector3(impactX, level - radius * 0.15, 0);
-    solver.step(dt, inlet, direction, 0.02 * incrementMl / (1 / pourSteps));
+    inlet.y = tubeLiquidHeight(volumeMl, radius) - radius * 0.15;
+    solver.step(dt, inlet, direction, step <= pourSteps ? 0.02 * (deliveredMl - previousMl) * pourSteps : 0);
     solver.transport(tracer, dt, diffusivity);
-    const scalar = solver.scalarDiagnostics(tracer);
-    const flow = solver.diagnostics();
-    samples.push({ step, deliveredMl, level, activeCount: mask.activeCount,
-      mass: scalar.mass, centroid: tracerCentroid(mask, tracer), energy: flow.energy,
-      meanAbsDivergence: flow.meanAbsDivergence, movingFraction: flow.movingFraction });
+    sample(step, volumeMl);
   }
-  return { mask, solver, tracer, seed, samples, dt, pourSteps, coastSteps };
+  return { mask, solver, tracer, samples, seed, pourSteps, coastSteps, dt };
 }
