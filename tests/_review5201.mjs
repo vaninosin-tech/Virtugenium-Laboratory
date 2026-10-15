@@ -10,6 +10,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1200, height: 900 } });
   if (process.env.QUALITY) await context.addInitScript(quality =>
     localStorage.setItem("virtugenium.runtime-quality.v1", quality), process.env.QUALITY);
+  if (process.env.INIT) await context.addInitScript(process.env.INIT);
   const page = await context.newPage();
   page.setDefaultTimeout(120000);
   page.on("pageerror", e => console.log("pageerror", e.message));
@@ -27,7 +28,7 @@ try {
   }, process.env.QUALITY);
   if (process.env.IMPACT || variants.length) await page.locator("select").nth(0).selectOption(process.env.IMPACT ?? variants[0][0]);
   if (process.env.SPEED || variants.length) await page.locator("select").nth(1).selectOption(process.env.SPEED ?? variants[0][1]);
-  if (process.env.DEBUG) await page.evaluate(() => {
+  if (process.env.DEBUG || process.env.SIM) await page.evaluate(() => {
     window.__tubeDebugEnabled = true;
     window.__exp1DiagnosticsEnabled = true;
   });
@@ -94,7 +95,9 @@ try {
         { timeout: 120000, polling: 10 });
       t0 = await page.evaluate(() => window.__reviewPourAt);
     }
-    await page.waitForTimeout(Math.max(0, t0 + t * 1000 - Date.now()));
+    if (process.env.SIM) await page.waitForFunction(target => { const d = window.__tubeDebug; if (!d) return false; if (window.__t0Sim === undefined || window.__t0Sim === null) { if (d.formed > 0.0005) window.__t0Sim = d.ageSeconds; return false; } return d.ageSeconds - window.__t0Sim >= target; }, t, { timeout: 180000, polling: 20 });
+    else await page.waitForTimeout(Math.max(0, t0 + t * 1000 - Date.now()));
+    if (process.env.PROBE) console.log('probe', JSON.stringify(await page.evaluate(() => { const sc = window.__three.scene; let out = {}; sc.traverse(o => { if (o.name === 'TubeSilverDenseField') { const u = o.material.uniforms; out.level = u.uLevel.value; out.bottom = u.uBottom.value; out.height = u.uHeight.value; out.radius = u.uRadius.value; out.meshY = o.position.y; out.up = u.uUp.value.toArray(); } if (o.name === 'TubeLiquidSurface') { out.surfaceLocalY = o.position.y; out.surfaceVisible = o.visible; } }); const d = window.__tubeDebug; out.formed = d && d.formed; const f = window.__silverFieldDebug; if (f) { const m = f.mask; let top = -1, bot = 99, ag = 0, agTop = 0; for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; const y = Math.floor(i / m.nx) % m.ny; if (f.dense[i] * m.activeCount > 0.05) { top = Math.max(top, y); bot = Math.min(bot, y); } } let wetTop = -1; for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; wetTop = Math.max(wetTop, Math.floor(i / m.nx) % m.ny); } out.ny = m.ny; out.denseTopRow = top; out.denseBottomRow = bot; out.wetTopRow = wetTop; out.cell = m.height / m.ny; out.mheight = m.height; out.mbottom = m.bottom; out.age = f.ageSeconds; out.delivered = f.delivered; const rd = new Array(m.ny).fill(0), rc = new Array(m.ny).fill(0), rn = new Array(m.ny).fill(0); for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; const y = Math.floor(i / m.nx) % m.ny; rd[y] += f.dense[i]; rc[y] += f.species['Cl-'].values[i]; rn[y]++; } out.rowDense = rd.map(v => +(v*1000).toFixed(2)).join(','); out.rowCl = rc.map(v => +(v*1000).toFixed(2)).join(','); out.rowN = rn.join(','); } return out; })));
     const actual = (Date.now() - t0) / 1000;
     const progressAtCapture = await page.evaluate(() => {
       const tube = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0];
@@ -276,4 +279,4 @@ try {
       names: change.programs.map(program => program.name) })));
   }
   await writeFile(`${out}/manifest.json`, JSON.stringify({ exp, quality: process.env.QUALITY ?? "AUTO", records, fps: timing }, null, 2));
-} finally { await browser.close(); }
+} finally { if (process.env.KEEPOPEN) await new Promise(r => setTimeout(r, Number(process.env.KEEPOPEN))); await browser.close(); }

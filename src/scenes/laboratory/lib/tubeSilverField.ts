@@ -9,11 +9,15 @@ import { silverStage } from "./silverStage";
 /** Stage-one precipitate partition: visible curd and conserved, optically hidden fine solid. */
 const STAGE_ONE_DENSE_FRACTION = 0.8;
 /** Surface film: layers that spread, thickness the film holds (normalised), peel rate, air that stays with the film. */
-const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.2, SURFACE_CAP = 1.1, SURFACE_PEEL = 0.1, SURFACE_AIR_KEPT = 0.35;
+const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.3, SURFACE_CAP = 1.6, SURFACE_PEEL = 0.15, SURFACE_AIR_KEPT = 0.35;
+/** Share of the film that wets and drains each second. */
+const SURFACE_LEAK = 0.12;
 /** Haze shed by cotton per second (base, extra in the dense core). */
-const HAZE_BASE = 0.015, HAZE_CORE = 0.05;
+const HAZE_BASE = 0.010, HAZE_CORE = 0.035;
 /** Share of the smoke that dissolves into the water tint each second. */
 const SMOKE_TO_TINT = 0.2;
+/** Cotton sets into curd with age: it sinks faster and presses harder (seconds, extra settling and load factors). */
+const HARDEN_FROM = 1.5, HARDEN_TO = 6, HARDEN_SINK = 12, HARDEN_LOAD = 2;
 
 /** R3 bookkeeping in normalized amounts. */
 export function reactR2(silver: number, chloride: number, fraction = 1) {
@@ -42,7 +46,7 @@ export class TubeSilverField {
   readonly tracer: Float64Array;
   readonly productSource: Float64Array;
   readonly dense: Float64Array;
-  /** Conserved mass-weighted birth coordinates (0-2) and trapped air (3), advected with the solid. */
+  /** Conserved mass-weighted birth coordinates (0-2), trapped air (3) and birth time (4), advected with the solid. */
   readonly denseCoordinates: Float64Array[];
   readonly densePixels: Float32Array;
   readonly denseTexture: THREE.Data3DTexture;
@@ -84,6 +88,8 @@ export class TubeSilverField {
   }
   private loadWeight = new Float64Array(0);
   private topCell = new Int32Array(0);
+  private filmMass = new Float64Array(0);
+  private filmCoordinates: Float64Array[] = [];
   private heapHeight = new Float64Array(0);
   private heapFree = new Int32Array(0);
   private readonly packWeights = new Float64Array(6);
@@ -115,7 +121,7 @@ export class TubeSilverField {
     this.productSource = new Float64Array(this.mask.data.length);
     this.dense = new Float64Array(this.mask.data.length);
     this.loadWeight = new Float64Array(this.mask.data.length);
-    this.denseCoordinates = [0, 1, 2, 3].map(() => new Float64Array(this.mask.data.length));
+    this.denseCoordinates = [0, 1, 2, 3, 4].map(() => new Float64Array(this.mask.data.length));
     this.densePixels = new Float32Array(this.mask.data.length * 4);
     this.overlapPixels = new Float32Array(this.mask.data.length);
     this.denseTexture = new THREE.Data3DTexture(this.densePixels, this.mask.nx, this.mask.ny, this.mask.nz);
@@ -223,7 +229,7 @@ export class TubeSilverField {
           const i = m.active[a];
           air[i] *= wetting;
           const lift = this.dense[i] > 1e-20 ? Math.min(1, air[i] / this.dense[i]) : 0;
-          this.loadWeight[i] = this.dense[i] * (1 - lift);
+          this.loadWeight[i] = this.dense[i] * (1 - lift) * (1 + HARDEN_LOAD * this.hardening(i));
         }
       }
       const wall = THREE.MathUtils.smoothstep(Math.hypot(inlet.x, inlet.z) / m.radius, 0.38, 0.80);
@@ -243,9 +249,11 @@ export class TubeSilverField {
       for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing, ionEddy);
       this.solver.transport(this.tracer, step, ionMixing, ionEddy);
       if (this.stageOne) {
+        this.holdFilm();
         this.solver.transport(this.dense, step, 0);
         for (const coordinate of this.denseCoordinates)
           this.solver.transport(coordinate, step, 0);
+        this.releaseFilm();
         this.settleDense(step);
         this.compactDense();
         this.packDense();
@@ -284,6 +292,7 @@ export class TubeSilverField {
           this.denseCoordinates[2][i] += curd * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
           const depthFromSurface = (level - m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
             Math.floor(i / (m.nx * m.ny)), this.scratch).y) / m.radius;
+          this.denseCoordinates[4][i] += curd * this.age;
           this.denseCoordinates[3][i] += curd * 0.98 * Math.exp(-Math.max(0, depthFromSurface) / 0.9);
           continue;
         }
@@ -363,7 +372,8 @@ export class TubeSilverField {
       if (!m.data[j] || this.dense[i] <= 0) continue;
       const concentration = this.dense[i] * m.activeCount;
       const lift = Math.min(1, this.denseCoordinates[3][i] / this.dense[i]);
-      const speed = (0.0005 + 0.002 * concentration / (concentration + 0.3)) * (1 - 0.995 * lift);
+      const speed = (0.0005 + 0.002 * concentration / (concentration + 0.3)) * (1 - 0.995 * lift)
+        * (1 + HARDEN_SINK * this.hardening(i));
       const fraction = Math.min(0.45, speed * dt / spacing);
       const moved = this.dense[i] * fraction;
       this.dense[i] -= moved; this.dense[j] += moved;
@@ -538,6 +548,13 @@ export class TubeSilverField {
     }
   }
 
+  /** 0 for fresh fluffy cotton, 1 for cotton that has had time to set into heavy curd. */
+  private hardening(i: number): number {
+    const mass = this.dense[i];
+    if (mass <= 1e-20) return 0;
+    return THREE.MathUtils.smoothstep(this.age - this.denseCoordinates[4][i] / mass, HARDEN_FROM, HARDEN_TO);
+  }
+
   /** Index of the highest wet cell of every column; -1 where the column holds no liquid. */
   private surfaceTop(): Int32Array {
     const m = this.mask, columns = m.nx * m.nz;
@@ -584,19 +601,61 @@ export class TubeSilverField {
     }
   }
 
-  /** A film thicker than the surface can hold is displaced: pieces are pushed below and wet as they go. */
-  private peelSurface() {
-    const m = this.mask, top = this.surfaceTop(), rows = m.nx;
-    const cap = SURFACE_CAP / m.activeCount, air = this.denseCoordinates[3];
+  /** Air-bearing cotton in the top layers stays at the surface: the flow cannot carry it away. */
+  private holdFilm() {
+    const m = this.mask, top = this.surfaceTop(), rows = m.nx, air = this.denseCoordinates[3];
+    if (this.filmMass.length !== m.data.length) {
+      this.filmMass = new Float64Array(m.data.length);
+      this.filmCoordinates = this.denseCoordinates.map(() => new Float64Array(m.data.length));
+    }
     for (let c = 0; c < top.length; c++) {
       const a = top[c];
       if (a < 0) continue;
       for (let layer = 0; layer < SURFACE_LAYERS; layer++) {
+        const i = a - layer * rows;
+        if (i < 0 || !m.data[i] || this.dense[i] <= 1e-20) continue;
+        const lift = Math.min(1, air[i] / this.dense[i]) ** 2;
+        const kept = this.dense[i] * lift;
+        this.filmMass[i] = kept; this.dense[i] -= kept;
+        for (let k = 0; k < this.denseCoordinates.length; k++) {
+          const held = this.denseCoordinates[k][i] * lift;
+          this.filmCoordinates[k][i] = held; this.denseCoordinates[k][i] -= held;
+        }
+      }
+    }
+  }
+
+  private releaseFilm() {
+    const m = this.mask;
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a];
+      if (this.filmMass[i] === 0) continue;
+      this.dense[i] += this.filmMass[i]; this.filmMass[i] = 0;
+      for (let k = 0; k < this.denseCoordinates.length; k++) {
+        this.denseCoordinates[k][i] += this.filmCoordinates[k][i]; this.filmCoordinates[k][i] = 0;
+      }
+    }
+  }
+
+  /** A film thicker than the surface can hold is displaced: pieces are pushed below and wet as they go. */
+  private peelStep = 0.05;
+  private peelSurface() {
+    const m = this.mask, top = this.surfaceTop(), rows = m.nx;
+    const air = this.denseCoordinates[3];
+    for (let c = 0; c < top.length; c++) {
+      const a = top[c];
+      if (a < 0) continue;
+      // The film holds less near the glass, so displaced cotton runs down along the wall.
+      const x = c % m.nx, z = Math.floor(c / m.nx);
+      const radial = Math.hypot((x + 0.5) / m.nx - 0.5, (z + 0.5) / m.nz - 0.5) * 2;
+      const cap = SURFACE_CAP * (1 - 0.65 * THREE.MathUtils.smoothstep(radial, 0.45, 0.95)) / m.activeCount;
+      for (let layer = 0; layer < SURFACE_LAYERS; layer++) {
         const i = a - layer * rows, j = i - rows;
         if (i < 0 || j < 0 || !m.data[i] || !m.data[j]) continue;
         const excess = this.dense[i] - cap;
-        if (excess <= 0) continue;
-        const amount = excess * SURFACE_PEEL;
+        // New cotton arriving at the film displaces the old one; the film also slowly wets and drains.
+        const amount = Math.max(0, excess) * SURFACE_PEEL + this.dense[i] * SURFACE_LEAK * this.peelStep;
+        if (amount <= 0) continue;
         const fraction = amount / this.dense[i];
         for (let k = 0; k < this.denseCoordinates.length; k++) {
           const component = this.denseCoordinates[k];

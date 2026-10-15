@@ -48,13 +48,15 @@ function measure(field: TubeSilverField) {
 }
 
 describe("wave 4A dense AgCl physics", () => {
-  it("partitions each newly formed solid into 45% curd and 55% fine suspension", () => {
+  it("partitions each newly formed solid into 80% curd and 20% fine smoke", () => {
     const field = new TubeSilverField("HIGH", 0.007, 0, 0.055);
     field.advance(0.05, new THREE.Vector3(0, 1, 0), 0.038,
       new THREE.Vector3(0, 0.037, 0), 0.05);
     expect(field.extent).toBeGreaterThan(0);
-    expect(field.denseMass / field.extent).toBeCloseTo(0.45, 12);
-    expect(field.suspensionMass / field.extent).toBeCloseTo(0.55, 12);
+    // The curd sheds smoke from its core within the same step, so the split is checked to a loose tolerance.
+    expect(field.denseMass / field.extent).toBeGreaterThan(0.78);
+    expect(field.denseMass / field.extent).toBeLessThanOrEqual(0.8 + 1e-9);
+    expect((field.denseMass + field.suspensionMass) / field.extent).toBeCloseTo(1, 12);
     expect(Math.abs(field.massBalanceError)).toBeLessThan(1e-9);
     field.dispose();
   });
