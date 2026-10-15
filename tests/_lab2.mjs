@@ -6,10 +6,10 @@ const pour = process.env.POUR ?? "slow";
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: false, channel: "chrome" });
 try {
-  const page = await browser.newPage({ viewport: { width: 520, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
   page.on("pageerror", e => console.log("pageerror", e.message.slice(0, 400)));
   page.on("console", m => { if (m.type() === "error") console.log("console", m.text().slice(0, 500)); });
-  await page.goto(`http://127.0.0.1:5201/experiment-lab.html?t=0&pour=${pour}`, { waitUntil: "commit", timeout: 60000 });
+  await page.goto(`http://127.0.0.1:5201/experiment-lab.html?t=0&pour=${pour}&voff=${process.env.VOFF ?? 0}`, { waitUntil: "commit", timeout: 60000 });
   await page.waitForFunction(() => document.title === "ready", null, { timeout: 120000 });
   for (const t of times) {
     await page.evaluate(x => window.__labSeek(x), t);
