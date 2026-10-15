@@ -12,6 +12,8 @@ const STAGE_ONE_DENSE_FRACTION = 0.8;
 const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.2, SURFACE_CAP = 1.1, SURFACE_PEEL = 0.1, SURFACE_AIR_KEPT = 0.35;
 /** Haze shed by cotton per second (base, extra in the dense core). */
 const HAZE_BASE = 0.015, HAZE_CORE = 0.05;
+/** Share of the smoke that dissolves into the water tint each second. */
+const SMOKE_TO_TINT = 0.2;
 
 /** R3 bookkeeping in normalized amounts. */
 export function reactR2(silver: number, chloride: number, fraction = 1) {
@@ -47,6 +49,9 @@ export class TubeSilverField {
   readonly overlapPixels: Float32Array;
   readonly overlapTexture: THREE.Data3DTexture;
   readonly sedimentField: SilverSedimentField;
+  /** Stage 1: dissolved tint of the water (suspension[1]) as a texture; `texture` then carries only the smoke. */
+  readonly tintPixels: Float32Array;
+  readonly tintTexture: THREE.Data3DTexture;
   readonly pixels: Float32Array;
   readonly texture: THREE.Data3DTexture;
   extent = 0;
@@ -124,6 +129,12 @@ export class TubeSilverField {
       texture.needsUpdate = true;
     }
     this.sedimentField = new SilverSedimentField(this.mask.nx, this.mask.nz);
+    this.tintPixels = new Float32Array(this.mask.data.length);
+    this.tintTexture = new THREE.Data3DTexture(this.tintPixels, this.mask.nx, this.mask.ny, this.mask.nz);
+    this.tintTexture.format = THREE.RedFormat; this.tintTexture.type = THREE.FloatType;
+    this.tintTexture.minFilter = this.tintTexture.magFilter = THREE.LinearFilter;
+    this.tintTexture.wrapS = this.tintTexture.wrapT = this.tintTexture.wrapR = THREE.ClampToEdgeWrapping;
+    this.tintTexture.unpackAlignment = 1; this.tintTexture.needsUpdate = true;
     this.next = new Float64Array(this.mask.data.length);
     this.flow = this.solver.flow;
     this.pixels = new Float32Array(this.mask.data.length);
@@ -242,6 +253,7 @@ export class TubeSilverField {
         this.spreadSurface();
         this.peelSurface();
         this.emitHaze(step);
+        this.dissolveSmoke(step);
       }
       const calm = this.delivered >= 0.999 && agitation < 0.02
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
@@ -249,7 +261,8 @@ export class TubeSilverField {
       this.settlingBoost += (targetBoost - this.settlingBoost) * (1 - Math.exp(-step / 0.8));
       this.sedimentField.settle(step);
       for (let k = 0; k < 3; k++) {
-        this.solver.transport(this.suspension[k], step, this.stageOne ? 0.000001 : 0.000018);
+        if (this.stageOne && k === 1) this.solver.transport(this.suspension[k], step, 0.00003, 1);
+        else this.solver.transport(this.suspension[k], step, this.stageOne ? 0.000001 : 0.000018);
         if (!this.stageOne) this.settle(this.suspension[k], step,
           TUBE_SIMULATION.silver.settlingSpeeds[k] * this.settlingBoost);
       }
@@ -306,7 +319,12 @@ export class TubeSilverField {
         this.pixels[i] = m.data[i] ? ((1 - opticalMix) * local
           + opticalMix * suspensionMass)
           * TUBE_SIMULATION.silver.suspensionOpticalScale : 0;
+        if (this.stageOne) {
+          this.pixels[i] = m.data[i] ? this.suspension[0][i] * m.activeCount : 0;
+          this.tintPixels[i] = m.data[i] ? this.suspension[1][i] * m.activeCount : 0;
+        }
       }
+      if (this.stageOne) this.tintTexture.needsUpdate = true;
       this.texture.needsUpdate = true;
       if (this.stageOne) {
         for (let i = 0; i < this.dense.length; i++) {
@@ -607,6 +625,16 @@ export class TubeSilverField {
     }
   }
 
+  /** Smoke thins out into the water: the tint is accumulated slowly from it, never present at once. */
+  private dissolveSmoke(dt: number) {
+    const m = this.mask, smoke = this.suspension[0], tint = this.suspension[1];
+    const share = 1 - Math.exp(-dt * SMOKE_TO_TINT);
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], moved = smoke[i] * share;
+      smoke[i] -= moved; tint[i] += moved;
+    }
+  }
+
   private advanceFlocs(dt: number, agitation: number) {
     const m = this.mask;
     for (let a = 0; a < m.activeCount; a++) {
@@ -761,5 +789,5 @@ export class TubeSilverField {
       (column, mass) => this.sedimentField.deposit(column, mass));
   }
 
-  dispose() { this.texture.dispose(); this.denseTexture.dispose(); this.overlapTexture.dispose(); }
+  dispose() { this.tintTexture.dispose(); this.texture.dispose(); this.denseTexture.dispose(); this.overlapTexture.dispose(); }
 }

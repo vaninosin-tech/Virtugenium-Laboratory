@@ -71,6 +71,7 @@ function restart() {
   silver.material.uniforms.uDense.value = field.denseTexture;
   silver.material.uniforms.uOverlap.value = field.overlapTexture;
   silver.material.uniforms.uHaze.value = field.texture;
+  silver.material.uniforms.uTint.value = field.tintTexture;
   simTime = 0; poured = 0;
 }
 
@@ -109,6 +110,7 @@ function syncVideo(force = false) {
 function draw() {
   const level = levelAt(simTime);
   silver.material.uniforms.uLevel.value = level;
+  silver.material.uniforms.uTime.value = simTime;
   silver.material.uniforms.uUp.value.copy(up);
   silver.camera.value.copy(camera.position);
   surface.position.y = level;

@@ -17,7 +17,8 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
-      uHaze: { value: emptyHaze() }, uHazeStrength: { value: 0.16 },
+      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uHazeStrength: { value: 9.0 },
+      uTintStrength: { value: 9.0 }, uTime: { value: 0 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     vertexShader: `
@@ -34,8 +35,8 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uniform vec3 uCameraLocal;
       uniform float uRadius, uBottom, uHeight, uLevel;
       uniform vec3 uUp;
-      uniform sampler3D uDense, uOverlap, uHaze;
-      uniform float uHazeStrength;
+      uniform sampler3D uDense, uOverlap, uHaze, uTint;
+      uniform float uHazeStrength, uTintStrength, uTime;
       in vec3 vPoint;
       out vec4 outColor;
       float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453); }
@@ -47,44 +48,23 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           mix(mix(hash3(i+vec3(0,0,1)), hash3(i+vec3(1,0,1)), f.x),
           mix(hash3(i+vec3(0,1,1)), hash3(i+vec3(1,1,1)), f.x), f.y), f.z);
       }
-      float gShade = 1.0;
+      float fbm3(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 3; i++) { s += a*noise3(p); p = p*2.03+vec3(1.7,9.2,3.1); a *= 0.5; } return s; }
+      float billow3(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 3; i++) { s += a*abs(2.0*noise3(p)-1.0); p = p*2.1+vec3(5.3,1.1,7.7); a *= 0.5; } return s; }
+      // Wet cotton wool (the look tuned in cotton-lab.html): the simulated concentration decides where the mass is
+      // and how dense its core is; torn, feathery detail exists only at the rim, folds and lumps inside.
       float cotton(vec4 field, vec3 grid, vec3 position) {
         if (field.r <= 0.0) return 0.0;
-        // Current physical coordinates keep every octave isotropic. Transported
-        // birth coordinates only bend the broad clumps, with bounded stretch.
-        // Birth coordinates vary cell by cell where the mass is dilute and printed
-        // a lattice; the shift is therefore faded in only inside solid cores.
-        vec3 materialShift = clamp((field.gba-grid)*vec3(2.0,uHeight/uRadius,2.0),
-          vec3(-0.12),vec3(0.12))*smoothstep(0.6,2.5,field.r);
-        vec3 q = vec3(position.x,position.y-uBottom,position.z)/uRadius;
-        vec3 broad = q + materialShift;
-        vec3 warp = vec3(noise3(broad*1.25+vec3(3.1,7.2,1.7)),
-          noise3(broad*1.35+vec3(9.7,2.3,5.1)),
-          noise3(broad*1.18+vec3(4.8,8.4,2.7)))-0.5;
-        broad += warp*0.32;
-        float lobe = noise3(broad*1.05);
-        float fold = noise3(broad*2.5+vec3(4.0,1.0,8.0));
-        vec3 fibre = q + warp*0.07;
-        float shred = noise3(fibre*7.0+vec3(8.0,3.0,5.0));
-        float hair = noise3(fibre*17.0+vec3(1.0,6.0,9.0));
+        vec3 q0 = vec3(position.x,position.y-uBottom,position.z)/uRadius;
+        vec3 w = vec3(noise3(q0*1.7+vec3(3.0,1.0,2.0)), noise3(q0*1.7+vec3(7.0,5.0,1.0)),
+          noise3(q0*1.7+vec3(2.0,9.0,4.0)))-0.5;
+        vec3 q = q0 + w*0.30;
         float concentration = field.r/(field.r+0.23);
-        // Broad gaps persist even when the field contains conserved dilute
-        // material. Folds and fine erosion never align to the grid axes.
-        float massive = noise3(broad*0.55+vec3(2.0,5.0,7.0));
-        float height = 0.50*lobe+0.22*fold+0.28*massive+0.14*concentration;
-        // Same broad field one step toward the light: its slope lights folds.
-        vec3 toLight = vec3(0.42,0.78,0.36)*0.22;
-        float heightLit = 0.50*noise3((broad+toLight)*1.05)+0.22*noise3((broad+toLight)*2.5+vec3(4.0,1.0,8.0))
-          +0.28*noise3((broad+toLight)*0.55+vec3(2.0,5.0,7.0))+0.14*concentration;
-        gShade = clamp(0.55+(height-heightLit)*5.0,0.0,1.0);
-        float clump = smoothstep(0.50,0.63,height);
-        float torn = smoothstep(0.30,0.66,
-          0.46*fold+0.34*shred+0.20*hair);
-        float core = smoothstep(0.12,0.45,concentration);
-        // Erosion acts on the rim only: dense cores stay solid.
-        float rimWeight = 1.0-smoothstep(0.30,0.80,concentration+0.25*lobe);
-        return smoothstep(0.07,0.26,field.r)*clump
-          * mix(1.0,torn,rimWeight)*(0.62+0.38*core);
+        float base = 1.05*concentration;
+        float rim = 1.0-smoothstep(0.35,0.95,base);
+        float lump = billow3(q*4.6), big = billow3(q*2.2), fold = fbm3(q*8.0);
+        float f = base + (0.34+0.30*rim)*(lump-0.30) + 0.22*(big-0.30) + (0.10+0.16*rim)*(fold-0.5);
+        f += rim*0.42*(fbm3(q*15.0)-0.45) + rim*0.20*(noise3(q*37.0)-0.5);
+        return smoothstep(0.60,0.72,f);
       }
       vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
         (p.y-uBottom)/uHeight, p.z/(2.0*uRadius)+0.5); }
@@ -92,6 +72,11 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         float radial = length(p.xz);
         float bowl = uBottom+uRadius-sqrt(max(0.0,uRadius*uRadius-radial*radial));
         return radial < uRadius*0.985 && p.y >= bowl && dot(uUp,p) <= uLevel;
+      }
+      float solidAt(vec3 p) {
+        if (!wet(p)) return 0.0;
+        vec3 g = uvw(p);
+        return cotton(texture(uDense,g),g,p);
       }
       void main() {
         vec3 direction = normalize(vPoint-uCameraLocal);
@@ -118,21 +103,33 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           float solid = cotton(field,grid,p)*rim;
           float source = texture(uOverlap,grid).r;
           float mixing = source > 0.015 ? smoothstep(0.015,0.08,source) : 0.0;
-          float shadow = 0.0;
-          if (solid > 0.003) {
-            for (int lightStep = 1; lightStep <= 3; lightStep++) {
-              vec3 lit = p + vec3(0.42,0.78,0.36)*float(lightStep)*uRadius*0.18;
-              if (wet(lit)) shadow += texture(uDense,uvw(lit)).r;
-            }
+          float lit = 1.0, diffuse = 0.5;
+          if (solid > 0.01) {
+            // Self shadow toward the light and a slope term, as in the cotton lab.
+            vec3 toLight = normalize(vec3(0.45,0.7,0.55));
+            float sh = 0.0;
+            for (int k = 1; k <= 3; k++) sh += solidAt(p+toLight*uRadius*0.12*float(k));
+            lit = exp(-sh*0.9);
+            diffuse = clamp(0.5-(solidAt(p+toLight*uRadius*0.06)-solid)*3.0,0.0,1.0);
           }
           // Fine solid shed by the cotton tints the water: bluish white, built up gently.
-          float hazeValue = texture(uHaze,grid).r;
-          float hazeAlpha = 1.0-exp(-hazeValue*uHazeStrength*stepLength/uRadius);
-          accumulated += (1.0-alpha)*hazeAlpha*vec3(0.84,0.90,0.96);
+          float smokeValue = texture(uHaze,grid).r;
+          float tintValue = texture(uTint,grid).r;
+          float smokeDensity = 0.0;
+          if (smokeValue > 0.0004) {
+            // Smoke: thin filaments of a ridged noise, warped and drifting slowly upward.
+            vec3 sq = vec3(p.x,p.y-uBottom,p.z)/uRadius;
+            vec3 swirl = vec3(noise3(sq*1.3+vec3(0.0,uTime*0.05,0.0)), noise3(sq*1.3+vec3(5.0,2.0,uTime*0.04)),
+              noise3(sq*1.3+vec3(1.0,uTime*0.03,7.0)))-0.5;
+            float wisp = 1.0-abs(2.0*noise3(sq*vec3(2.4,1.1,2.4)+swirl*1.8+vec3(0.0,-uTime*0.07,0.0))-1.0);
+            smokeDensity = smokeValue*(0.10+2.4*pow(wisp,4.0));
+          }
+          float hazeAlpha = 1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius);
+          accumulated += (1.0-alpha)*hazeAlpha*mix(vec3(0.70,0.82,0.94),vec3(0.90,0.93,0.97),clamp(smokeDensity*6.0,0.0,1.0));
           alpha += (1.0-alpha)*hazeAlpha;
-          float localAlpha = 1.0-exp(-(solid*30.0+mixing*0.012)*stepLength/uRadius);
+          float localAlpha = 1.0-exp(-(solid*26.0+mixing*0.012)*stepLength/uRadius);
           vec3 color = mix(vec3(0.91,0.93,0.91),
-            vec3(1.0,0.998,0.99)*clamp(1.0-shadow*0.34,0.58,1.0)*(0.66+0.34*gShade),
+            vec3(1.0,1.0,0.995)*(0.70+0.22*lit+0.10*diffuse),
             solid/(solid+mixing*0.10+0.00001));
           accumulated += (1.0-alpha)*localAlpha*color;
           alpha += (1.0-alpha)*localAlpha;
