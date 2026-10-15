@@ -20,8 +20,9 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
         vec3 b = instanceMatrix[1].xyz;
         vec3 c = instanceMatrix[2].xyz;
         vec3 delta = uCameraLocal - instanceMatrix[3].xyz;
-        vEye = vec3(dot(delta, a) / dot(a, a), dot(delta, b) / dot(b, b),
-          dot(delta, c) / dot(c, c));
+        vEye = vec3(dot(delta, a) / max(dot(a, a), 1e-12),
+          dot(delta, b) / max(dot(b, b), 1e-12),
+          dot(delta, c) / max(dot(c, c), 1e-12));
         vSurface = position;
         vTubeCenter = instanceMatrix[3].xyz;
         vBasisX = a;
@@ -55,6 +56,8 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
         d += 0.55 * lobe(q, vec3(0.31, 0.15, -0.12), vec3(0.48, 0.57, 0.52));
         d += 0.46 * lobe(q, vec3(-0.28, -0.12, 0.18), vec3(0.48, 0.50, 0.44));
         d += 0.30 * lobe(q, vec3(0.02, -0.37, -0.13), vec3(0.48, 0.46, 0.45));
+        // A soft density field and overlapping lobes give each existing floc a
+        // dense core and a feathered edge without spawning extra particles.
         return clamp(d, 0.0, 2.0);
       }
       void main() {
@@ -62,19 +65,22 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number) {
         vec3 direction = ray / max(length(ray), 0.000001);
         float travel = clamp(-2.0 * dot(vSurface, direction), 0.0, 2.0);
         float integral = 0.0;
+        // Fixed 12-tap midpoint quadrature: bounded cost per visible fragment.
+        // Integrate optical depth in local sphere units; no time or grid phase.
         for (int step = 0; step < 12; step++) {
           vec3 p = vSurface + direction * travel * (float(step) + 0.5) / 12.0;
           vec3 tubePoint = vTubeCenter + vBasisX * p.x + vBasisY * p.y + vBasisZ * p.z;
           float radial = length(tubePoint.xz);
           float bowl = uBottom + uRadius - sqrt(max(0.0, uRadius*uRadius - radial*radial));
           if (radial < uRadius * 0.98 && tubePoint.y >= bowl && tubePoint.y <= uLevel)
-            integral += density(p) / 12.0;
+            integral += clamp(density(p), 0.0, 2.0) * travel / 12.0;
         }
-        float opticalDepth = clamp(integral * travel * 2.8, 0.0, 32.0);
+        float opticalDepth = clamp(integral * 2.8, 0.0, 32.0);
         float alpha = clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
         if (alpha < 0.008) discard;
-        float shade = clamp(0.88 + 0.08 * exp(-opticalDepth * 0.6), 0.0, 1.0);
-        gl_FragColor = vec4(vec3(shade, shade, shade * 0.99), alpha);
+        // Forward scattered light stays below display white even where lobes overlap.
+        float shade = clamp(0.85 + 0.11 * exp(-opticalDepth * 0.6), 0.0, 1.0);
+        gl_FragColor = vec4(clamp(vec3(shade, shade, shade * 0.99), 0.0, 1.0), alpha);
       }
     `,
   });
