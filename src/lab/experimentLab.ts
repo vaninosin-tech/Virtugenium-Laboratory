@@ -93,7 +93,7 @@ function stepSim(dt: number) {
   const delivery = Math.min(1, simTime / pourSeconds);
   const level = levelAt(simTime);
   inlet.set(RADIUS * 0.7, level, 0);
-  field.advance(dt, up, level, inlet, delivery, 0, 1, down);
+  field.advance(dt, up, level, inlet, delivery, 0, 0.33, down);
   simTime += dt; poured = delivery;
 }
 

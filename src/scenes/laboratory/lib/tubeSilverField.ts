@@ -98,6 +98,12 @@ export class TubeSilverField {
   private flocMass = new Float32Array(0);
   private flocVisual = new Float32Array(0);
   private readonly down = new THREE.Vector3();
+  /** Surface-spreading closure of the plunging jet (alpha, delta are tunable, see the hydrodynamic note). */
+  private get surfaceClosure() { return (globalThis as { __silverSpread?: unknown }).__silverSpread !== 0; }
+  private get surfaceAlpha() { const v = (globalThis as { __silverAlpha?: unknown }).__silverAlpha; return typeof v === "number" ? v : 0.2; }
+  private get surfaceDelta() { const v = (globalThis as { __silverDelta?: unknown }).__silverDelta; return typeof v === "number" ? v : 0.0015; }
+  /** Buoyancy of the incoming solution in loadWeight units: g*(drho/rho)*(pour/liquid volume)/loadStrength (0 disables). */
+  private get buoyancy() { const v = (globalThis as { __silverBuoy?: unknown }).__silverBuoy; return typeof v === "number" ? v : 4.4; }
   private get ionDiffusivity() {
     const override = (globalThis as { __silverMix?: unknown }).__silverMix;
     return typeof override === "number" ? override : 0.0000004;
@@ -257,7 +263,12 @@ export class TubeSilverField {
       const amount = Math.max(0, Math.min(1, delivery) - this.delivered);
       this.inject(inlet, amount, jetStrength);
       if (this.flocMode) {
-        if (this.flocMass.length) for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; this.loadWeight[i] = this.flocMass[i] / m.activeCount; }
+        // Heavy flocs load the liquid; the poured (lighter) NaCl solution is buoyant: weight is negative where the
+        // incoming-solution tracer is. Acceleration = g * (relative density difference) * volume fraction.
+        for (let a = 0; a < m.activeCount; a++) {
+          const i = m.active[a];
+          this.loadWeight[i] = (this.flocMass.length ? this.flocMass[i] / m.activeCount : 0) - this.buoyancy * this.tracer[i];
+        }
       } else if (this.stageOne) {
         // Flocs that trapped air at the surface float until the liquid wets them.
         const wetting = Math.exp(-step / 18), air = this.denseCoordinates[3];
@@ -277,7 +288,10 @@ export class TubeSilverField {
         amount > 0 ? 0.2 * this.jetScale * Math.min(3, Math.max(0.4, jetStrength)) : 0,
         agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined,
         0, this.stageOne ? { values: this.loadWeight, scale: m.activeCount * this.loadStrength,
-          down: this.down.copy(up).negate() } : undefined);
+          down: this.down.copy(up).negate() } : undefined,
+        this.stageOne && amount > 0 && this.surfaceClosure
+          ? { x: inlet.x, z: inlet.z, level, flow: Math.max(0.05, jetStrength) * 1e-6, alpha: this.surfaceAlpha,
+            delta: this.surfaceDelta, r0: 0.001, relaxation: 12 } : undefined);
       const kinetic = this.solver.diagnostics().energy;
       // The stream stirs the added solution into the Ag+ liquid within about a second.
       const ionMixing = (this.stageOne ? this.ionDiffusivity : 0.00012) + agitation * 0.000003;

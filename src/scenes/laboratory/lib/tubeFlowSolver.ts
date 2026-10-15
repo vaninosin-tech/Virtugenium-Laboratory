@@ -3,6 +3,9 @@ import { LiquidMask } from "./tubeVolumeField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 
 /** Closed, staggered 3D liquid flow. A face exists only between two wet cells. */
+/** Parameters of the surface-spreading closure of a plunging jet (SI units). */
+export interface SurfaceSpread { x: number; z: number; level: number; flow: number; alpha: number; delta: number; r0: number; relaxation: number; }
+
 export class TubeFlowSolver {
   readonly flow: Float32Array;
   lastStepMs = 0;
@@ -59,13 +62,29 @@ export class TubeFlowSolver {
     for (let axis = 0; axis < 3; axis++) for (let i = 0; i < m.data.length; i++)
       if (this.adjacent[axis * 2 + 1][i] < 0) this.faces[axis][i] = 0;
   }
+  /**
+   * First-order closure: u_r(r,z) = alpha*Q/(2*pi*r*delta) * [1 - exp(-(r/r0)^2)] * exp(-z/delta) outward from the
+   * impact point, acting as a relaxation of the horizontal face velocity towards u_r (a momentum correction, not a
+   * second inflow). The projection that follows removes the divergence, so volume is preserved.
+   */
+  private surfaceSpreadTerm(s: SurfaceSpread, p: THREE.Vector3, axis: number, v: number, dt: number) {
+    const depth = s.level - p.y;
+    if (depth < -1e-9 || depth > 4 * s.delta) return 0;
+    const rx = p.x - s.x, rz = p.z - s.z, r = Math.hypot(rx, rz);
+    if (r < 1e-6) return 0;
+    const ur = s.alpha * s.flow / (2 * Math.PI * r * s.delta)
+      * (1 - Math.exp(-((r / s.r0) ** 2))) * Math.exp(-Math.max(0, depth) / s.delta);
+    const target = ur * (axis === 0 ? rx : rz) / r;
+    return (target - v) * Math.min(1, s.relaxation * dt);
+  }
   private neighbor(i: number, axis: number, sign: number) {
     return this.adjacent[axis * 2 + (sign > 0 ? 1 : 0)][i];
   }
   /** Adds momentum at the impact only, then transports, damps and projects the entire velocity. */
   step(dt: number, inlet: THREE.Vector3, direction: THREE.Vector3, impulse: number,
     agitation = 0, background?: (x: number, y: number, z: number) => ArrayLike<number>,
-    jetReach = 0, load?: { values: Float64Array; scale: number; down: THREE.Vector3 }) {
+    jetReach = 0, load?: { values: Float64Array; scale: number; down: THREE.Vector3 },
+    surface?: SurfaceSpread) {
     const started = typeof performance !== "undefined" ? performance.now() : 0;
     const m = this.mask, old = this.previousFaces;
     for (let axis = 0; axis < 3; axis++) old[axis].set(this.faces[axis]);
@@ -109,7 +128,9 @@ export class TubeFlowSolver {
           + source * d.getComponent(axis)
           // Heavy suspended solid loads the liquid: a body force along gravity.
           + (load ? dt * load.scale * 0.5 * (load.values[i] + load.values[j]) * load.down.getComponent(axis) : 0)
-          + (ambient?.[axis] ?? 0) * dt * (this.options.ambientStrength ?? 0.15)));
+          + (ambient?.[axis] ?? 0) * dt * (this.options.ambientStrength ?? 0.15)
+          // Near-surface outward spreading of a plunging jet; the pressure projection below keeps it incompressible.
+          + (surface && axis !== 1 ? this.surfaceSpreadTerm(surface, p, axis, v, dt) : 0)));
       }
     }
     this.project();
