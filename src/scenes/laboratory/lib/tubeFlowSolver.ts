@@ -159,7 +159,7 @@ export class TubeFlowSolver {
       }
     }
   }
-  transport(values: Float64Array, dt: number, diffusivity: number) {
+  transport(values: Float64Array, dt: number, diffusivity: number, eddyScale?: number) {
     const m = this.mask;
     this.next.set(values); this.outgoing.fill(0); this.flux.fill(0);
     for (let a = 0; a < m.activeCount; a++) {
@@ -170,7 +170,7 @@ export class TubeFlowSolver {
         const f = this.faces[axis][i] * dt / this.spacing[axis];
         // Six wet faces may export from one cell; keep explicit diffusion below its CFL limit.
         const mixing = Math.min(0.12, (diffusivity
-          + this.eddy[i] * (this.options.eddyFraction ?? (this.options.lowDiffusion ? 0.02 : 1))) * dt / this.spacing[axis] ** 2);
+          + this.eddy[i] * (eddyScale ?? this.options.eddyFraction ?? (this.options.lowDiffusion ? 0.02 : 1))) * dt / this.spacing[axis] ** 2);
         let donorValue = f >= 0 ? values[i] : values[j];
         if (this.options.lowDiffusion) {
           const donor = f >= 0 ? i : j;

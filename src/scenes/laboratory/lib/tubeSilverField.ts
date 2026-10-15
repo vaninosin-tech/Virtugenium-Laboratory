@@ -33,7 +33,7 @@ export class TubeSilverField {
   readonly tracer: Float64Array;
   readonly productSource: Float64Array;
   readonly dense: Float64Array;
-  /** Conserved mass-weighted birth coordinates, advected with the solid. */
+  /** Conserved mass-weighted birth coordinates (0-2) and trapped air (3), advected with the solid. */
   readonly denseCoordinates: Float64Array[];
   readonly densePixels: Float32Array;
   readonly denseTexture: THREE.Data3DTexture;
@@ -56,13 +56,28 @@ export class TubeSilverField {
   private initialized = false;
   private readonly stageOne: boolean;
   private readonly down = new THREE.Vector3();
+  private get ionDiffusivity() {
+    const override = (globalThis as { __silverMix?: unknown }).__silverMix;
+    return typeof override === "number" ? override : 0.00004;
+  }
+  private get ionEddy() {
+    const override = (globalThis as { __silverEddy?: unknown }).__silverEddy;
+    return typeof override === "number" ? override : 0.8;
+  }
+  /** Stage 1 keeps the stream gentle so the first cotton forms under the surface. */
+  private get jetScale() {
+    if (!this.stageOne) return 1;
+    const override = (globalThis as { __silverJet?: unknown }).__silverJet;
+    return typeof override === "number" ? override : 0.3;
+  }
+  private loadWeight = new Float64Array(0);
   private heapHeight = new Float64Array(0);
   private heapFree = new Int32Array(0);
   private readonly packWeights = new Float64Array(6);
   private readonly packTargets = new Int32Array(6);
   private get packingLimit() {
     const override = (globalThis as { __silverPack?: unknown }).__silverPack;
-    return typeof override === "number" ? override : 2.5;
+    return typeof override === "number" ? override : 4.5;
   }
   /** Body force per unit dense concentration (m/s^2); tuned against the reference video. */
   private get loadStrength() {
@@ -73,12 +88,13 @@ export class TubeSilverField {
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     readonly silverAmount = 1.15) {
     this.stageOne = silverStage() === 1;
+    if (typeof window !== "undefined") (window as unknown as { __silverFieldDebug?: unknown }).__silverFieldDebug = this;
     // Stage 1 carries a connected dense phase and needs the finer field grid.
     const size = this.stageOne ? (quality === "LOW" ? TUBE_SIMULATION.field.LOW : TUBE_SIMULATION.field.HIGH)
       : quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
     this.mask = new LiquidMask(size.width, size.height, size.depth, radius, bottom, height);
     this.velocity = new VelocityField(this.mask);
-    this.solver = new TubeFlowSolver(this.mask, this.stageOne ? { lowDiffusion: true } : {});
+    this.solver = new TubeFlowSolver(this.mask, this.stageOne ? { lowDiffusion: true, ambientStrength: 0.03 } : {});
     this.species = { "Ag+": new SpeciesField("Ag+", this.mask),
       "Cl-": new SpeciesField("Cl-", this.mask) };
     this.suspension = [0, 1, 2].map(() => new Float64Array(this.mask.data.length));
@@ -86,7 +102,8 @@ export class TubeSilverField {
     this.tracer = new Float64Array(this.mask.data.length);
     this.productSource = new Float64Array(this.mask.data.length);
     this.dense = new Float64Array(this.mask.data.length);
-    this.denseCoordinates = [0, 1, 2].map(() => new Float64Array(this.mask.data.length));
+    this.loadWeight = new Float64Array(this.mask.data.length);
+    this.denseCoordinates = [0, 1, 2, 3].map(() => new Float64Array(this.mask.data.length));
     this.densePixels = new Float32Array(this.mask.data.length * 4);
     this.overlapPixels = new Float32Array(this.mask.data.length);
     this.denseTexture = new THREE.Data3DTexture(this.densePixels, this.mask.nx, this.mask.ny, this.mask.nz);
@@ -181,20 +198,32 @@ export class TubeSilverField {
       }
       const amount = Math.max(0, Math.min(1, delivery) - this.delivered);
       this.inject(inlet, amount, jetStrength);
+      if (this.stageOne) {
+        // Flocs that trapped air at the surface float until the liquid wets them.
+        const wetting = Math.exp(-step / 9), air = this.denseCoordinates[3];
+        for (let a = 0; a < m.activeCount; a++) {
+          const i = m.active[a];
+          air[i] *= wetting;
+          const lift = this.dense[i] > 1e-20 ? Math.min(1, air[i] / this.dense[i]) : 0;
+          this.loadWeight[i] = this.dense[i] * (1 - lift);
+        }
+      }
       const wall = THREE.MathUtils.smoothstep(Math.hypot(inlet.x, inlet.z) / m.radius, 0.38, 0.80);
       this.wallJet.copy(jetDirection ?? up);
       if (!jetDirection) this.wallJet.negate();
       this.wallJet.x += inlet.x / m.radius * wall * 0.55;
       this.wallJet.z += inlet.z / m.radius * wall * 0.55;
       this.solver.step(step, inlet, this.wallJet,
-        amount > 0 ? 0.2 * Math.min(3, Math.max(0.4, jetStrength)) : 0,
+        amount > 0 ? 0.2 * this.jetScale * Math.min(3, Math.max(0.4, jetStrength)) : 0,
         agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined,
-        0, this.stageOne ? { values: this.dense, scale: m.activeCount * this.loadStrength,
+        0, this.stageOne ? { values: this.loadWeight, scale: m.activeCount * this.loadStrength,
           down: this.down.copy(up).negate() } : undefined);
       const kinetic = this.solver.diagnostics().energy;
-      const ionMixing = (this.stageOne ? 0.000002 : 0.00012) + agitation * 0.000003;
-      for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing);
-      this.solver.transport(this.tracer, step, ionMixing);
+      // The stream stirs the added solution into the Ag+ liquid within about a second.
+      const ionMixing = (this.stageOne ? this.ionDiffusivity : 0.00012) + agitation * 0.000003;
+      const ionEddy = this.stageOne ? this.ionEddy : undefined;
+      for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing, ionEddy);
+      this.solver.transport(this.tracer, step, ionMixing, ionEddy);
       if (this.stageOne) {
         this.solver.transport(this.dense, step, 0);
         for (const coordinate of this.denseCoordinates)
@@ -228,6 +257,9 @@ export class TubeSilverField {
           this.denseCoordinates[0][i] += formed * ((i % m.nx + 0.5) / m.nx);
           this.denseCoordinates[1][i] += formed * ((Math.floor(i / m.nx) % m.ny + 0.5) / m.ny);
           this.denseCoordinates[2][i] += formed * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
+          const depthFromSurface = (level - m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
+            Math.floor(i / (m.nx * m.ny)), this.scratch).y) / m.radius;
+          this.denseCoordinates[3][i] += formed * 0.85 * Math.exp(-Math.max(0, depthFromSurface) / 0.7);
           continue;
         }
         // Dense, freshly nucleated parcels flocculate locally. All visible
@@ -300,11 +332,12 @@ export class TubeSilverField {
       const j = i + sign * stride;
       if (!m.data[j] || this.dense[i] <= 0) continue;
       const concentration = this.dense[i] * m.activeCount;
-      const speed = 0.002 + 0.008 * concentration / (concentration + 0.3);
+      const lift = Math.min(1, this.denseCoordinates[3][i] / this.dense[i]);
+      const speed = (0.002 + 0.008 * concentration / (concentration + 0.3)) * (1 - 0.97 * lift);
       const fraction = Math.min(0.45, speed * dt / spacing);
       const moved = this.dense[i] * fraction;
       this.dense[i] -= moved; this.dense[j] += moved;
-      for (let component = 0; component < 3; component++) {
+      for (let component = 0; component < this.denseCoordinates.length; component++) {
         const values = this.denseCoordinates[component];
         const part = values[i] * fraction;
         values[i] -= part; values[j] += part;
