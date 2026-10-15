@@ -6,6 +6,9 @@ import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
 import { silverStage } from "./silverStage";
 
+/** Stage-one precipitate partition: visible curd and conserved, optically hidden fine solid. */
+const STAGE_ONE_DENSE_FRACTION = 0.45;
+
 /** R3 bookkeeping in normalized amounts. */
 export function reactR2(silver: number, chloride: number, fraction = 1) {
   const extent = Math.min(Math.max(0, silver), Math.max(0, chloride))
@@ -68,7 +71,7 @@ export class TubeSilverField {
   private get jetScale() {
     if (!this.stageOne) return 1;
     const override = (globalThis as { __silverJet?: unknown }).__silverJet;
-    return typeof override === "number" ? override : 0.3;
+    return typeof override === "number" ? override : 0.1;
   }
   private loadWeight = new Float64Array(0);
   private heapHeight = new Float64Array(0);
@@ -77,18 +80,17 @@ export class TubeSilverField {
   private readonly packTargets = new Int32Array(6);
   private get packingLimit() {
     const override = (globalThis as { __silverPack?: unknown }).__silverPack;
-    return typeof override === "number" ? override : 4.5;
+    return typeof override === "number" ? override : 2.5;
   }
   /** Body force per unit dense concentration (m/s^2); tuned against the reference video. */
   private get loadStrength() {
     const override = (globalThis as { __silverLoad?: unknown }).__silverLoad;
-    return typeof override === "number" ? override : 0.1;
+    return typeof override === "number" ? override : 0.005;
   }
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     readonly silverAmount = 1.15) {
     this.stageOne = silverStage() === 1;
-    if (typeof window !== "undefined") (window as unknown as { __silverFieldDebug?: unknown }).__silverFieldDebug = this;
     // Stage 1 carries a connected dense phase and needs the finer field grid.
     const size = this.stageOne ? (quality === "LOW" ? TUBE_SIMULATION.field.LOW : TUBE_SIMULATION.field.HIGH)
       : quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
@@ -200,7 +202,7 @@ export class TubeSilverField {
       this.inject(inlet, amount, jetStrength);
       if (this.stageOne) {
         // Flocs that trapped air at the surface float until the liquid wets them.
-        const wetting = Math.exp(-step / 9), air = this.denseCoordinates[3];
+        const wetting = Math.exp(-step / 40), air = this.denseCoordinates[3];
         for (let a = 0; a < m.activeCount; a++) {
           const i = m.active[a];
           air[i] *= wetting;
@@ -239,8 +241,8 @@ export class TubeSilverField {
       this.settlingBoost += (targetBoost - this.settlingBoost) * (1 - Math.exp(-step / 0.8));
       this.sedimentField.settle(step);
       for (let k = 0; k < 3; k++) {
-        this.solver.transport(this.suspension[k], step, 0.000018);
-        this.settle(this.suspension[k], step,
+        this.solver.transport(this.suspension[k], step, this.stageOne ? 0.000001 : 0.000018);
+        if (!this.stageOne) this.settle(this.suspension[k], step,
           TUBE_SIMULATION.silver.settlingSpeeds[k] * this.settlingBoost);
       }
       this.solver.transport(this.coarse, step, 0.000003);
@@ -253,13 +255,15 @@ export class TubeSilverField {
         ba[i] -= formed; so[i] -= formed; this.extent += formed;
         this.productSource[i] = formed;
         if (this.stageOne) {
-          this.dense[i] += formed;
-          this.denseCoordinates[0][i] += formed * ((i % m.nx + 0.5) / m.nx);
-          this.denseCoordinates[1][i] += formed * ((Math.floor(i / m.nx) % m.ny + 0.5) / m.ny);
-          this.denseCoordinates[2][i] += formed * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
+          const curd = formed * STAGE_ONE_DENSE_FRACTION;
+          this.suspension[0][i] += formed - curd;
+          this.dense[i] += curd;
+          this.denseCoordinates[0][i] += curd * ((i % m.nx + 0.5) / m.nx);
+          this.denseCoordinates[1][i] += curd * ((Math.floor(i / m.nx) % m.ny + 0.5) / m.ny);
+          this.denseCoordinates[2][i] += curd * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
           const depthFromSurface = (level - m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
             Math.floor(i / (m.nx * m.ny)), this.scratch).y) / m.radius;
-          this.denseCoordinates[3][i] += formed * 0.85 * Math.exp(-Math.max(0, depthFromSurface) / 0.7);
+          this.denseCoordinates[3][i] += curd * 0.98 * Math.exp(-Math.max(0, depthFromSurface) / 0.9);
           continue;
         }
         // Dense, freshly nucleated parcels flocculate locally. All visible
@@ -333,7 +337,7 @@ export class TubeSilverField {
       if (!m.data[j] || this.dense[i] <= 0) continue;
       const concentration = this.dense[i] * m.activeCount;
       const lift = Math.min(1, this.denseCoordinates[3][i] / this.dense[i]);
-      const speed = (0.002 + 0.008 * concentration / (concentration + 0.3)) * (1 - 0.97 * lift);
+      const speed = (0.0005 + 0.002 * concentration / (concentration + 0.3)) * (1 - 0.995 * lift);
       const fraction = Math.min(0.45, speed * dt / spacing);
       const moved = this.dense[i] * fraction;
       this.dense[i] -= moved; this.dense[j] += moved;
@@ -341,6 +345,46 @@ export class TubeSilverField {
         const values = this.denseCoordinates[component];
         const part = values[i] * fraction;
         values[i] -= part; values[j] += part;
+      }
+    }
+    // Porous curd rises against the carrier flow while its trapped air wets out.
+    // Traverse from the top down so a parcel cannot cross several rows in one step.
+    for (let a = m.activeCount - 1; a >= 0; a--) {
+      const i = m.active[a];
+      const cell = axis === 0 ? i % m.nx : axis === 1
+        ? Math.floor(i / m.nx) % m.ny : Math.floor(i / (m.nx * m.ny));
+      if (cell - sign < 0 || cell - sign >= limit || this.dense[i] <= 0) continue;
+      const j = i - sign * stride;
+      if (!m.data[j]) continue;
+      const lift = Math.min(1, this.denseCoordinates[3][i] / this.dense[i]);
+      if (lift < 0.25) continue;
+      const fraction = Math.min(0.35, 0.02 * lift * lift * dt / spacing);
+      const moved = this.dense[i] * fraction;
+      this.dense[i] -= moved; this.dense[j] += moved;
+      for (const values of this.denseCoordinates) {
+        const part = values[i] * fraction;
+        values[i] -= part; values[j] += part;
+      }
+    }
+    // Air-rich curd at the meniscus spreads into adjacent wet cells as a
+    // shallow raft. Pairwise flux keeps both the curd and trapped air conserved.
+    if (axis === 1) for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], y = Math.floor(i / m.nx) % m.ny;
+      if (y + 1 < m.ny && m.data[i + m.nx]) continue;
+      if (this.dense[i] <= 0 || this.denseCoordinates[3][i] < this.dense[i] * 0.25) continue;
+      const x = i % m.nx, z = Math.floor(i / (m.nx * m.ny));
+      for (const [j, valid] of [[i + 1, x + 1 < m.nx], [i - 1, x > 0],
+        [i + m.nx * m.ny, z + 1 < m.nz], [i - m.nx * m.ny, z > 0]] as const) {
+        if (!valid || !m.data[j] || (y + 1 < m.ny && m.data[j + m.nx])) continue;
+        const delta = this.dense[i] - this.dense[j];
+        if (delta <= 0) continue;
+        const amount = Math.min(this.dense[i], delta * 0.08);
+        const fraction = amount / this.dense[i];
+        this.dense[i] -= amount; this.dense[j] += amount;
+        for (const values of this.denseCoordinates) {
+          const part = values[i] * fraction;
+          values[i] -= part; values[j] += part;
+        }
       }
     }
   }
@@ -412,31 +456,38 @@ export class TubeSilverField {
     }
   }
 
-  /** Angle of repose (about 35 degrees): the top of a steep pile slides to lower neighbouring columns. Conservative. */
+  /** Fractional height-field relaxation of the contiguous bottom pile. */
   private repose() {
     const m = this.mask, rows = m.nx, columns = m.nx * m.nz;
     if (this.heapHeight.length !== columns) {
       this.heapHeight = new Float64Array(columns); this.heapFree = new Int32Array(columns);
     }
     const cap = this.packingLimit / m.activeCount;
-    const limit = 0.45;
-    for (let pass = 0; pass < 3; pass++) {
+    // A cell is much taller than it is wide. An 18 degree local relaxation
+    // target leaves room for continuing deposition while keeping the measured
+    // surface below the 35 degree repose bound.
+    const limit = Math.tan(18 * Math.PI / 180) * (2 * m.radius / m.nx)
+      / (m.height / m.ny);
+    for (let pass = 0; pass < 40; pass++) {
       for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
         const c = z * m.nx + x;
-        let full = 0, free = -1;
+        let height = 0, free = -1;
         for (let y = 0; y < m.ny; y++) {
           const i = x + y * rows + z * rows * m.ny;
           if (!m.data[i]) continue;
-          if (this.dense[i] >= 0.9 * cap) { full++; continue; }
-          free = i; break;
+          const fill = Math.min(1, this.dense[i] / cap);
+          if (fill < 0.01) { free = i; break; }
+          height += fill;
+          if (fill < 0.999) { free = i; break; }
         }
         this.heapFree[c] = free;
-        this.heapHeight[c] = free < 0 ? full : full + this.dense[free] / cap;
+        this.heapHeight[c] = height;
       }
       for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
-        const c = z * m.nx + x, from = this.heapFree[c];
-        if (from < 0 || this.heapHeight[c] < 1) continue;
-        const source = this.dense[from] > 0.02 * cap ? from : from - rows;
+        const c = z * m.nx + x;
+        if (this.heapHeight[c] <= 0) continue;
+        const source = this.heapFree[c] >= 0 && this.dense[this.heapFree[c]] > 0.01 * cap
+          ? this.heapFree[c] : this.heapFree[c] - rows;
         if (source < 0 || !m.data[source] || this.dense[source] <= 0) continue;
         for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
           const nx = x + dx, nz = z + dz;
@@ -446,7 +497,7 @@ export class TubeSilverField {
           const drop = this.heapHeight[c] - this.heapHeight[n] - limit;
           if (drop <= 0) continue;
           const amount = Math.min(this.dense[source], Math.max(0, cap - this.dense[target]),
-            0.16 * drop * cap);
+            0.5 * drop * cap);
           if (amount <= 0) continue;
           const fraction = amount / this.dense[source];
           for (const component of this.denseCoordinates) {
@@ -454,6 +505,8 @@ export class TubeSilverField {
             component[source] -= portion; component[target] += portion;
           }
           this.dense[source] -= amount; this.dense[target] += amount;
+          this.heapHeight[c] -= amount / cap;
+          this.heapHeight[n] += amount / cap;
         }
       }
     }

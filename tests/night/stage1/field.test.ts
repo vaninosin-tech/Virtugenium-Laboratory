@@ -101,7 +101,7 @@ function run(inletX: number, varied = false, collectSlices = false, steps = 100)
       varied && step >= 70 && step < 85 ? 0.8 : 0);
     maxMassError = Math.max(maxMassError, Math.abs(field.massBalanceError));
     if (Math.abs(field.massBalanceError) >= 1e-8 ||
-      field.suspensionMass + field.coarseMass + field.sedimentMass !== 0)
+      field.coarseMass + field.sedimentMass !== 0)
       throw new Error(`solid mass balance failed at step ${step + 1}`);
     for (let a = 0; a < field.mask.activeCount; a++) {
       const i = field.mask.active[a];
@@ -116,7 +116,8 @@ function run(inletX: number, varied = false, collectSlices = false, steps = 100)
         throw new Error(`invalid ion cell ${i} at step ${step + 1}`);
       if (field.productSource[i] > 0) {
         positiveSourceCells++;
-        if (field.dense[i] <= 0) throw new Error(`source absent from dense cell ${i}`);
+        if (field.dense[i] <= 0 || field.suspension[0][i] <= 0)
+          throw new Error(`source absent from solid reservoirs at cell ${i}`);
       }
       if (step === 0 && field.dense[i] > 0 && field.productSource[i] <= 0)
         throw new Error(`dense mass appeared without source at cell ${i}`);
