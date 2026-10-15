@@ -30,6 +30,12 @@ export interface FlocConfig {
   linkRange: number;
   maxLinksPerNode: number;
   eddyDiffusivity: number;
+  /** Fraction of the settling slip that remains for a node held at the surface. */
+  surfaceHold: number;
+  /** Share of the vertical carrier flow that the free surface blocks for a node lying in it. */
+  surfaceBlock: number;
+  /** Minimum centre distance as a share of the sum of radii (soft contact; <1 means wool-like overlap). */
+  contact: number;
   /** Fraction of the stretch removed per relaxation sweep (position based, not a spring). */
   linkStiffness: number;
   /** Stretch ratio at which a link yields (permanent lengthening) and the share of the excess made permanent. */
@@ -41,22 +47,25 @@ export interface FlocConfig {
 }
 
 export const DEFAULT_FLOC_CONFIG: Omit<FlocConfig, "radius" | "bottom" | "height"> = {
-  quantum: 0.012,
-  quantumRadius: 0.0017,
+  quantum: 0.03,
+  quantumRadius: 0.0021,
   fractalDimension: 1.9,
   solidFraction: 0.00018,
   liquidDensity: 1000, solidDensity: 5560,
   dragCoefficient: 1.1,
   relaxation: 0.12,
-  linkRange: 0.0027,
+  linkRange: 0.0034,
   maxLinksPerNode: 3,
   /** Turbulent dispersion of a node (m^2/s): eddies of the stream scatter the pieces sideways. */
   eddyDiffusivity: 6e-6,
+  surfaceHold: 0.04,
+  surfaceBlock: 0.85,
+  contact: 0.75,
   linkStiffness: 0.35,
   yieldStretch: 1.25, plasticShare: 0.5,
   breakStretch: 3.0,
   allowBreakage: false,
-  maxNodes: 220,
+  maxNodes: 260,
 };
 
 export interface FlocNode {
@@ -100,6 +109,8 @@ export class FlocSystem {
   readonly config: FlocConfig;
   /** Mass that has left the flocs as sediment (handed back to the caller). */
   settledMass = 0;
+  /** Height of the free surface (m); set by the caller each step. */
+  surfaceY = Infinity;
   private readonly flow: [number, number, number] = [0, 0, 0];
   private readonly adjacency: number[][] = [];
   private readonly scratch = new Float32Array(32768);
@@ -128,7 +139,7 @@ export class FlocSystem {
       const reach = Math.max(nodeRadius(n.mass, c), c.quantumRadius) * 1.3;
       if (d < reach && d < bestD) { bestD = d; best = i; }
     }
-    if (best >= 0 && this.nodes[best].mass < c.quantum * 8) { this.nodes[best].mass += mass; return; }
+    if (best >= 0 && this.nodes[best].mass < c.quantum * 3) { this.nodes[best].mass += mass; return; }
     if (this.nodes.length >= c.maxNodes) {
       // Too many nodes: add to the nearest one instead of creating more.
       let near = 0, nd = Infinity;
@@ -166,9 +177,14 @@ export class FlocSystem {
       const inside = sample(n.x, n.y, n.z, flow);
       const ux = inside ? flow[0] : 0, uy = inside ? flow[1] : 0, uz = inside ? flow[2] : 0;
       // Velocity relaxes towards fluid velocity plus the slip from gravity, buoyancy and drag.
-      const slip = slipSpeed(r, c) * (upY >= 0 ? -1 : 1);
+      // A node that touches the free surface is held by surface tension (a raft): it only leaves the surface when
+      // crowded out by neighbours (the separation step), not by time.
+      const atSurface = n.y > this.surfaceY - 1.3 * r;
+      const slip = slipSpeed(r, c) * (upY >= 0 ? -1 : 1) * (atSurface ? c.surfaceHold : 1);
       const k = 1 - Math.exp(-dt / c.relaxation);
-      n.vx += (ux - n.vx) * k; n.vy += (uy + slip - n.vy) * k; n.vz += (uz - n.vz) * k;
+      // At the free surface the vertical carrier flow is blocked: a raft is only swept sideways there.
+      const uyEff = atSurface ? uy * (1 - c.surfaceBlock) : uy;
+      n.vx += (ux - n.vx) * k; n.vy += (uyEff + slip - n.vy) * k; n.vz += (uz - n.vz) * k;
       // Eddy dispersion grows with the local flow speed; the draw is a deterministic hash of node and step.
       const flowSpeed = Math.hypot(ux, uy, uz), eddy = Math.sqrt(2 * c.eddyDiffusivity * dt) * (0.3 + Math.min(1, flowSpeed / 0.01));
       const hid = this.nodes.indexOf(n) * 12.9898 + this.tick * 78.233;
@@ -206,7 +222,7 @@ export class FlocSystem {
       const a = nodes[i], b = nodes[j];
       const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
       const d2 = dx * dx + dy * dy + dz * dz;
-      const ra = nodeRadius(a.mass, c), rb = nodeRadius(b.mass, c), min = 0.55 * (ra + rb);
+      const ra = nodeRadius(a.mass, c), rb = nodeRadius(b.mass, c), min = c.contact * (ra + rb);
       if (d2 >= min * min || d2 < 1e-18) continue;
       const d = Math.sqrt(d2), push = (min - d) * 0.5;
       const nx = dx / d, ny = dy / d, nz = dz / d;
@@ -223,7 +239,10 @@ export class FlocSystem {
       const radial = Math.hypot(n.x, n.z), limit = R - r;
       if (radial > limit && radial > 1e-9) { n.x *= limit / radial; n.z *= limit / radial; n.vx *= 0.3; n.vz *= 0.3; }
       const floor = this.floorHeight(Math.hypot(n.x, n.z)) + r;
-      if (n.y < floor) { n.y = floor; n.vy = Math.max(0, n.vy); n.resting = true; } else n.resting = false;
+      if (n.y < floor) { n.y = floor; n.vy = Math.max(0, n.vy); n.vx *= 0.2; n.vz *= 0.2; n.resting = true; } else n.resting = false;
+      // The free surface holds a node: it cannot leave the liquid, it floats half in.
+      const ceiling = this.surfaceY - 0.6 * r;
+      if (n.y > ceiling) { n.y = ceiling; n.vy = Math.min(0, n.vy); }
     }
   }
 

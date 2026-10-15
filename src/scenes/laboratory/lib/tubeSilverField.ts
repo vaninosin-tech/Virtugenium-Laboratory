@@ -33,7 +33,7 @@ const RAFT_ROWS = 3, RAFT_HOLD = 0.04;
 /** Settling law: speed of a unit aggregate (m/s), upper bound, growth time (s) and the flow speed that halves the size. */
 const AGG_V0 = 0.0011, AGG_MAX_SPEED = 0.008, AGG_GROWTH_TIME = 6, AGG_BREAK_SHEAR = 0.05;
 /** Rate (per unit relative concentration per second) at which fine solid joins flocs (Smoluchowski-like, ~ c). */
-const FLOC_AGGREGATION = 8;
+const FLOC_AGGREGATION = 14, FLOC_C0 = 0.25;
 const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
 
 /** R3 bookkeeping in normalized amounts. */
@@ -94,6 +94,7 @@ export class TubeSilverField {
   /** Stage 3: the cotton is a set of cohesive Lagrangian flocs (FlocSystem) instead of a concentration field. */
   readonly flocMode: boolean;
   flocSystem!: FlocSystem;
+  private liquidLevel = Infinity;
   private flocMass = new Float32Array(0);
   private flocVisual = new Float32Array(0);
   private readonly down = new THREE.Vector3();
@@ -218,6 +219,7 @@ export class TubeSilverField {
   advance(dt: number, up: THREE.Vector3, level: number, inlet: THREE.Vector3,
     delivery: number, agitation = 0, jetStrength = 1, jetDirection?: THREE.Vector3) {
     const m = this.mask;
+    this.liquidLevel = level;
     this.velocity.gravityUp.copy(up);
     this.accumulator = Math.min(0.5, this.accumulator + Math.max(0, dt));
     while (this.accumulator >= TUBE_SIMULATION.field.stepSeconds - 1e-10) {
@@ -689,7 +691,10 @@ export class TubeSilverField {
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a], fine = smoothing[i];
       if (fine <= 1e-12) continue;
-      const rate = Math.min(0.6, FLOC_AGGREGATION * fine * m.activeCount * dt);
+      // Smoluchowski: collisions of primary particles scale with concentration squared, so dilute regions stay a
+      // fine suspension and only concentrated parts (the mixing zone) flocculate.
+      const concentration = fine * m.activeCount;
+      const rate = Math.min(0.6, FLOC_AGGREGATION * concentration * (concentration / (concentration + FLOC_C0)) * dt);
       const moved = fine * rate;
       if (moved <= 1e-12) continue;
       smoothing[i] -= moved;
@@ -697,6 +702,7 @@ export class TubeSilverField {
       m.point(x, y, z, point);
       this.flocSystem.addMass(point.x, point.y, point.z, moved);
     }
+    this.flocSystem.surfaceY = this.liquidLevel;
     this.flocSystem.step(dt, (x, y, z, out) => this.sampleFlow(x, y, z, out), this.velocity.gravityUp.y);
     this.flocSystem.rasterize(this.flocMass, this.flocVisual, m.nx, m.ny, m.nz, m.activeCount);
   }
