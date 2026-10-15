@@ -62,15 +62,17 @@ try { git(['cat-file', '-e', 'HEAD:docs/AGCL_INTERFACES.md'], { cwd: repoRoot })
 catch { throw new Error('docs/AGCL_INTERFACES.md must be COMMITTED before running agents.'); }
 if (nodeModulesFrom && !fs.existsSync(nodeModulesFrom)) throw new Error(`nodeModulesFrom not found: ${nodeModulesFrom}`);
 
-const baseSha = git(['rev-parse', 'HEAD'], { cwd: repoRoot });
+const resumeRun = process.env.RESUME_RUN || null; // reuse the worktrees and branches of an earlier run
+const oldManifest = resumeRun ? JSON.parse(fs.readFileSync(path.join(repoRoot, '.codex-agent-runs', resumeRun, 'manifest.json'), 'utf8')) : null;
+const baseSha = oldManifest ? oldManifest.baseSha : git(['rev-parse', 'HEAD'], { cwd: repoRoot });
 const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
 const runId = `${timestamp}-${process.pid}`;
 const treesBase = path.join(path.dirname(repoRoot), `${path.basename(repoRoot)}-codex-worktrees`, runId);
 const reportsBase = path.join(repoRoot, '.codex-agent-runs', runId);
 const tasks = jobs.map(job => ({
   ...job,
-  branch: `agent/${job.id}-${runId}`,
-  tree: path.join(treesBase, job.id),
+  branch: oldManifest ? oldManifest.tasks.find(t => t.id === job.id).branch : `agent/${job.id}-${runId}`,
+  tree: oldManifest ? oldManifest.tasks.find(t => t.id === job.id).tree : path.join(treesBase, job.id),
   promptBody: fs.readFileSync(path.resolve(repoRoot, job.prompt), 'utf8')
 }));
 console.log(`Repo: ${repoRoot}\nBase: ${baseSha}\nWorkers: ${tasks.length}\nWorktree base: ${treesBase}\nReports: ${reportsBase}`);
@@ -88,11 +90,12 @@ console.log(`\nCodex: ${(check.stdout || '').trim()}`);
 fs.mkdirSync(reportsBase, { recursive: true });
 fs.mkdirSync(treesBase, { recursive: true });
 for (const task of tasks) {
+  if (oldManifest) continue;
   git(['worktree', 'add', '-b', task.branch, task.tree, 'HEAD'], { cwd: repoRoot });
   if (nodeModulesFrom) fs.symlinkSync(nodeModulesFrom, path.join(task.tree, 'node_modules'), 'junction');
 }
 const manifest = {
-  repoRoot, runId, baseSha, reportsBase, startedAt: new Date().toISOString(), maxHours,
+  repoRoot, runId, resumedFrom: resumeRun, baseSha, reportsBase, startedAt: new Date().toISOString(), maxHours,
   tasks: tasks.map(({ id, branch, tree, prompt, owns }) => ({ id, branch, tree, prompt, owns, status: 'running' }))
 };
 const manifestPath = path.join(reportsBase, 'manifest.json');
@@ -147,7 +150,8 @@ function runCodexOnce(task, attempt) {
 async function runWorker(task) {
   const rec = manifest.tasks.find(x => x.id === task.id);
   let res;
-  for (let attempt = 1; attempt <= 6; attempt++) {
+  const first = oldManifest ? 2 : 1;
+  for (let attempt = first; attempt < first + 6; attempt++) {
     rec.attempts = attempt; saveManifest();
     res = await runCodexOnce(task, attempt);
     if (res.code === 0 || rec.timedOut) break;
