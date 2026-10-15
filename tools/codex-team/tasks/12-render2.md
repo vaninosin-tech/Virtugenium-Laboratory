@@ -12,3 +12,8 @@ Goals:
 5. Cost: bounded raymarch steps (state the number), no per-frame allocations, no new shader compile stalls at reaction start; report the cost reasoning honestly (you cannot measure GPU time in the sandbox).
 
 Verification: unit tests for all pure functions (extinction, thickness-from-mass, height field, floc density profile), geometry tests for `SilverSedimentGeometry` (finite vertices, inside the tube radius, thickness monotonic in mass, follows the hemispherical floor, no gaps). The sandbox cannot open a browser: do NOT claim any visual result; write down precisely what a human must look at (frames at 2, 6, 15, 40 s of experiment 2 from front/side/top). `node node_modules/typescript/bin/tsc --noEmit` clean; run the relevant vitest files and report real counts. Write `docs/night/render2/REPORT.md` with changes, tests, cost reasoning, pending visual checks and limitations.
+
+## Resume note (human review of your first attempt)
+1. Your change broke an existing test: `tests/tubeReactionVisuals.test.ts` > "silver-chloride supports completion and reverse seeking while retaining GPU resources" fails with `expected true to be false`. Find the cause in your edits and fix the CODE (do not weaken or edit that test).
+2. You edited `tests/night/render/silverRender.test.ts`, which is outside your ownership. Revert that file to the base version and put any new tests under `tests/night/render2/`.
+3. Then re-run the full suite one process at a time and report real counts in `docs/night/render2/REPORT.md`. Keep memory use low: specific files first, the whole suite last.

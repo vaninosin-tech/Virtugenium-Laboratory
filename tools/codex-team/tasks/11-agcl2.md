@@ -22,3 +22,6 @@ Verification you must do yourself (unit and scenario tests, all deterministic an
 - Keep every existing test of the repo that is not about silver green: run `node node_modules/vitest/vitest.mjs run --configLoader runner --no-file-parallelism src tests/night` and report counts (the sandbox may time out on slow tests; rerun those alone).
 - `node node_modules/typescript/bin/tsc --noEmit` clean.
 You cannot run a browser: say so, never claim visual results. Write `docs/night/agcl2/REPORT.md` with measured numbers, test counts, what is physically motivated vs artistic, limitations, and anything the renderer or coordinator must do. Do not fake results.
+
+## Resume note
+The previous attempt was killed by the machine running out of memory before you finished. Inspect your worktree (git status, git log, git diff against the base), then continue and finish all required items, run the full verification again and write the final docs/night/agcl2/REPORT.md. Keep memory use low: run vitest on specific files first, the whole suite last, one process at a time.
