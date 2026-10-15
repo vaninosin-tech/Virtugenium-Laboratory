@@ -13,7 +13,7 @@ const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.3, SURFACE_CAP = 1.6, SURFACE_PEEL 
 /** Share of the film that wets and drains each second. */
 const SURFACE_LEAK = 0.12;
 /** Haze shed by cotton per second (base, extra in the dense core). */
-const HAZE_BASE = 0.010, HAZE_CORE = 0.035;
+const HAZE_BASE = 0.004, HAZE_CORE = 0.008, HAZE_DILUTE = 0.35;
 /** Share of the smoke that dissolves into the water tint each second. */
 const SMOKE_TO_TINT = 0.2;
 /** Cotton sets into curd with age: it sinks faster and presses harder (seconds, extra settling and load factors). */
@@ -270,6 +270,7 @@ export class TubeSilverField {
       this.sedimentField.settle(step);
       for (let k = 0; k < 3; k++) {
         if (this.stageOne && k === 1) this.solver.transport(this.suspension[k], step, 0.00003, 1);
+        else if (this.stageOne && k === 0) this.solver.transport(this.suspension[k], step, 0.000012, 0.6);
         else this.solver.transport(this.suspension[k], step, this.stageOne ? 0.000001 : 0.000018);
         if (!this.stageOne) this.settle(this.suspension[k], step,
           TUBE_SIMULATION.silver.settlingSpeeds[k] * this.settlingBoost);
@@ -676,8 +677,10 @@ export class TubeSilverField {
       if (mass <= 1e-20) continue;
       const concentration = mass * m.activeCount;
       const core = THREE.MathUtils.smoothstep(concentration, 0.5, 2.2);
+      // The loose, porous parts of the cotton shed the most; the dense core stays clean.
+      const dilute = 1 - THREE.MathUtils.smoothstep(concentration, 0.3, 1.6);
       const wet = 1 - Math.min(1, air[i] / mass);
-      const emitted = mass * Math.min(0.2, dt * (HAZE_BASE + HAZE_CORE * core) * (0.35 + 0.65 * wet));
+      const emitted = mass * Math.min(0.2, dt * (HAZE_BASE + HAZE_CORE * core + HAZE_DILUTE * dilute) * (0.35 + 0.65 * wet));
       const fraction = emitted / mass;
       for (const component of this.denseCoordinates) component[i] -= component[i] * fraction;
       this.dense[i] -= emitted; this.suspension[0][i] += emitted;
