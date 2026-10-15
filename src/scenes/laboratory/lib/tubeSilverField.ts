@@ -270,8 +270,8 @@ export class TubeSilverField {
     const stride = axis === 0 ? 1 : axis === 1 ? m.nx : m.nx * m.ny;
     const limit = axis === 0 ? m.nx : axis === 1 ? m.ny : m.nz;
     const spacing = axis === 1 ? m.height / m.ny : 2 * m.radius / limit;
-    // Hindered settling remains a conservative wet-cell flux. At the 3 mm LOW
-    // grid spacing the old 0.5 mm/s speed could not reach the floor in a pour.
+    // Hindered settling remains a conservative wet-cell flux. A new tuft needs
+    // several seconds to cross the liquid, while compact material can pile up.
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
       const cell = axis === 0 ? i % m.nx : axis === 1
@@ -280,7 +280,7 @@ export class TubeSilverField {
       const j = i + sign * stride;
       if (!m.data[j] || this.dense[i] <= 0) continue;
       const concentration = this.dense[i] * m.activeCount;
-      const speed = 0.012 / (1 + 1.5 * concentration);
+      const speed = 0.004 + 0.015 * concentration / (concentration + 0.3);
       const fraction = Math.min(0.45, speed * dt / spacing);
       const moved = this.dense[i] * fraction;
       this.dense[i] -= moved; this.dense[j] += moved;
@@ -308,7 +308,7 @@ export class TubeSilverField {
         const to = from === i ? j : i;
         const low = this.dense[from], high = this.dense[to];
         if (low <= 0 || high < low * 1.2) continue;
-        const fraction = 0.025 * Math.min(1, high / low - 1.2);
+        const fraction = 0.075 * Math.min(1, high / low - 1.2);
         const amount = low * fraction;
         for (const coordinate of this.denseCoordinates) {
           const portion = coordinate[from] * fraction;

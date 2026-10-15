@@ -1073,7 +1073,8 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
     ? new THREE.Mesh(silverDenseGeometry, silverVolume.material) : null;
   if (silverDenseMesh && silverField) {
     silverDenseMesh.position.y = box.min.y + fieldHeight * 0.5;
-    silverDenseMesh.renderOrder = 1.05;
+    // Composite the liquid field before the separate transparent PourStream.
+    silverDenseMesh.renderOrder = -0.25;
     silverDenseMesh.name = "TubeSilverDenseField";
     silverDenseMesh.onBeforeRender = updateSilverVolumeCamera;
     silverVolume.material.uniforms.uDense.value = silverField.denseTexture;

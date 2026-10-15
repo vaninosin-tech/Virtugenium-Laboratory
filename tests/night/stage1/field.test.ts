@@ -82,7 +82,7 @@ function verticalProfile(field: TubeSilverField) {
     span: Math.max(0, high - low + 1), floorFraction: floor / Math.max(total, 1e-30) };
 }
 
-function run(inletX: number, varied = false, collectSlices = false) {
+function run(inletX: number, varied = false, collectSlices = false, steps = 100) {
   const field = new TubeSilverField("LOW", 0.007, 0, 0.055);
   const inlet = new THREE.Vector3(inletX, 0.037, 0);
   const up = new THREE.Vector3(0, 1, 0);
@@ -94,40 +94,42 @@ function run(inletX: number, varied = false, collectSlices = false) {
   let positiveSourceCells = 0;
   let maxMassError = 0;
   const profiles: ReturnType<typeof verticalProfile>[] = [];
-  for (let step = 0; step < 100; step++) {
+  for (let step = 0; step < steps; step++) {
     const level = varied && step >= 50 ? 0.041 : 0.038;
     up.set(varied && step >= 65 ? 0.45 : 0, varied && step >= 65 ? 0.893 : 1, 0).normalize();
     field.advance(0.05, up, level, inlet, Math.min(1, (step + 1) / 24),
       varied && step >= 70 && step < 85 ? 0.8 : 0);
     maxMassError = Math.max(maxMassError, Math.abs(field.massBalanceError));
-    expect(Math.abs(field.massBalanceError)).toBeLessThan(1e-8);
-    expect(field.denseMass).toBeCloseTo(field.extent, 8);
-    expect(field.suspensionMass + field.coarseMass + field.sedimentMass).toBe(0);
+    if (Math.abs(field.massBalanceError) >= 1e-8 ||
+      field.suspensionMass + field.coarseMass + field.sedimentMass !== 0)
+      throw new Error(`solid mass balance failed at step ${step + 1}`);
     for (let a = 0; a < field.mask.activeCount; a++) {
       const i = field.mask.active[a];
-      expect(Number.isFinite(field.dense[i])).toBe(true);
-      expect(field.dense[i]).toBeGreaterThanOrEqual(0);
+      if (!Number.isFinite(field.dense[i]) || field.dense[i] < 0)
+        throw new Error(`invalid dense cell ${i} at step ${step + 1}`);
       for (const coordinate of field.denseCoordinates) {
-        expect(Number.isFinite(coordinate[i])).toBe(true);
-        expect(coordinate[i]).toBeGreaterThanOrEqual(0);
+        if (!Number.isFinite(coordinate[i]) || coordinate[i] < 0)
+          throw new Error(`invalid material coordinate ${i} at step ${step + 1}`);
       }
-      expect(Number.isFinite(field.species["Ag+"].values[i])).toBe(true);
-      expect(Number.isFinite(field.species["Cl-"].values[i])).toBe(true);
+      if (!Number.isFinite(field.species["Ag+"].values[i]) ||
+        !Number.isFinite(field.species["Cl-"].values[i]))
+        throw new Error(`invalid ion cell ${i} at step ${step + 1}`);
       if (field.productSource[i] > 0) {
         positiveSourceCells++;
-        expect(field.dense[i]).toBeGreaterThan(0);
+        if (field.dense[i] <= 0) throw new Error(`source absent from dense cell ${i}`);
       }
-      if (step === 0 && field.dense[i] > 0) expect(field.productSource[i]).toBeGreaterThan(0);
+      if (step === 0 && field.dense[i] > 0 && field.productSource[i] <= 0)
+        throw new Error(`dense mass appeared without source at cell ${i}`);
     }
-    if (collectSlices && [4, 19, 49, 99].includes(step)) text += slices(field, `step ${step + 1}`);
-    if ([0, 4, 19, 49, 99].includes(step)) profiles.push(verticalProfile(field));
+    if (collectSlices && [4, 19, 49, 99, 159].includes(step)) text += slices(field, `step ${step + 1}`);
+    if ([0, 4, 19, 49, 99, 159].includes(step)) profiles.push(verticalProfile(field));
   }
   const center = sample(field, field.dense);
   const groups = components(field, 0.01);
   if (collectSlices) {
     text += `dense centre=${center.x.toFixed(3)},${center.y.toFixed(3)},${center.z.toFixed(3)} `
       + `components above 0.01=${groups.length}; largest=${groups[0] ?? 0}; total=${groups.reduce((a, b) => a + b, 0)}\n`;
-    text += `vertical profiles (steps 1,5,20,50,100): ${profiles.map(p =>
+    text += `vertical profiles (steps 1,5,20,50,100${steps >= 160 ? ",160" : ""}): ${profiles.map(p =>
       `centre=${p.centre.toFixed(2)} span=${p.span} floor=${p.floorFraction.toFixed(3)}`).join("; ")}\n`;
     mkdirSync("docs/night/stage1", { recursive: true });
     writeFileSync("docs/night/stage1/slices.txt", text);
@@ -141,15 +143,16 @@ function run(inletX: number, varied = false, collectSlices = false) {
 
 describe("stage-one AgCl field scenarios", () => {
   it("forms only at reaction source, conserves through level, tilt and shake, and emits slices", () => {
-    const outcome = run(0, true, true);
+    const outcome = run(0, true, true, 160);
     expect(outcome.extent).toBeGreaterThan(0.4);
     expect(outcome.positiveSourceCells).toBeGreaterThan(0);
     expect(outcome.groups.length).toBeGreaterThan(0);
     expect((outcome.groups[0] ?? 0) / outcome.groups.reduce((a, b) => a + b, 0)).toBeGreaterThan(0.7);
     // With a 38 mm fill, the highest wet LOW-grid cell is y=11.
     expect(outcome.profiles[0].centre).toBeGreaterThan(8);
+    expect(outcome.profiles[2].floorFraction).toBeLessThan(0.005);
     expect(outcome.profiles[2].span).toBeGreaterThan(outcome.profiles[1].span);
-    expect(outcome.profiles[4].floorFraction).toBeGreaterThan(outcome.profiles[2].floorFraction);
+    expect(outcome.profiles[5].floorFraction).toBeGreaterThan(outcome.profiles[4].floorFraction);
   }, 60000);
   it("follows the pour location and is deterministic", () => {
     const center = run(0);

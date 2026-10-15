@@ -28,22 +28,34 @@ export function valueNoise(x: number, y: number, z: number): number {
   return clamp01(result);
 }
 
+function cottonOctaves(x: number, y: number, z: number): [number, number, number] {
+  const wx = valueNoise(x * 27 + 3.1, y * 20 + 7.2, z * 27 + 1.7) - 0.5;
+  const wy = valueNoise(x * 29 + 9.7, y * 22 + 2.3, z * 29 + 5.1) - 0.5;
+  const wz = valueNoise(x * 23 + 4.8, y * 18 + 8.4, z * 23 + 2.7) - 0.5;
+  const qx = (x + wx * 0.027) * 105;
+  const qy = (y + wy * 0.027) * 68;
+  const qz = (z + wz * 0.027) * 105;
+  return [valueNoise(qx, qy, qz),
+    valueNoise(qx * 2.3 + 8, qy * 2.3 + 3, qz * 2.3 + 5),
+    valueNoise(qx * 5.1 + 1, qy * 5.1 + 6, qz * 5.1 + 9)];
+}
+
 export function fractalNoise(x: number, y: number, z: number): number {
-  const warp = valueNoise(x * 19 + 3.1, y * 19 + 7.2, z * 19 + 1.7) - 0.5;
-  const qx = (x + warp * 0.024) * 74;
-  const qy = (y - warp * 0.012) * 42;
-  const qz = (z + warp * 0.0168) * 74;
-  return clamp01(0.55 * valueNoise(qx, qy, qz)
-    + 0.30 * valueNoise(qx * 2.1, qy * 2.1, qz * 2.1)
-    + 0.15 * valueNoise(qx * 4.3, qy * 4.3, qz * 4.3));
+  const [fold, shred, hair] = cottonOctaves(x, y, z);
+  return clamp01(0.48 * fold + 0.33 * shred + 0.19 * hair);
 }
 
 export function cottonDensity(concentration: number, materialX: number,
   materialY: number, materialZ: number): number {
   const c = Number.isFinite(concentration) ? Math.max(0, concentration) : 0;
   if (c <= 0) return 0;
-  const detail = fractalNoise(materialX, materialY, materialZ) - 0.5;
-  return clamp01(smoothThreshold(c, 0.012, 0.045)
-    * smoothThreshold(c + detail * 0.22, 0.025, 0.135)
-    * (0.42 + 0.58 * smoothThreshold(c, 0.055, 0.22)));
+  const normalized = c / (c + 0.23);
+  const [fold, shred, hair] = cottonOctaves(materialX, materialY, materialZ);
+  const detail = 0.48 * fold + 0.33 * shred + 0.19 * hair - 0.5;
+  const erosion = smoothThreshold(normalized, 0.18, 0.46)
+    * smoothThreshold(shred * 0.65 + hair * 0.35, 0.13, 0.38);
+  return clamp01(smoothThreshold(c, 0.018, 0.065)
+    * smoothThreshold(normalized + detail * 0.72, 0.12, 0.25)
+    * (0.28 + 0.72 * smoothThreshold(normalized, 0.16, 0.57))
+    * (0.36 + 0.64 * erosion));
 }

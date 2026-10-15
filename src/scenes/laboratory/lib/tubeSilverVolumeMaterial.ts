@@ -40,14 +40,22 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       float cotton(vec4 field) {
         if (field.r <= 0.0) return 0.0;
         vec3 p = field.gba;
-        float warp = noise3(p*19.0+vec3(3.1,7.2,1.7))-0.5;
-        p += vec3(warp,-warp*0.5,warp*0.7)*0.024;
-        vec3 fibre = p*vec3(74.0,42.0,74.0);
-        float detail = 0.55*noise3(fibre)+0.30*noise3(fibre*2.1)
-          +0.15*noise3(fibre*4.3)-0.5;
-        float edge = smoothstep(0.025,0.135,field.r+detail*0.22);
-        float core = smoothstep(0.055,0.22,field.r);
-        return smoothstep(0.012,0.045,field.r)*edge*(0.42+0.58*core);
+        vec3 warp = vec3(noise3(p*vec3(27.0,20.0,27.0)+vec3(3.1,7.2,1.7)),
+          noise3(p*vec3(29.0,22.0,29.0)+vec3(9.7,2.3,5.1)),
+          noise3(p*vec3(23.0,18.0,23.0)+vec3(4.8,8.4,2.7)))-0.5;
+        p += warp*0.027;
+        vec3 fibre = p*vec3(105.0,68.0,105.0);
+        float fold = noise3(fibre);
+        float shred = noise3(fibre*2.3+vec3(8.0,3.0,5.0));
+        float hair = noise3(fibre*5.1+vec3(1.0,6.0,9.0));
+        float detail = 0.48*fold+0.33*shred+0.19*hair-0.5;
+        float concentration = field.r/(field.r+0.23);
+        float torn = smoothstep(0.12,0.25,concentration+detail*0.72);
+        float erosion = smoothstep(0.18,0.46,concentration)
+          * smoothstep(0.13,0.38,shred*0.65+hair*0.35);
+        float core = smoothstep(0.16,0.57,concentration);
+        return smoothstep(0.018,0.065,field.r)*torn
+          * (0.28+0.72*core)*(0.36+0.64*erosion);
       }
       vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
         (p.y-uBottom)/uHeight, p.z/(2.0*uRadius)+0.5); }
@@ -79,7 +87,8 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           vec4 field = texture(uDense,grid);
           float rim = 1.0-smoothstep(0.87,0.985,length(p.xz)/uRadius);
           float solid = cotton(field)*rim;
-          float mixing = smoothstep(0.002,0.18,texture(uOverlap,grid).r);
+          float source = texture(uOverlap,grid).r;
+          float mixing = source > 0.015 ? smoothstep(0.015,0.08,source) : 0.0;
           float shadow = 0.0;
           if (solid > 0.003) {
             for (int lightStep = 1; lightStep <= 3; lightStep++) {
@@ -87,10 +96,10 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
               if (wet(lit)) shadow += texture(uDense,uvw(lit)).r;
             }
           }
-          float localAlpha = 1.0-exp(-(solid*19.0+mixing*0.12)*stepLength/uRadius);
-          vec3 color = mix(vec3(0.66,0.88,0.96),
-            vec3(0.99,0.99,0.985)*clamp(1.0-shadow*0.075,0.68,1.0),
-            solid/(solid+mixing*0.55+0.00001));
+          float localAlpha = 1.0-exp(-(solid*13.0+mixing*0.012)*stepLength/uRadius);
+          vec3 color = mix(vec3(0.91,0.93,0.91),
+            vec3(1.0,0.998,0.99)*clamp(1.0-shadow*0.17,0.53,1.0),
+            solid/(solid+mixing*0.10+0.00001));
           accumulated += (1.0-alpha)*localAlpha*color;
           alpha += (1.0-alpha)*localAlpha;
         }

@@ -389,6 +389,8 @@ describe("tube reaction rendering contract", () => {
     silver.advance(2, chemistry(0), "LOW");
     const bariumBed = barium.get("TubeSediment");
     expect(silver.get("TubeSilverDenseField")).toBeDefined();
+    // PourStream is a separate transparent mesh with the default order 0.
+    expect(silver.get("TubeSilverDenseField").renderOrder).toBeLessThan(0);
     expect(silver.get("TubePrecipitate").visible).toBe(false);
     expect(silver.get("TubeSediment").visible).toBe(false);
     expect(barium.get("TubePrecipitate").visible).toBe(false);
