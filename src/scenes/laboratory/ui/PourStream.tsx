@@ -7,7 +7,9 @@ import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { pourFraction, pouredMl, publishTubePourImpact } from "../lib/tubePourImpact";
-import { seedTubeAmounts } from "../lib/tubeAmounts";
+import { seedTubeAmounts, tubeAmount } from "../lib/tubeAmounts";
+import { tubeEffectiveRadius, tubeLiquidHeight } from "../lib/tubeLiquidLevel";
+import { silverStage } from "../lib/silverStage";
 
 const RINGS = 13;
 const SIDES = 8;
@@ -15,7 +17,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 const STREAM_START = 0.35;
 const STREAM_END = 0.76;
 
-function streamGeometry() {
+export function streamGeometry() {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(RINGS * SIDES * 3);
   const uvs = new Float32Array(RINGS * SIDES * 2);
@@ -42,7 +44,7 @@ function streamGeometry() {
 }
 
 /** A translucent liquid surface with angle-dependent edge and a narrow moving glint. */
-function streamMaterial(dyed: boolean) {
+export function streamMaterial(dyed: boolean) {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -51,6 +53,7 @@ function streamMaterial(dyed: boolean) {
       uColor: { value: new THREE.Color(dyed ? "#bb347f" : "#6d9eaa") },
       uDyed: { value: dyed ? 1 : 0 },
       uOpacity: { value: 0 },
+      uSilver: { value: 0 },
       uTime: { value: 0 },
     },
     vertexShader: `
@@ -69,6 +72,7 @@ function streamMaterial(dyed: boolean) {
       uniform vec3 uColor;
       uniform float uDyed;
       uniform float uOpacity;
+      uniform float uSilver;
       uniform float uTime;
       varying vec3 vNormalView;
       varying vec3 vEye;
@@ -81,12 +85,38 @@ function streamMaterial(dyed: boolean) {
         glint *= 0.8 + 0.2 * sin(uTime * 12.0 - vAlong * 16.0);
         vec3 color = mix(uColor, vec3(1.0), min(0.75, fresnel * 0.4 + glint * 0.65));
         float alpha = (mix(0.38, 0.34, uDyed) + fresnel * 0.43 + glint * 0.27) * uOpacity;
+        if (uSilver > 0.5) {
+          color = mix(vec3(0.46, 0.72, 0.79), vec3(1.0), min(0.8, fresnel * 0.45 + glint * 0.7));
+          alpha = (0.78 + fresnel * 0.12 + glint * 0.10) * uOpacity;
+        }
         gl_FragColor = vec4(color, min(alpha, 0.86));
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }
     `,
   });
+}
+
+export function configureSilverStream(mesh: THREE.Mesh, material: THREE.ShaderMaterial, silver: boolean) {
+  mesh.renderOrder = silver ? 5 : 0;
+  material.depthTest = !silver;
+  material.uniforms.uSilver.value = silver ? 1 : 0;
+}
+
+export function isStageOneSilverPour(stage: number, reagentId: string | undefined, contents: readonly string[]) {
+  return stage === 1 && (reagentId === "nacl" && contents.includes("agno3")
+    || reagentId === "agno3" && contents.includes("nacl"));
+}
+
+export function shouldDrawStream(flow: number, length: number, silver: boolean) {
+  return flow > 0.015 && (silver || length < 0.1);
+}
+
+/** The wet surface is measured from the tube's 150 mm mouth, in its own frame. */
+export function silverStreamEnd(mouth: THREE.Vector3, tubeRoot: THREE.Matrix4, volumeMl: number) {
+  const surface = new THREE.Vector3(0,
+    tubeLiquidHeight(volumeMl, tubeEffectiveRadius(0.055)), 0).applyMatrix4(tubeRoot);
+  return surface.y < mouth.y ? surface.add(new THREE.Vector3(0, -0.004, 0)) : mouth.clone();
 }
 
 interface MouthMeasure {
@@ -179,6 +209,13 @@ export function PourStream({
     const reagents = useReagentStorageStore.getState();
     const reagentId = [...reagents.workbenchItems, ...reagents.fumeHoodItems, ...reagents.trayItems]
       .find(item => item.instanceId === instanceId)?.reagentId;
+    const silver = !!targetTube && isStageOneSilverPour(silverStage(), reagentId, targetTube.contents);
+    if (mesh.current) configureSilverStream(mesh.current, material, silver);
+    if (silver && targetTube) {
+      seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
+      scratch.target.y = silverStreamEnd(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.root,
+        tubeAmount(targetTube.instanceId).volumeMl).y;
+    }
     if (targetTube && reagentId && pour) {
       if (delivery.current.serial !== pour.at) delivery.current = { serial: pour.at, ml: 0 };
       const total = pouredMl(k);
@@ -197,7 +234,7 @@ export function PourStream({
     const flow = Math.min(rise, fade);
     const length = scratch.lip.distanceTo(scratch.target);
     const positions = geometry.attributes.position as THREE.BufferAttribute;
-    if (flow > 0.015 && length < 0.1) {
+    if (shouldDrawStream(flow, length, silver)) {
       scratch.tangent.subVectors(scratch.target, scratch.lip).normalize()
         .applyQuaternion(scratch.worldQuat.clone().invert());
       scratch.normal.set(0, 0, 1).cross(scratch.tangent).normalize();
