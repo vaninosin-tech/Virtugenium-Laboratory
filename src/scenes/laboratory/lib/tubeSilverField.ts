@@ -17,7 +17,7 @@ const SURFACE_SPREAD_PASSES = 8;
 /** How much less a heap holds at the glass than at its centre. */
 const HEAP_EDGE = 0.5;
 /** Sideways dispersion of fresh cotton: passes per step and share of the gap moved per pass. */
-const YOUNG_PASSES = 2, YOUNG_SPREAD = 0.25;
+const YOUNG_PASSES = 2, YOUNG_SPREAD = 0.3;
 /** Haze shed by cotton per second (base, extra in the dense core). */
 /** Chips torn off per second (share of the ragged parts) and how fast they sink (m/s). */
 const CHIP_RATE = 0.012, CHIP_SINK = 0.012;
@@ -488,8 +488,10 @@ export class TubeSilverField {
     };
     const strides = [1, m.nx, m.nx * m.ny], limits = [m.nx, m.ny, m.nz];
     for (let pass = 0; pass < 8; pass++) {
-      for (let a = 0; a < m.activeCount; a++) {
-        const i = m.active[a];
+      // Alternate the sweep direction so the relaxation does not drift the heap to one side.
+      const backwards = (pass + Math.floor(this.age * 20)) % 2 === 1;
+      for (let n = 0; n < m.activeCount; n++) {
+        const i = m.active[backwards ? m.activeCount - 1 - n : n];
         const cap = capAt(i);
         const excess = this.dense[i] - cap;
         if (excess <= 0) continue;
@@ -548,7 +550,9 @@ export class TubeSilverField {
         this.heapFree[c] = free;
         this.heapHeight[c] = height;
       }
-      for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
+      const flip = (pass + Math.floor(this.age * 20)) % 2 === 1;
+      for (let z = 0; z < m.nz; z++) for (let xn = 0; xn < m.nx; xn++) {
+        const x = flip ? m.nx - 1 - xn : xn;
         const c = z * m.nx + x;
         if (this.heapHeight[c] <= 0) continue;
         const source = this.heapFree[c] >= 0 && this.dense[this.heapFree[c]] > 0.01 * cap
