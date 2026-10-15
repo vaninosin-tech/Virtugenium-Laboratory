@@ -15,9 +15,9 @@ const SURFACE_LEAK = 0.06;
 /** Passes of lateral spreading per step so the film can cover the whole surface within about a second. */
 const SURFACE_SPREAD_PASSES = 8;
 /** How much less a heap holds at the glass than at its centre. */
-const HEAP_EDGE = 0.0;
+const HEAP_EDGE = 0.45;
 /** Sideways dispersion of fresh cotton: passes per step and share of the gap moved per pass. */
-const YOUNG_PASSES = 2, YOUNG_SPREAD = 0.3;
+const YOUNG_PASSES = 2, YOUNG_SPREAD = 0.2;
 /** Haze shed by cotton per second (base, extra in the dense core). */
 /** Chips torn off per second (share of the ragged parts) and how fast they sink (m/s). */
 const CHIP_RATE = 0.002, CHIP_SINK = 0.012;
@@ -27,8 +27,10 @@ const SMOKE_TO_TINT = 0.03;
 /** Cotton sets into curd with age: it sinks faster and presses harder (seconds, extra settling and load factors). */
 /** Fractal dimension of the aggregates (reaction-limited cluster aggregation, literature range 1.4 to 2.8). */
 const FRACTAL_DIMENSION = 1.9;
+/** Surface raft: rows below the meniscus in which cotton is held, and the factor on its settling there. */
+const RAFT_ROWS = 3, RAFT_HOLD = 0.04;
 /** Settling law: speed of a unit aggregate (m/s), upper bound, growth time (s) and the flow speed that halves the size. */
-const AGG_V0 = 0.0035, AGG_MAX_SPEED = 0.012, AGG_GROWTH_TIME = 5, AGG_BREAK_SHEAR = 0.05;
+const AGG_V0 = 0.0016, AGG_MAX_SPEED = 0.008, AGG_GROWTH_TIME = 6, AGG_BREAK_SHEAR = 0.05;
 const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
 
 /** R3 bookkeeping in normalized amounts. */
@@ -390,7 +392,11 @@ export class TubeSilverField {
     const grown = 1 + age / AGG_GROWTH_TIME;
     const broken = 1 / (1 + shear / AGG_BREAK_SHEAR);
     const size = Math.max(0.05, this.clumpMass(i) * m.activeCount) * grown * broken;
-    return Math.min(AGG_MAX_SPEED, AGG_V0 * Math.pow(size, FRACTAL_DIMENSION - 1));
+    // A thin raft lies in the surface layers (surface tension holds the first cotton there) until it is displaced.
+    const column = Math.floor(i / (m.nx * m.ny)) * m.nx + i % m.nx;
+    const rowsBelowTop = this.topCell[column] >= 0 ? (this.topCell[column] - i) / m.nx : 99;
+    const raft = rowsBelowTop < RAFT_ROWS ? RAFT_HOLD : 1;
+    return raft * Math.min(AGG_MAX_SPEED, AGG_V0 * Math.pow(size, FRACTAL_DIMENSION - 1));
   }
 
   /** Mean cotton mass of the cell and its six neighbours (centre weighted), the size of the clump it belongs to. */
@@ -636,7 +642,7 @@ export class TubeSilverField {
         if (Math.abs(gap) < 1e-14) continue;
         const donor = gap > 0 ? i : j, taker = gap > 0 ? j : i;
         const fresh = 1 - this.hardening(donor);
-        const fraction = YOUNG_SPREAD * (axis === 2 ? 0 : 1) * fresh * Math.abs(gap) / Math.max(this.dense[donor], 1e-20);
+        const fraction = YOUNG_SPREAD * (axis === 2 ? 0.5 : 1) * fresh * Math.abs(gap) / Math.max(this.dense[donor], 1e-20);
         if (fraction <= 0) continue;
         for (const component of this.denseCoordinates) {
           const portion = component[donor] * fraction;
