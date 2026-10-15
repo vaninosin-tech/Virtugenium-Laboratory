@@ -29,6 +29,7 @@ export interface FlocConfig {
   relaxation: number;
   linkRange: number;
   maxLinksPerNode: number;
+  eddyDiffusivity: number;
   /** Fraction of the stretch removed per relaxation sweep (position based, not a spring). */
   linkStiffness: number;
   /** Stretch ratio at which a link yields (permanent lengthening) and the share of the excess made permanent. */
@@ -43,12 +44,14 @@ export const DEFAULT_FLOC_CONFIG: Omit<FlocConfig, "radius" | "bottom" | "height
   quantum: 0.012,
   quantumRadius: 0.0017,
   fractalDimension: 1.9,
-  solidFraction: 0.0004,
+  solidFraction: 0.00018,
   liquidDensity: 1000, solidDensity: 5560,
   dragCoefficient: 1.1,
   relaxation: 0.12,
-  linkRange: 0.0052,
-  maxLinksPerNode: 4,
+  linkRange: 0.0027,
+  maxLinksPerNode: 3,
+  /** Turbulent dispersion of a node (m^2/s): eddies of the stream scatter the pieces sideways. */
+  eddyDiffusivity: 6e-6,
   linkStiffness: 0.35,
   yieldStretch: 1.25, plasticShare: 0.5,
   breakStretch: 3.0,
@@ -145,7 +148,7 @@ export class FlocSystem {
       if (d < c.linkRange && this.adjacency[j].length < c.maxLinksPerNode) candidates.push({ j, d });
     }
     candidates.sort((p, q) => p.d - q.d);
-    for (const { j, d } of candidates.slice(0, 3)) this.link(index, j, Math.max(d, c.quantumRadius * 0.8));
+    for (const { j, d } of candidates.slice(0, 2)) this.link(index, j, Math.max(d, c.quantumRadius * 0.8));
   }
 
   private link(a: number, b: number, rest: number) {
@@ -154,8 +157,10 @@ export class FlocSystem {
   }
 
   /** Advance by dt seconds. `sample` returns the carrier flow; `up` is the unit vector against gravity. */
+  private tick = 0;
   step(dt: number, sample: FlowSampler, upY = 1) {
     const c = this.config, flow = this.flow;
+    this.tick++;
     for (const n of this.nodes) {
       const r = nodeRadius(n.mass, c);
       const inside = sample(n.x, n.y, n.z, flow);
@@ -164,7 +169,11 @@ export class FlocSystem {
       const slip = slipSpeed(r, c) * (upY >= 0 ? -1 : 1);
       const k = 1 - Math.exp(-dt / c.relaxation);
       n.vx += (ux - n.vx) * k; n.vy += (uy + slip - n.vy) * k; n.vz += (uz - n.vz) * k;
-      n.x += n.vx * dt; n.y += n.vy * dt; n.z += n.vz * dt;
+      // Eddy dispersion grows with the local flow speed; the draw is a deterministic hash of node and step.
+      const flowSpeed = Math.hypot(ux, uy, uz), eddy = Math.sqrt(2 * c.eddyDiffusivity * dt) * (0.3 + Math.min(1, flowSpeed / 0.01));
+      const hid = this.nodes.indexOf(n) * 12.9898 + this.tick * 78.233;
+      const rnd = (o: number) => { const v = Math.sin(hid + o * 37.719) * 43758.5453; return (v - Math.floor(v)) * 2 - 1; };
+      n.x += n.vx * dt + eddy * rnd(1); n.y += n.vy * dt + eddy * 0.5 * rnd(2); n.z += n.vz * dt + eddy * rnd(3);
     }
     for (let sweep = 0; sweep < 3; sweep++) { this.relaxLinks(); this.separate(); this.confine(); }
     if (c.allowBreakage) this.breakLinks();
