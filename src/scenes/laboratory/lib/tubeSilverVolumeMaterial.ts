@@ -17,7 +17,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
-      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uHazeStrength: { value: 7.0 },
+      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 7.0 },
       uTintStrength: { value: 4.0 }, uTime: { value: 0 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
@@ -35,7 +35,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uniform vec3 uCameraLocal;
       uniform float uRadius, uBottom, uHeight, uLevel;
       uniform vec3 uUp;
-      uniform sampler3D uDense, uOverlap, uHaze, uTint;
+      uniform sampler3D uDense, uOverlap, uHaze, uTint, uChip;
       uniform float uHazeStrength, uTintStrength, uTime;
       in vec3 vPoint;
       out vec4 outColor;
@@ -126,6 +126,17 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             float line = 1.0-abs(2.0*noise3(sw*vec3(2.6,1.3,2.6)+vec3(0.0,-uTime*0.05,0.0))-1.0);
             ribbon = pow(line,9.0);
             smokeDensity = smokeValue*(0.7*veil+2.2*ribbon);
+          }
+          // Small torn-off chips: separate bright specks, only where chips are present.
+          float chipValue = texture(uChip,grid).r;
+          if (chipValue > 0.0004) {
+            // Irregular flakes: a warped, lower-frequency noise thresholded high so only a few survive.
+            vec3 cq = vec3(p.x,p.y-uBottom,p.z)/uRadius*7.0;
+            vec3 cw = vec3(noise3(cq*0.7+vec3(1.0,2.0,3.0)),noise3(cq*0.7+vec3(7.0,5.0,1.0)),noise3(cq*0.7+vec3(4.0,9.0,6.0)))-0.5;
+            float speck = smoothstep(0.80,0.84,noise3(cq+cw*1.4+vec3(3.0,1.0,5.0)));
+            float chipAlpha = 1.0-exp(-speck*smoothstep(0.004,0.03,chipValue)*40.0*stepLength/uRadius);
+            accumulated += (1.0-alpha)*chipAlpha*vec3(0.96,0.97,0.98);
+            alpha += (1.0-alpha)*chipAlpha;
           }
           float hazeAlpha = 1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius);
           accumulated += (1.0-alpha)*hazeAlpha*mix(vec3(0.34,0.44,0.58),vec3(0.74,0.82,0.92),clamp(ribbon*3.0,0.0,1.0));

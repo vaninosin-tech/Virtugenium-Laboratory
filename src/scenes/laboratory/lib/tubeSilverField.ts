@@ -9,10 +9,16 @@ import { silverStage } from "./silverStage";
 /** Stage-one precipitate partition: visible curd and conserved, optically hidden fine solid. */
 const STAGE_ONE_DENSE_FRACTION = 0.8;
 /** Surface film: layers that spread, thickness the film holds (normalised), peel rate, air that stays with the film. */
-const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.3, SURFACE_CAP = 1.6, SURFACE_PEEL = 0.15, SURFACE_AIR_KEPT = 0.35;
+const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.25, SURFACE_CAP = 1.6, SURFACE_PEEL = 0.15, SURFACE_AIR_KEPT = 0.35;
 /** Share of the film that wets and drains each second. */
 const SURFACE_LEAK = 0.12;
+/** Passes of lateral spreading per step so the film can cover the whole surface within about a second. */
+const SURFACE_SPREAD_PASSES = 8;
+/** How much less a heap holds at the glass than at its centre. */
+const HEAP_EDGE = 0.5;
 /** Haze shed by cotton per second (base, extra in the dense core). */
+/** Chips torn off per second (share of the ragged parts) and how fast they sink (m/s). */
+const CHIP_RATE = 0.012, CHIP_SINK = 0.012;
 const HAZE_BASE = 0.004, HAZE_CORE = 0.008, HAZE_DILUTE = 0.35;
 /** Share of the smoke that dissolves into the water tint each second. */
 const SMOKE_TO_TINT = 0.2;
@@ -56,6 +62,9 @@ export class TubeSilverField {
   /** Stage 1: dissolved tint of the water (suspension[1]) as a texture; `texture` then carries only the smoke. */
   readonly tintPixels: Float32Array;
   readonly tintTexture: THREE.Data3DTexture;
+  /** Stage 1: small torn-off chips (`coarse`) as a texture. */
+  readonly chipPixels: Float32Array;
+  readonly chipTexture: THREE.Data3DTexture;
   readonly pixels: Float32Array;
   readonly texture: THREE.Data3DTexture;
   extent = 0;
@@ -135,6 +144,12 @@ export class TubeSilverField {
       texture.needsUpdate = true;
     }
     this.sedimentField = new SilverSedimentField(this.mask.nx, this.mask.nz);
+    this.chipPixels = new Float32Array(this.mask.data.length);
+    this.chipTexture = new THREE.Data3DTexture(this.chipPixels, this.mask.nx, this.mask.ny, this.mask.nz);
+    this.chipTexture.format = THREE.RedFormat; this.chipTexture.type = THREE.FloatType;
+    this.chipTexture.minFilter = this.chipTexture.magFilter = THREE.LinearFilter;
+    this.chipTexture.wrapS = this.chipTexture.wrapT = this.chipTexture.wrapR = THREE.ClampToEdgeWrapping;
+    this.chipTexture.unpackAlignment = 1; this.chipTexture.needsUpdate = true;
     this.tintPixels = new Float32Array(this.mask.data.length);
     this.tintTexture = new THREE.Data3DTexture(this.tintPixels, this.mask.nx, this.mask.ny, this.mask.nz);
     this.tintTexture.format = THREE.RedFormat; this.tintTexture.type = THREE.FloatType;
@@ -261,6 +276,8 @@ export class TubeSilverField {
         this.spreadSurface();
         this.peelSurface();
         this.emitHaze(step);
+        this.shedChips(step);
+        this.sinkChips(step);
         this.dissolveSmoke(step);
       }
       const calm = this.delivered >= 0.999 && agitation < 0.02
@@ -275,7 +292,7 @@ export class TubeSilverField {
         if (!this.stageOne) this.settle(this.suspension[k], step,
           TUBE_SIMULATION.silver.settlingSpeeds[k] * this.settlingBoost);
       }
-      this.solver.transport(this.coarse, step, 0.000003);
+      this.solver.transport(this.coarse, step, this.stageOne ? 0.000004 : 0.000003, this.stageOne ? 0.8 : undefined);
       const ba = this.species["Ag+"].values, so = this.species["Cl-"].values;
       this.productSource.fill(0);
       for (let a = 0; a < m.activeCount; a++) {
@@ -332,9 +349,10 @@ export class TubeSilverField {
         if (this.stageOne) {
           this.pixels[i] = m.data[i] ? this.suspension[0][i] * m.activeCount : 0;
           this.tintPixels[i] = m.data[i] ? this.suspension[1][i] * m.activeCount : 0;
+          this.chipPixels[i] = m.data[i] ? this.coarse[i] * m.activeCount : 0;
         }
       }
-      if (this.stageOne) this.tintTexture.needsUpdate = true;
+      if (this.stageOne) { this.tintTexture.needsUpdate = true; this.chipTexture.needsUpdate = true; }
       this.texture.needsUpdate = true;
       if (this.stageOne) {
         for (let i = 0; i < this.dense.length; i++) {
@@ -458,11 +476,18 @@ export class TubeSilverField {
   /** Wet curd has a maximum packing density; the excess slides sideways and upward into a heap. */
   private packDense() {
     const m = this.mask, up = this.velocity.gravityUp;
-    const cap = this.packingLimit / m.activeCount;
+    const baseCap = this.packingLimit / m.activeCount;
+    // A settled heap is domed: it holds less at the glass than in the middle.
+    const capAt = (i: number) => {
+      const x = i % m.nx, z = Math.floor(i / (m.nx * m.ny));
+      const radial = Math.hypot((x + 0.5) / m.nx - 0.5, (z + 0.5) / m.nz - 0.5) * 2;
+      return baseCap * (1 - HEAP_EDGE * THREE.MathUtils.smoothstep(radial, 0.3, 1));
+    };
     const strides = [1, m.nx, m.nx * m.ny], limits = [m.nx, m.ny, m.nz];
     for (let pass = 0; pass < 8; pass++) {
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a];
+        const cap = capAt(i);
         const excess = this.dense[i] - cap;
         if (excess <= 0) continue;
         const coords = [i % m.nx, Math.floor(i / m.nx) % m.ny, Math.floor(i / (m.nx * m.ny))];
@@ -472,7 +497,7 @@ export class TubeSilverField {
           const j = i + sign * strides[axis];
           if (!m.data[j]) continue;
           const lift = sign * up.getComponent(axis);
-          const room = Math.max(0, cap - this.dense[j]) + (lift > 0.5 ? cap * 0.05 : 0);
+          const room = Math.max(0, capAt(j) - this.dense[j]) + (lift > 0.5 ? cap * 0.05 : 0);
           this.packWeights[count] = room * (lift > 0.5 ? 0.12 : 1);
           this.packTargets[count++] = j;
           total += this.packWeights[count - 1];
@@ -580,6 +605,7 @@ export class TubeSilverField {
       }
       this.dense[from] -= amount; this.dense[to] += amount;
     };
+    for (let pass = 0; pass < SURFACE_SPREAD_PASSES; pass++)
     for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
       const a = top[z * m.nx + x];
       if (a < 0) continue;
@@ -684,6 +710,45 @@ export class TubeSilverField {
       const fraction = emitted / mass;
       for (const component of this.denseCoordinates) component[i] -= component[i] * fraction;
       this.dense[i] -= emitted; this.suspension[0][i] += emitted;
+    }
+  }
+
+  /** Loose ragged parts tear off the cotton as small chips; the faster the flow, the more of them. */
+  private shedChips(dt: number) {
+    const m = this.mask, flow = this.flow;
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], mass = this.dense[i];
+      if (mass <= 1e-20) continue;
+      const concentration = mass * m.activeCount;
+      const ragged = THREE.MathUtils.smoothstep(concentration, 0.2, 0.6) * (1 - THREE.MathUtils.smoothstep(concentration, 0.9, 2.2));
+      if (ragged <= 0) continue;
+      const speed = Math.hypot(flow[i * 3], flow[i * 3 + 1], flow[i * 3 + 2]);
+      const rate = CHIP_RATE * ragged * (0.3 + Math.min(1, speed / 0.02));
+      const moved = mass * Math.min(0.2, dt * rate), fraction = moved / mass;
+      for (const component of this.denseCoordinates) component[i] -= component[i] * fraction;
+      this.dense[i] -= moved; this.coarse[i] += moved;
+    }
+  }
+
+  /** Chips sink on their own; the ones that reach the floor or the heap join it. */
+  private sinkChips(dt: number) {
+    const m = this.mask, rows = m.nx, step = this.velocity.gravityUp.y >= 0 ? -1 : 1;
+    const fraction = Math.min(0.45, CHIP_SINK * dt / (m.height / m.ny));
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], amount = this.coarse[i];
+      if (amount <= 1e-20) continue;
+      const j = i + step * rows;
+      const y = Math.floor(i / m.nx) % m.ny;
+      const floor = y + step < 0 || y + step >= m.ny || !m.data[j];
+      const moved = amount * (floor ? 1 : fraction);
+      this.coarse[i] -= moved;
+      if (!floor) { this.coarse[j] += moved; continue; }
+      // Landed: the chip becomes part of the heap, wet and no longer buoyant.
+      this.dense[i] += moved;
+      this.denseCoordinates[0][i] += moved * ((i % m.nx + 0.5) / m.nx);
+      this.denseCoordinates[1][i] += moved * ((y + 0.5) / m.ny);
+      this.denseCoordinates[2][i] += moved * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
+      this.denseCoordinates[4][i] += moved * this.age;
     }
   }
 
@@ -831,8 +896,8 @@ export class TubeSilverField {
       const dx = p.x - inlet.x;
       const dz = p.z - inlet.z;
       const wall = THREE.MathUtils.smoothstep(Math.hypot(inlet.x, inlet.z) / m.radius, 0.38, 0.80);
-      const width = m.radius * (0.20 + 0.06 * Math.min(3, jetStrength)) * (1 - 0.38 * wall);
-      const vertical = m.radius * (0.36 + 0.12 * Math.min(3, jetStrength));
+      const width = m.radius * ((this.stageOne ? 0.30 : 0.20) + 0.06 * Math.min(3, jetStrength)) * (1 - 0.38 * wall);
+      const vertical = m.radius * ((this.stageOne ? 0.50 : 0.36) + 0.12 * Math.min(3, jetStrength));
       weights[i] = p.y <= inlet.y && depth < vertical * 2
         ? Math.exp(-(dx * dx + dz * dz) / (width * width) - depth * depth / (vertical * vertical)) : 0;
       sum += weights[i];
@@ -851,5 +916,5 @@ export class TubeSilverField {
       (column, mass) => this.sedimentField.deposit(column, mass));
   }
 
-  dispose() { this.tintTexture.dispose(); this.texture.dispose(); this.denseTexture.dispose(); this.overlapTexture.dispose(); }
+  dispose() { this.chipTexture.dispose(); this.tintTexture.dispose(); this.texture.dispose(); this.denseTexture.dispose(); this.overlapTexture.dispose(); }
 }

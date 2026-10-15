@@ -72,6 +72,7 @@ function restart() {
   silver.material.uniforms.uOverlap.value = field.overlapTexture;
   silver.material.uniforms.uHaze.value = field.texture;
   silver.material.uniforms.uTint.value = field.tintTexture;
+  silver.material.uniforms.uChip.value = field.chipTexture;
   simTime = 0; poured = 0;
 }
 
