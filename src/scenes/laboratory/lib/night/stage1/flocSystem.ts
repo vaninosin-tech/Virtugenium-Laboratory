@@ -208,8 +208,14 @@ export class FlocSystem {
         const excess = (d - l.rest) * c.linkStiffness;
         const wa = b.mass / (a.mass + b.mass), wb = a.mass / (a.mass + b.mass);
         const nx = dx / d, ny = dy / d, nz = dz / d;
-        a.x += nx * excess * wa; a.y += ny * excess * wa; a.z += nz * excess * wa;
-        b.x -= nx * excess * wb; b.y -= ny * excess * wb; b.z -= nz * excess * wb;
+        // A node held in the free surface is not dragged down by its links; the lower node is pulled up instead.
+        const heldA = a.y > this.surfaceY - 1.3 * nodeRadius(a.mass, c), heldB = b.y > this.surfaceY - 1.3 * nodeRadius(b.mass, c);
+        const lift = (heldA && !heldB) ? 1 : (heldB && !heldA) ? -1 : 0;
+        a.x += nx * excess * wa; a.z += nz * excess * wa;
+        b.x -= nx * excess * wb; b.z -= nz * excess * wb;
+        if (lift === 0) { a.y += ny * excess * wa; b.y -= ny * excess * wb; }
+        else if (lift === 1) { b.y -= ny * excess; }
+        else { a.y += ny * excess; }
         if (stretch > c.yieldStretch) l.rest += (d - l.rest) * c.plasticShare * 0.1;
       }
     }

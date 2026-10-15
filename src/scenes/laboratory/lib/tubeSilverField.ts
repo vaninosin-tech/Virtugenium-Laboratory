@@ -100,17 +100,17 @@ export class TubeSilverField {
   private readonly down = new THREE.Vector3();
   private get ionDiffusivity() {
     const override = (globalThis as { __silverMix?: unknown }).__silverMix;
-    return typeof override === "number" ? override : 0.00004;
+    return typeof override === "number" ? override : 0.0000004;
   }
   private get ionEddy() {
     const override = (globalThis as { __silverEddy?: unknown }).__silverEddy;
-    return typeof override === "number" ? override : 0.8;
+    return typeof override === "number" ? override : 0.01;
   }
   /** Stage 1 keeps the stream gentle so the first cotton forms under the surface. */
   private get jetScale() {
     if (!this.stageOne) return 1;
     const override = (globalThis as { __silverJet?: unknown }).__silverJet;
-    return typeof override === "number" ? override : 0.1;
+    return typeof override === "number" ? override : 0.03;
   }
   private loadWeight = new Float64Array(0);
   private topCell = new Int32Array(0);
