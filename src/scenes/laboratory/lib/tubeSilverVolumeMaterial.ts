@@ -17,8 +17,8 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
-      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 7.0 },
-      uTintStrength: { value: 4.0 }, uTime: { value: 0 },
+      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 3.5 },
+      uTintStrength: { value: 2.0 }, uTime: { value: 0 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     vertexShader: `

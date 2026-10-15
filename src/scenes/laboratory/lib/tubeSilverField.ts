@@ -7,11 +7,11 @@ import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics
 import { silverStage } from "./silverStage";
 
 /** Stage-one precipitate partition: visible curd and conserved, optically hidden fine solid. */
-const STAGE_ONE_DENSE_FRACTION = 0.55;
+const STAGE_ONE_DENSE_FRACTION = 0.8;
 /** Surface film: layers that spread, thickness the film holds (normalised), peel rate, air that stays with the film. */
-const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.25, SURFACE_CAP = 1.0, SURFACE_PEEL = 0.35, SURFACE_AIR_KEPT = 0.1;
+const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.25, SURFACE_CAP = 1.3, SURFACE_PEEL = 0.2, SURFACE_AIR_KEPT = 0.2;
 /** Share of the film that wets and drains each second. */
-const SURFACE_LEAK = 0.15;
+const SURFACE_LEAK = 0.06;
 /** Passes of lateral spreading per step so the film can cover the whole surface within about a second. */
 const SURFACE_SPREAD_PASSES = 8;
 /** How much less a heap holds at the glass than at its centre. */
@@ -23,11 +23,13 @@ const YOUNG_PASSES = 2, YOUNG_SPREAD = 0.3;
 const CHIP_RATE = 0.002, CHIP_SINK = 0.012;
 const HAZE_BASE = 0.002, HAZE_CORE = 0.004, HAZE_DILUTE = 0.04;
 /** Share of the smoke that dissolves into the water tint each second. */
-const SMOKE_TO_TINT = 0.2;
+const SMOKE_TO_TINT = 0.03;
 /** Cotton sets into curd with age: it sinks faster and presses harder (seconds, extra settling and load factors). */
-/** How strongly a big clump outruns a small one while sinking (m/s at full clump concentration). */
-const CLUMP_SINK = 0.006;
-const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_SINK = 12, HARDEN_LOAD = 2;
+/** Fractal dimension of the aggregates (reaction-limited cluster aggregation, literature range 1.4 to 2.8). */
+const FRACTAL_DIMENSION = 1.9;
+/** Settling law: speed of a unit aggregate (m/s), upper bound, growth time (s) and the flow speed that halves the size. */
+const AGG_V0 = 0.0035, AGG_MAX_SPEED = 0.012, AGG_GROWTH_TIME = 5, AGG_BREAK_SHEAR = 0.05;
+const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
 
 /** R3 bookkeeping in normalized amounts. */
 export function reactR2(silver: number, chloride: number, fraction = 1) {
@@ -243,7 +245,7 @@ export class TubeSilverField {
       this.inject(inlet, amount, jetStrength);
       if (this.stageOne) {
         // Flocs that trapped air at the surface float until the liquid wets them.
-        const wetting = Math.exp(-step / 7), air = this.denseCoordinates[3];
+        const wetting = Math.exp(-step / 18), air = this.denseCoordinates[3];
         for (let a = 0; a < m.activeCount; a++) {
           const i = m.active[a];
           air[i] *= wetting;
@@ -300,7 +302,6 @@ export class TubeSilverField {
       this.solver.transport(this.coarse, step, this.stageOne ? 0.000004 : 0.000003, this.stageOne ? 0.8 : undefined);
       const ba = this.species["Ag+"].values, so = this.species["Cl-"].values;
       this.productSource.fill(0);
-      const surfaceTops = this.stageOne ? this.surfaceTop() : this.topCell;
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a];
         const formed = precipitatePair(ba[i], so[i], m.activeCount, 0.0005, step,
@@ -311,16 +312,13 @@ export class TubeSilverField {
           if (formed <= 0) continue;
           const curd = formed * STAGE_ONE_DENSE_FRACTION;
           this.suspension[0][i] += formed - curd;
-          // Where the reagents meet, the product first forms as air-laden cotton at the top of the liquid
-          // (the film); the flow and its own weight carry it down afterwards.
-          const column = Math.floor(i / (m.nx * m.ny)) * m.nx + i % m.nx;
-          const top = surfaceTops[column] >= 0 ? surfaceTops[column] : i;
-          this.dense[top] += curd;
-          this.denseCoordinates[0][top] += curd * ((top % m.nx + 0.5) / m.nx);
-          this.denseCoordinates[1][top] += curd * ((Math.floor(top / m.nx) % m.ny + 0.5) / m.ny);
-          this.denseCoordinates[2][top] += curd * ((Math.floor(top / (m.nx * m.ny)) + 0.5) / m.nz);
-          this.denseCoordinates[4][top] += curd * this.age;
-          this.denseCoordinates[3][top] += curd * 0.98;
+          // The stream makes the cotton where the reagents meet. Whatever forms in the surface layers is
+          // buoyed there as a raft (the rim); the rest is carried down by the flow.
+          this.dense[i] += curd;
+          this.denseCoordinates[0][i] += curd * ((i % m.nx + 0.5) / m.nx);
+          this.denseCoordinates[1][i] += curd * ((Math.floor(i / m.nx) % m.ny + 0.5) / m.ny);
+          this.denseCoordinates[2][i] += curd * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
+          this.denseCoordinates[4][i] += curd * this.age;
           continue;
         }
         // Dense, freshly nucleated parcels flocculate locally. All visible
@@ -379,6 +377,22 @@ export class TubeSilverField {
     }
   }
 
+  /**
+   * Settling speed of a porous fractal aggregate (m/s). The effective density of an aggregate of size s made of
+   * primary AgCl particles falls as s^(Df-3), so Stokes drag gives v ~ s^(Df-1): bigger floc, faster fall,
+   * but far slower than a compact grain. Aggregates grow with the time they have been shearing together
+   * (cluster-cluster aggregation) and are capped by breakage where the local shear is strong.
+   */
+  private aggregateSpeed(i: number): number {
+    const m = this.mask, mass = this.dense[i];
+    const age = Math.max(0, this.age - this.denseCoordinates[4][i] / Math.max(mass, 1e-20));
+    const flow = this.flow, shear = Math.hypot(flow[i * 3], flow[i * 3 + 1], flow[i * 3 + 2]);
+    const grown = 1 + age / AGG_GROWTH_TIME;
+    const broken = 1 / (1 + shear / AGG_BREAK_SHEAR);
+    const size = Math.max(0.05, this.clumpMass(i) * m.activeCount) * grown * broken;
+    return Math.min(AGG_MAX_SPEED, AGG_V0 * Math.pow(size, FRACTAL_DIMENSION - 1));
+  }
+
   /** Mean cotton mass of the cell and its six neighbours (centre weighted), the size of the clump it belongs to. */
   private clumpMass(i: number): number {
     const m = this.mask, rows = m.nx, planes = m.nx * m.ny;
@@ -413,10 +427,7 @@ export class TubeSilverField {
       const j = i + sign * stride;
       if (!m.data[j] || this.dense[i] <= 0) continue;
       // A clump sinks as a whole: its speed follows the mass of the neighbourhood, not of the single cell.
-      const concentration = this.clumpMass(i) * m.activeCount;
-      const lift = Math.min(1, this.denseCoordinates[3][i] / this.dense[i]);
-      const speed = (0.0005 + CLUMP_SINK * concentration / (concentration + 0.3)) * (1 - 0.995 * lift)
-        * (1 + HARDEN_SINK * this.hardening(i));
+      const speed = this.aggregateSpeed(i);
       const fraction = Math.min(0.45, speed * dt / spacing);
       const moved = this.dense[i] * fraction;
       this.dense[i] -= moved; this.dense[j] += moved;
@@ -762,7 +773,8 @@ export class TubeSilverField {
       // The loose, porous parts of the cotton shed the most; the dense core stays clean.
       const dilute = 1 - THREE.MathUtils.smoothstep(concentration, 0.3, 1.6);
       const wet = 1 - Math.min(1, air[i] / mass);
-      const emitted = mass * Math.min(0.2, dt * (HAZE_BASE + HAZE_CORE * core + HAZE_DILUTE * dilute) * (0.35 + 0.65 * wet));
+      // The haze of the reference only builds up after the first seconds (minutes of real time later).
+      const emitted = mass * Math.min(0.2, dt * this.hazeDelay() * (HAZE_BASE + HAZE_CORE * core + HAZE_DILUTE * dilute) * (0.35 + 0.65 * wet));
       const fraction = emitted / mass;
       for (const component of this.denseCoordinates) component[i] -= component[i] * fraction;
       this.dense[i] -= emitted; this.suspension[0][i] += emitted;
@@ -807,6 +819,8 @@ export class TubeSilverField {
       this.denseCoordinates[4][i] += moved * this.age;
     }
   }
+
+  private hazeDelay(): number { return THREE.MathUtils.smoothstep(this.age, 5, 20); }
 
   /** Smoke thins out into the water: the tint is accumulated slowly from it, never present at once. */
   private dissolveSmoke(dt: number) {
