@@ -12,7 +12,8 @@ const RADIUS = 0.007, BOTTOM = 0, FIELD_HEIGHT = 0.1105;
 const LEVEL_START = 0.062, LEVEL_END = 0.077;
 const MAX_TIME = 19;
 const params = new URLSearchParams(location.search);
-let pourSeconds = params.get("pour") === "fast" ? 2.2 : 4.5;
+const pourParam = params.get("pour");
+let pourSeconds = pourParam === "fast" ? 2.2 : pourParam && Number(pourParam) > 0 ? Number(pourParam) : 1.5;
 let speed = 1, paused = params.get("t") !== null;
 let videoOffset = Number(params.get("voff") ?? 0), videoRate = 1;
 const RATES = [1, 0.5, 2, 5];
@@ -158,7 +159,7 @@ $("restart").onclick = () => { restart(); paused = false; syncVideo(true); };
 $("vminus").onclick = () => { videoOffset -= 0.5; syncVideo(true); };
 $("vplus").onclick = () => { videoOffset += 0.5; syncVideo(true); };
 rateButton.onclick = () => { videoRate = RATES[(RATES.indexOf(videoRate) + 1) % RATES.length]; rateButton.textContent = `скорость видео x${videoRate}`; syncVideo(true); };
-pourButton.onclick = () => { pourSeconds = pourSeconds > 3 ? 2.2 : 4.5; pourButton.textContent = `налив: ${pourSeconds > 3 ? "медленно" : "быстро"}`; restart(); syncVideo(true); };
+pourButton.onclick = () => { pourSeconds = pourSeconds > 1.8 ? 1.5 : 4.5; pourButton.textContent = `налив: ${pourSeconds > 1.8 ? "медленно" : "быстро"}`; restart(); syncVideo(true); };
 scrub.addEventListener("input", () => { dragging = true; clock.textContent = `перемотка: ${scrub.value} с`; });
 scrub.addEventListener("change", async () => { paused = true; await seek(Number(scrub.value)); dragging = false; });
 window.addEventListener("keydown", event => {

@@ -16,10 +16,12 @@ const SURFACE_LEAK = 0.12;
 const SURFACE_SPREAD_PASSES = 8;
 /** How much less a heap holds at the glass than at its centre. */
 const HEAP_EDGE = 0.5;
+/** Sideways dispersion of fresh cotton: passes per step and share of the gap moved per pass. */
+const YOUNG_PASSES = 2, YOUNG_SPREAD = 0.25;
 /** Haze shed by cotton per second (base, extra in the dense core). */
 /** Chips torn off per second (share of the ragged parts) and how fast they sink (m/s). */
 const CHIP_RATE = 0.012, CHIP_SINK = 0.012;
-const HAZE_BASE = 0.004, HAZE_CORE = 0.008, HAZE_DILUTE = 0.35;
+const HAZE_BASE = 0.004, HAZE_CORE = 0.008, HAZE_DILUTE = 0.08;
 /** Share of the smoke that dissolves into the water tint each second. */
 const SMOKE_TO_TINT = 0.2;
 /** Cotton sets into curd with age: it sinks faster and presses harder (seconds, extra settling and load factors). */
@@ -270,6 +272,7 @@ export class TubeSilverField {
           this.solver.transport(coordinate, step, 0);
         this.releaseFilm();
         this.settleDense(step);
+        this.spreadYoung();
         this.compactDense();
         this.packDense();
         this.repose();
@@ -579,6 +582,34 @@ export class TubeSilverField {
     const mass = this.dense[i];
     if (mass <= 1e-20) return 0;
     return THREE.MathUtils.smoothstep(this.age - this.denseCoordinates[4][i] / mass, HARDEN_FROM, HARDEN_TO);
+  }
+
+  /** Young, fluffy cotton is dispersed sideways by the turbulence of the stream; set cotton is not. Conservative. */
+  private spreadYoung() {
+    const m = this.mask, strides = [1, m.nx * m.ny];
+    for (let pass = 0; pass < YOUNG_PASSES; pass++) for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a];
+      if (this.dense[i] <= 1e-20) continue;
+      const x = i % m.nx, z = Math.floor(i / (m.nx * m.ny));
+      for (let axis = 0; axis < 2; axis++) {
+        const coordinate = axis === 0 ? x : z;
+        if (coordinate + 1 >= (axis === 0 ? m.nx : m.nz)) continue;
+        const j = i + strides[axis];
+        if (!m.data[j]) continue;
+        const gap = this.dense[i] - this.dense[j];
+        if (Math.abs(gap) < 1e-14) continue;
+        const donor = gap > 0 ? i : j, taker = gap > 0 ? j : i;
+        const fresh = 1 - this.hardening(donor);
+        const fraction = YOUNG_SPREAD * fresh * Math.abs(gap) / Math.max(this.dense[donor], 1e-20);
+        if (fraction <= 0) continue;
+        for (const component of this.denseCoordinates) {
+          const portion = component[donor] * fraction;
+          component[donor] -= portion; component[taker] += portion;
+        }
+        const moved = this.dense[donor] * fraction;
+        this.dense[donor] -= moved; this.dense[taker] += moved;
+      }
+    }
   }
 
   /** Index of the highest wet cell of every column; -1 where the column holds no liquid. */
