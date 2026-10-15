@@ -37,6 +37,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           mix(mix(hash3(i+vec3(0,0,1)), hash3(i+vec3(1,0,1)), f.x),
           mix(hash3(i+vec3(0,1,1)), hash3(i+vec3(1,1,1)), f.x), f.y), f.z);
       }
+      float gShade = 1.0;
       float cotton(vec4 field, vec3 grid, vec3 position) {
         if (field.r <= 0.0) return 0.0;
         // Current physical coordinates keep every octave isotropic. Transported
@@ -49,21 +50,29 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           noise3(broad*1.35+vec3(9.7,2.3,5.1)),
           noise3(broad*1.18+vec3(4.8,8.4,2.7)))-0.5;
         broad += warp*0.32;
-        float lobe = noise3(broad*1.65);
-        float fold = noise3(broad*3.7+vec3(4.0,1.0,8.0));
+        float lobe = noise3(broad*1.05);
+        float fold = noise3(broad*2.5+vec3(4.0,1.0,8.0));
         vec3 fibre = q + warp*0.07;
-        float shred = noise3(fibre*10.0+vec3(8.0,3.0,5.0));
-        float hair = noise3(fibre*23.0+vec3(1.0,6.0,9.0));
+        float shred = noise3(fibre*7.0+vec3(8.0,3.0,5.0));
+        float hair = noise3(fibre*17.0+vec3(1.0,6.0,9.0));
         float concentration = field.r/(field.r+0.23);
         // Broad gaps persist even when the field contains conserved dilute
         // material. Folds and fine erosion never align to the grid axes.
-        float clump = smoothstep(0.43,0.57,
-          0.72*lobe+0.28*fold+0.08*concentration);
-        float torn = smoothstep(0.33,0.61,
-          0.54*fold+0.32*shred+0.14*hair);
-        float core = smoothstep(0.15,0.52,concentration);
-        return smoothstep(0.025,0.12,field.r)*clump
-          * (0.46+0.54*torn)*(0.42+0.58*core);
+        float massive = noise3(broad*0.55+vec3(2.0,5.0,7.0));
+        float height = 0.50*lobe+0.22*fold+0.28*massive+0.14*concentration;
+        // Same broad field one step toward the light: its slope lights folds.
+        vec3 toLight = vec3(0.42,0.78,0.36)*0.22;
+        float heightLit = 0.50*noise3((broad+toLight)*1.05)+0.22*noise3((broad+toLight)*2.5+vec3(4.0,1.0,8.0))
+          +0.28*noise3((broad+toLight)*0.55+vec3(2.0,5.0,7.0))+0.14*concentration;
+        gShade = clamp(0.55+(height-heightLit)*5.0,0.0,1.0);
+        float clump = smoothstep(0.50,0.63,height);
+        float torn = smoothstep(0.30,0.66,
+          0.46*fold+0.34*shred+0.20*hair);
+        float core = smoothstep(0.12,0.45,concentration);
+        // Erosion acts on the rim only: dense cores stay solid.
+        float rimWeight = 1.0-smoothstep(0.30,0.80,concentration+0.25*lobe);
+        return smoothstep(0.02,0.10,field.r)*clump
+          * mix(1.0,torn,rimWeight)*(0.62+0.38*core);
       }
       vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
         (p.y-uBottom)/uHeight, p.z/(2.0*uRadius)+0.5); }
@@ -104,9 +113,9 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
               if (wet(lit)) shadow += texture(uDense,uvw(lit)).r;
             }
           }
-          float localAlpha = 1.0-exp(-(solid*13.0+mixing*0.012)*stepLength/uRadius);
+          float localAlpha = 1.0-exp(-(solid*30.0+mixing*0.012)*stepLength/uRadius);
           vec3 color = mix(vec3(0.91,0.93,0.91),
-            vec3(1.0,0.998,0.99)*clamp(1.0-shadow*0.30,0.49,1.0),
+            vec3(1.0,0.998,0.99)*clamp(1.0-shadow*0.34,0.58,1.0)*(0.66+0.34*gShade),
             solid/(solid+mixing*0.10+0.00001));
           accumulated += (1.0-alpha)*localAlpha*color;
           alpha += (1.0-alpha)*localAlpha;
