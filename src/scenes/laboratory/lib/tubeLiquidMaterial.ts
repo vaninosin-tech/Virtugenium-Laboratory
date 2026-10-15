@@ -153,11 +153,13 @@ float dyeHalo = 0.0;
 float tracerLayer = 0.0;
 float tracerJet = 0.0;
 if (uReactionKind > 0.5 && uReactionKind < 1.5) {
-  // The conserved mean supplies a light blue wash; local concentration keeps
-  // stronger, irregular streams readable through that wash.
-  float blue = copperField(vTubePoint);
-  float wash = 0.12 * smoothstep(0.002, 0.055, uCuMeanDensity);
-  float surfaceWash = smoothstep(0.001, 0.025, uCuSurfaceDensity);
+  // Colour the actual Cu(II) field at the liquid boundary, including the cap.
+  // The local excess supplies the stronger, irregular streams.
+  vec3 copperSample = vTubePoint;
+  if (vCap < 0.5) copperSample.xz *= 0.84;
+  float blue = copperField(copperSample);
+  float wash = smoothstep(0.001, 0.038, copperDensity(copperSample));
+  float surfaceWash = smoothstep(0.001, 0.038, uCuSurfaceDensity);
   localMix = 0.82 * clamp(max(wash, vCap > 0.5 ? surfaceWash : 0.0)
     + 0.48 * smoothstep(0.06, 1.05, blue), 0.0, 1.0);
 } else if (uReactionKind > 1.5 && uReactionKind < 2.5) {
@@ -247,7 +249,7 @@ if (uReactionKind > 2.5 && uReactionKind < 3.5 && vCap > 0.5 && uTracerMode < 0.
 }
 vec3 reactionTint = uReactionColor;
 if (uReactionKind > 0.5 && uReactionKind < 1.5)
-  reactionTint = mix(vec3(0.34, 0.67, 0.68), uReactionColor, smoothstep(0.55, 1.0, p));
+  reactionTint = mix(vec3(0.24, 0.52, 0.68), uReactionColor, smoothstep(0.12, 0.8, p));
 vec3 tubeColor = mix(uBaseColor, reactionTint, localMix);
 if (uTracerMode > 0.5) {
   vec3 layers = vec3(0.95, 0.25, 0.63), jet = vec3(0.02, 0.80, 0.96);

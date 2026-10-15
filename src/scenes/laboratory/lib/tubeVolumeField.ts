@@ -179,6 +179,7 @@ export class VelocityField {
 }
 
 export class TubeVolumeField {
+  private static readonly copperPatches = 10;
   readonly mask: LiquidMask;
   readonly species: Record<string, SpeciesField>;
   readonly velocity: VelocityField;
@@ -229,7 +230,7 @@ export class TubeVolumeField {
     this.mask = new LiquidMask(resolution.width, resolution.height, resolution.depth, radius, bottom, height);
     this.species = { "Cu2+": new SpeciesField("Cu2+", this.mask), HNO3: new SpeciesField("HNO3", this.mask) };
     this.velocity = new VelocityField(this.mask);
-    this.flowSolver = new TubeFlowSolver(this.mask, { lowDiffusion: true, pressureIterations: 10, eddyFraction: 0.0005, ambientStrength: 0.2 });
+    this.flowSolver = new TubeFlowSolver(this.mask, { lowDiffusion: true, pressureIterations: 10, eddyFraction: 0.0005, ambientStrength: 0.3 });
     this.sources = sources.map(p => p.clone());
     const n = this.mask.data.length;
     this.wake = new Float32Array(n);
@@ -249,11 +250,11 @@ export class TubeVolumeField {
   get alpha() { return clamp(this.accumulator / this.step, 0, 1); }
   get copperII() { return this.species["Cu2+"].total; }
   private patchPulse(patch: number) {
-    return 0.04 + Math.pow(0.5 + 0.5 * Math.sin(this.time * (0.8 + patch * 0.17)
-      + patch * 2.43), 3);
+    return 0.04 + Math.pow(0.5 + 0.5 * Math.sin(this.time * (1.5 + patch * 0.23)
+      + patch * 2.43), 4);
   }
   surfaceActivityAt(point: THREE.Vector3) {
-    const width2 = (this.mask.radius * 0.30) ** 2;
+    const width2 = (this.mask.radius * 0.15) ** 2;
     let activity = 0.01;
     for (let patch = 0; patch < this.sourcePatchCentres.length; patch++)
       activity += this.patchPulse(patch)
@@ -349,7 +350,7 @@ export class TubeVolumeField {
             const iy = Math.max(0, Math.min(m.ny - 1, Math.floor((y - m.bottom) / m.height * m.ny)));
             const iz = Math.max(0, Math.min(m.nz - 1, Math.floor((z / m.radius + 1) * m.nz / 2)));
             const wake = this.wake[m.index(ix, iy, iz)];
-            const wakeSpeed = Math.min(0.2, wake * 0.5);
+            const wakeSpeed = Math.min(0.24, wake * 0.9);
             this.ambient[0] = v[0] * 5 + up.x * wakeSpeed;
             const acid = this.species.HNO3.values[m.index(ix, iy, iz)];
             const acidContrast = Math.min(2, acid * m.activeCount / 4.4);
@@ -366,6 +367,7 @@ export class TubeVolumeField {
       let stamp = performance.now();
       this.flowSolver.transport(this.species["Cu2+"].values, this.step,
         TUBE_SIMULATION.field.baseDiffusivity + this.velocity.contributions.buoyancy * TUBE_SIMULATION.field.heatDiffusivity);
+      this.mixCopperFromBubbles();
       this.profile.copperMs += performance.now() - stamp;
       stamp = performance.now();
       this.flowSolver.transport(this.species.HNO3.values, this.step, 0.000008);
@@ -478,7 +480,7 @@ export class TubeVolumeField {
         }
       }
     }
-    this.sourcePatchWeights = new Float32Array(this.sourceCells.length * 6);
+    this.sourcePatchWeights = new Float32Array(this.sourceCells.length * TubeVolumeField.copperPatches);
     this.sourceReactionWeights = new Float64Array(this.sourceCells.length);
     if (!this.sourceCells.length) {
       this.sourcePatchCentres = [];
@@ -491,9 +493,9 @@ export class TubeVolumeField {
       Math.floor(i / m.nx) % m.ny, Math.floor(i / (m.nx * m.ny))));
     const meanY = surface.reduce((sum, point) => sum + point.y, 0) / surface.length;
     const exposed = surface.filter(point => point.y >= meanY - m.radius * 0.12);
-    const candidates = exposed.length >= 6 ? exposed : surface;
+    const candidates = exposed.length >= TubeVolumeField.copperPatches ? exposed : surface;
     const centres: THREE.Vector3[] = [candidates[Math.floor(candidates.length * 0.17)]];
-    while (centres.length < Math.min(6, candidates.length)) {
+    while (centres.length < Math.min(TubeVolumeField.copperPatches, candidates.length)) {
       let best = candidates[0], spread = -1;
       for (const point of candidates) {
         const distance = Math.min(...centres.map(centre => point.distanceToSquared(centre)));
@@ -502,14 +504,14 @@ export class TubeVolumeField {
       centres.push(best);
     }
     this.sourcePatchCentres = centres;
-    const width = m.radius * 0.30;
+    const width = m.radius * 0.15;
     for (let s = 0; s < this.sourceCells.length; s++) {
       const i = this.sourceCells[s];
       const point = m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
         Math.floor(i / (m.nx * m.ny)), this.injectionPoint);
       for (let patch = 0; patch < centres.length; patch++) {
         const distance2 = point.distanceToSquared(centres[patch]);
-        this.sourcePatchWeights[s * 6 + patch] = Math.exp(-distance2 / (width * width));
+        this.sourcePatchWeights[s * TubeVolumeField.copperPatches + patch] = Math.exp(-distance2 / (width * width));
       }
     }
     this.injectionDirty = false;
@@ -605,12 +607,12 @@ export class TubeVolumeField {
     // Irregular wet surface patches pulse independently, with one normalized
     // Cu(II) budget. Activity changes position without creating extra mass.
     const weights = this.sourceReactionWeights;
-    const pulses = Array.from({ length: 6 }, (_, patch) => this.patchPulse(patch));
+    const pulses = Array.from({ length: TubeVolumeField.copperPatches }, (_, patch) => this.patchPulse(patch));
     let weightSum = 0;
     for (let s = 0; s < this.sourceCells.length; s++) {
       let patch = 0;
-      for (let active = 0; active < 6; active++)
-        patch += this.sourcePatchWeights[s * 6 + active] * pulses[active];
+      for (let active = 0; active < this.sourcePatchCentres.length; active++)
+        patch += this.sourcePatchWeights[s * TubeVolumeField.copperPatches + active] * pulses[active];
       // Concentrate a fixed Cu(II) budget in the currently active wet patches.
       // A linear blend across all surface cells smears late sources into a halo.
       weights[s] = 0.002 + patch * patch;
@@ -626,6 +628,24 @@ export class TubeVolumeField {
       copper[this.sourceCells[s]] += 1.65 * d * weights[s] / weightSum;
     Object.assign(this.reaction, copperReactionState(this.reaction.extent + d));
     return d;
+  }
+
+  private mixCopperFromBubbles() {
+    // Unresolved bubble-driven circulation exchanges old liquid throughout
+    // the tube. It acts on conserved Cu(II), while fresh narrow plumes are
+    // injected at the copper after transport.
+    const values = this.species["Cu2+"].values;
+    const active = this.mask.active;
+    const count = this.mask.activeCount;
+    if (!count || this.velocity.contributions.bubbles <= 0) return;
+    let total = 0;
+    for (let a = 0; a < count; a++) total += values[active[a]];
+    const mean = total / count;
+    const fraction = 1 - Math.exp(-this.step * 0.11 * this.velocity.contributions.bubbles);
+    for (let a = 0; a < count; a++) {
+      const i = active[a];
+      values[i] += fraction * (mean - values[i]);
+    }
   }
 
   private writeTexture() {

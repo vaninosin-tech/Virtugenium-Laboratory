@@ -22,16 +22,19 @@ export const copperFieldGLSL = `
 uniform sampler3D uCuPrevious, uCuCurrent;
 uniform float uCuBlend, uCuCompletion, uCuTime, uCuMeanDensity, uCuSurfaceDensity;
 uniform vec3 uCuBoundsMin, uCuBoundsSize;
-float copperField(vec3 p) {
+float copperDensity(vec3 p) {
   vec3 uvw = (p - uCuBoundsMin) / uCuBoundsSize;
   if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return 0.0;
   float density = mix(texture(uCuPrevious, uvw).r, texture(uCuCurrent, uvw).r, uCuBlend);
-  float c = max(0.0, density);
+  return max(0.0, density);
+}
+float copperField(vec3 p) {
+  float c = copperDensity(p);
   // The conserved mean colours the bulk separately. Only real local excess
   // contributes to the plume, so a uniformly blue field cannot paint one.
   // A sublinear response preserves visible differences before transmission
   // approaches zero in an already coloured solution.
-  return 18.0 * pow(max(c - uCuMeanDensity, 0.0), 0.9);
+  return 32.0 * pow(max(c - uCuMeanDensity, 0.0), 0.9);
 }`;
 
 export const permanganateTongueGLSL = `
@@ -128,8 +131,9 @@ void main() {
     float wall = h < radius ? radius * radius - (h - radius) * (h - radius) : radius * radius;
     if (h < 0.0 || h > height || dot(q.xz, q.xz) > wall || dot(uUp, q) > uLevel) continue;
     if (uKind < 1.5) {
-      float frontWeight = 2.3 * exp(-2.0 * (float(i) + 0.5) / uSteps);
-      float bulk = 0.45 * pow(max(uCuMeanDensity, 0.0), 0.68);
+      float frontWeight = 1.5 * exp(-(float(i) + 0.5) / uSteps);
+      // Integrate the actual local Cu(II), including the wall and bowl cells.
+      float bulk = 1.35 * pow(copperDensity(q), 0.68);
       float plume = copperField(q);
       opticalDepth += mix(vec3(1.0, 0.26, 0.008), vec3(0.95, 0.20, 0.07),
         smoothstep(0.65, 0.95, uCuCompletion)) * (bulk + plume * frontWeight)
