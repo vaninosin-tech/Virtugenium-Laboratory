@@ -1067,7 +1067,8 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
     ? new TubeSilverField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, fieldHeight) : null;
   const stageOneSilver = !!silverField && silverStage() === 1;
-  const silverDenseGeometry = stageOneSilver ? new THREE.BoxGeometry(2 * radius, fieldHeight, 2 * radius) : null;
+  const silverDenseGeometry = stageOneSilver
+    ? new THREE.BoxGeometry(2.4 * radius, fieldHeight + 0.3 * radius, 2.4 * radius) : null;
   const silverDenseMesh = silverDenseGeometry
     ? new THREE.Mesh(silverDenseGeometry, silverVolume.material) : null;
   if (silverDenseMesh && silverField) {

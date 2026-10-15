@@ -29,11 +29,13 @@ export function valueNoise(x: number, y: number, z: number): number {
 }
 
 export function fractalNoise(x: number, y: number, z: number): number {
-  const warp = valueNoise(x * 4 + 3.1, y * 4, z * 4) - 0.5;
-  const qx = x + warp * 0.09, qy = y + warp * 0.09, qz = z - warp * 0.09;
-  return clamp01(0.64 * valueNoise(qx * 11, qy * 11, qz * 11)
-    + 0.25 * valueNoise(qx * 23, qy * 23, qz * 23)
-    + 0.11 * valueNoise(qx * 47, qy * 47, qz * 47));
+  const warp = valueNoise(x * 19 + 3.1, y * 19 + 7.2, z * 19 + 1.7) - 0.5;
+  const qx = (x + warp * 0.024) * 74;
+  const qy = (y - warp * 0.012) * 42;
+  const qz = (z + warp * 0.0168) * 74;
+  return clamp01(0.55 * valueNoise(qx, qy, qz)
+    + 0.30 * valueNoise(qx * 2.1, qy * 2.1, qz * 2.1)
+    + 0.15 * valueNoise(qx * 4.3, qy * 4.3, qz * 4.3));
 }
 
 export function cottonDensity(concentration: number, materialX: number,
@@ -41,6 +43,7 @@ export function cottonDensity(concentration: number, materialX: number,
   const c = Number.isFinite(concentration) ? Math.max(0, concentration) : 0;
   if (c <= 0) return 0;
   const detail = fractalNoise(materialX, materialY, materialZ) - 0.5;
-  return clamp01(smoothThreshold(c, 0.04, 0.8)
-    * smoothThreshold(c + detail * 0.4, 0.2, 0.95));
+  return clamp01(smoothThreshold(c, 0.012, 0.045)
+    * smoothThreshold(c + detail * 0.22, 0.025, 0.135)
+    * (0.42 + 0.58 * smoothThreshold(c, 0.055, 0.22)));
 }

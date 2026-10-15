@@ -178,10 +178,11 @@ export class TubeSilverField {
       for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing);
       this.solver.transport(this.tracer, step, ionMixing);
       if (this.stageOne) {
-        this.solver.transport(this.dense, step, 0.000001);
+        this.solver.transport(this.dense, step, 0);
         for (const coordinate of this.denseCoordinates)
-          this.solver.transport(coordinate, step, 0.000001);
+          this.solver.transport(coordinate, step, 0);
         this.settleDense(step);
+        this.compactDense();
       }
       const calm = this.delivered >= 0.999 && agitation < 0.02
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
@@ -269,7 +270,8 @@ export class TubeSilverField {
     const stride = axis === 0 ? 1 : axis === 1 ? m.nx : m.nx * m.ny;
     const limit = axis === 0 ? m.nx : axis === 1 ? m.ny : m.nz;
     const spacing = axis === 1 ? m.height / m.ny : 2 * m.radius / limit;
-    // A denser patch experiences more drag; settling is limited to one face per step.
+    // Hindered settling remains a conservative wet-cell flux. At the 3 mm LOW
+    // grid spacing the old 0.5 mm/s speed could not reach the floor in a pour.
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
       const cell = axis === 0 ? i % m.nx : axis === 1
@@ -278,14 +280,41 @@ export class TubeSilverField {
       const j = i + sign * stride;
       if (!m.data[j] || this.dense[i] <= 0) continue;
       const concentration = this.dense[i] * m.activeCount;
-      const speed = 0.0005 / (1 + 3 * concentration);
-      const fraction = Math.min(0.08, speed * dt / spacing);
+      const speed = 0.012 / (1 + 1.5 * concentration);
+      const fraction = Math.min(0.45, speed * dt / spacing);
       const moved = this.dense[i] * fraction;
       this.dense[i] -= moved; this.dense[j] += moved;
       for (let component = 0; component < 3; component++) {
         const values = this.denseCoordinates[component];
         const part = values[i] * fraction;
         values[i] -= part; values[j] += part;
+      }
+    }
+  }
+
+  /** Local coagulation sharpens a continuous concentration field without changing its mass. */
+  private compactDense() {
+    const m = this.mask;
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a];
+      const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
+      const z = Math.floor(i / (m.nx * m.ny));
+      for (let axis = 0; axis < 3; axis++) {
+        if ((axis === 0 ? x : axis === 1 ? y : z) >=
+          (axis === 0 ? m.nx : axis === 1 ? m.ny : m.nz) - 1) continue;
+        const j = i + (axis === 0 ? 1 : axis === 1 ? m.nx : m.nx * m.ny);
+        if (!m.data[j]) continue;
+        const from = this.dense[i] < this.dense[j] ? i : j;
+        const to = from === i ? j : i;
+        const low = this.dense[from], high = this.dense[to];
+        if (low <= 0 || high < low * 1.2) continue;
+        const fraction = 0.025 * Math.min(1, high / low - 1.2);
+        const amount = low * fraction;
+        for (const coordinate of this.denseCoordinates) {
+          const portion = coordinate[from] * fraction;
+          coordinate[from] -= portion; coordinate[to] += portion;
+        }
+        this.dense[from] -= amount; this.dense[to] += amount;
       }
     }
   }

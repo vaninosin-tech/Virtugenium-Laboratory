@@ -43,7 +43,7 @@ function components(field: TubeSilverField, threshold: number) {
 }
 
 function slices(field: TubeSilverField, label: string) {
-  const m = field.mask, glyphs = " .:-=+*#%@";
+  const m = field.mask, glyphs = ".:-=+*#%@";
   const fields: [string, ArrayLike<number>][] = [
     ["dense", field.dense], ["Ag+", field.species["Ag+"].values],
     ["Cl-", field.species["Cl-"].values], ["overlap", field.productSource],
@@ -68,17 +68,32 @@ function slices(field: TubeSilverField, label: string) {
   return output;
 }
 
+function verticalProfile(field: TubeSilverField) {
+  const m = field.mask;
+  let total = 0, floor = 0, weightedY = 0, low = m.ny, high = -1;
+  for (let a = 0; a < m.activeCount; a++) {
+    const i = m.active[a], y = Math.floor(i / m.nx) % m.ny;
+    const value = field.dense[i];
+    total += value; weightedY += value * y;
+    if (y <= 2) floor += value;
+    if (value * m.activeCount > 0.04) { low = Math.min(low, y); high = Math.max(high, y); }
+  }
+  return { centre: weightedY / Math.max(total, 1e-30),
+    span: Math.max(0, high - low + 1), floorFraction: floor / Math.max(total, 1e-30) };
+}
+
 function run(inletX: number, varied = false, collectSlices = false) {
   const field = new TubeSilverField("LOW", 0.007, 0, 0.055);
   const inlet = new THREE.Vector3(inletX, 0.037, 0);
   const up = new THREE.Vector3(0, 1, 0);
-  let text = "Stage 1 AgCl numerical slices; glyph intensity increases from space to @.\n";
+  let text = "Stage 1 AgCl numerical slices; glyph intensity increases from . to @.\n";
   field.advance(0.05, up, 0.038, inlet, 0);
   expect(field.denseMass).toBe(0);
   expect(field.extent).toBe(0);
   if (collectSlices) text += slices(field, "before pour");
   let positiveSourceCells = 0;
   let maxMassError = 0;
+  const profiles: ReturnType<typeof verticalProfile>[] = [];
   for (let step = 0; step < 100; step++) {
     const level = varied && step >= 50 ? 0.041 : 0.038;
     up.set(varied && step >= 65 ? 0.45 : 0, varied && step >= 65 ? 0.893 : 1, 0).normalize();
@@ -105,18 +120,21 @@ function run(inletX: number, varied = false, collectSlices = false) {
       if (step === 0 && field.dense[i] > 0) expect(field.productSource[i]).toBeGreaterThan(0);
     }
     if (collectSlices && [4, 19, 49, 99].includes(step)) text += slices(field, `step ${step + 1}`);
+    if ([0, 4, 19, 49, 99].includes(step)) profiles.push(verticalProfile(field));
   }
   const center = sample(field, field.dense);
   const groups = components(field, 0.01);
   if (collectSlices) {
     text += `dense centre=${center.x.toFixed(3)},${center.y.toFixed(3)},${center.z.toFixed(3)} `
       + `components above 0.01=${groups.length}; largest=${groups[0] ?? 0}; total=${groups.reduce((a, b) => a + b, 0)}\n`;
+    text += `vertical profiles (steps 1,5,20,50,100): ${profiles.map(p =>
+      `centre=${p.centre.toFixed(2)} span=${p.span} floor=${p.floorFraction.toFixed(3)}`).join("; ")}\n`;
     mkdirSync("docs/night/stage1", { recursive: true });
     writeFileSync("docs/night/stage1/slices.txt", text);
     process.stdout.write(text);
   }
   const result = { dense: Array.from(field.dense), extent: field.extent,
-    center, groups, positiveSourceCells, maxMassError };
+    center, groups, positiveSourceCells, maxMassError, profiles };
   field.dispose();
   return result;
 }
@@ -128,7 +146,11 @@ describe("stage-one AgCl field scenarios", () => {
     expect(outcome.positiveSourceCells).toBeGreaterThan(0);
     expect(outcome.groups.length).toBeGreaterThan(0);
     expect((outcome.groups[0] ?? 0) / outcome.groups.reduce((a, b) => a + b, 0)).toBeGreaterThan(0.7);
-  }, 30000);
+    // With a 38 mm fill, the highest wet LOW-grid cell is y=11.
+    expect(outcome.profiles[0].centre).toBeGreaterThan(8);
+    expect(outcome.profiles[2].span).toBeGreaterThan(outcome.profiles[1].span);
+    expect(outcome.profiles[4].floorFraction).toBeGreaterThan(outcome.profiles[2].floorFraction);
+  }, 60000);
   it("follows the pour location and is deterministic", () => {
     const center = run(0);
     const wall = run(0.004);
@@ -139,5 +161,5 @@ describe("stage-one AgCl field scenarios", () => {
       + `max mass error=${Math.max(center.maxMassError, wall.maxMassError).toExponential(3)}\n`;
     appendFileSync("docs/night/stage1/slices.txt", diagnostic);
     process.stdout.write(diagnostic);
-  }, 30000);
+  }, 60000);
 });

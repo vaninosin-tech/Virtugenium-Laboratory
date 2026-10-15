@@ -1,39 +1,36 @@
-# AgCl stage 1 report
+# AgCl stage 1, iteration 2
 
-## Files modified
+## Design and changes
 
-- `src/scenes/laboratory/lib/tubeSilverField.ts`: conserved dense field, transport, source, textures, diagnostics.
-- `src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts`: stage 1 ray march and retained legacy shader.
-- `src/scenes/laboratory/lib/tubeReactionVisuals.ts`: silver-only stage view and volume mesh.
-- `src/scenes/laboratory/lib/silverStage.ts` and `src/scenes/laboratory/lib/night/stage1/density.ts`: stage selector and pure density mapping.
-- `tests/tubeReactionVisuals.test.ts`, `tests/night/stage1/density.test.ts`, and `tests/night/stage1/field.test.ts`: renderer, pure mapping, and deterministic scenario checks.
-- `docs/night/stage1/REPORT.md`, `slices.txt`, `focused.log`, and `full-suite.log`: report and diagnostics.
+The default diagnostic view for experiment 2 contains the existing external `PourStream`, the faint blue local product-source field, and one white ray-marched dense field. The tube liquid remains clear; fine suspension, instanced flocs, fragments, and the separate sediment geometry are hidden. The `PourStream` component is outside this worker's ownership and was not changed. The stage 1 visuals do not toggle its visibility. Experiments 1, 3, and 4 retain their existing render branches. `tests/tubeReactionVisuals.test.ts` checks that the dense mesh exists only for silver and checks resources for all four reactions.
 
-## Design
+Each local `precipitatePair` consumption is added in full to `TubeSilverField.dense` and to the diagnostic `productSource`; no solid enters another reservoir in stage 1. The solver transports dense mass and three mass-weighted material coordinates using its low-diffusion flux-limited scheme with zero explicit dense diffusivity. A conservative neighbor transfer settles the mass at `0.012 / (1 + 1.5 * local concentration)` m/s, capped at 0.45 cell per 0.05 s step. A second conservative transfer moves at most 2.5% of a lower-density cell toward a neighboring cell at least 20% denser. This local coagulation sharpens the mass without creating it. It has six face checks per active cell per step and no new per-frame allocation. Material coordinates move with both transfers and anchor the cotton noise.
 
-Experiment 2 defaults to a diagnostic view with the existing external pouring stream, a faint blue mixing source, and one white dense volume. The tube liquid uses its clear baseline material. Silver suspension, floc instances, sediment, fragments, internal pour film, air bubbles, and splash are hidden in this stage. Experiments 1, 3, and 4 retain their previous construction and render branches; the reaction visuals regression test checks that only silver has `TubeSilverDenseField` and exercises resource stability for all four reactions.
+The ray proxy extends to 1.2 tube radii and 0.15 radius above and below the field. A real cylindrical liquid mask and a radial fade from 0.87 to 0.985 radius keep the proxy faces from defining a straight visible edge. The shader uses 56 fixed primary steps and at most three additional light samples at occupied steps. Four noise evaluations (one warp plus three octaves) use transported material coordinates; higher spatial frequencies tear the threshold into folds, pores, and vertically stretched detail. The optical threshold spans concentrations 0.025 to 0.135 with a separate dense-core ramp from 0.055 to 0.22. White non-emissive extinction is 19 per radius. The blue source tint has much lower opacity. The mesh, shaders, textures, and buffers are created with the tube, before reaction onset.
 
-`TubeSilverField.dense` lives on the existing liquid grid. Each local `precipitatePair` consumption adds the same amount to `dense` and `productSource`, and adds nothing to suspension or coarse classes in stage 1. `TubeFlowSolver.transport` advects the dense field and three mass-weighted birth-coordinate fields. A conservative neighboring-cell gravity transfer settles dense material with speed `0.0005 / (1 + 3 * local concentration)` m/s, capped at 0.08 of a cell per step. The birth coordinates travel with the solid and anchor domain-warped, three-octave noise. Stage 1 uses the solver's low-diffusion transport and `0.000002 + agitation * 0.000003` ion diffusivity in the existing 0.05 s step. The old material and bookkeeping remain available with the stage selector.
+Set `window.__silverStage = 1` before creating the tube, or leave it unset, for stage 1. Set it to another number and recreate the tube to select the retained older silver path. The field chooses its mass route at construction; switching an active tube does not migrate its mass.
 
-The volume is one box proxy rendered by a 48-step ray march. It samples the dense field and instantaneous local product source, applies two smooth density thresholds (`0.04..0.8` and `0.2..0.95`) around advected material-space noise, and takes at most three additional light samples at occupied steps. The result has a white dense core, translucent edge, and weak blue source tint. The volume mesh, material, textures, and buffers are made when the tube visuals are created, before reaction onset. The new stage render path allocates no per-frame objects. No browser or GPU shader compilation was available to verify its appearance or compile timing.
+## Numerical evidence
 
-Set `window.__silverStage = 1` before creating the tube, or leave it unset, for this view. Set it to another number and recreate the tube to use the retained earlier silver representation. The field chooses its route when constructed, so changing the value during an active tube does not migrate existing mass.
+The deterministic LOW-grid diagnostic uses an 8 x 18 x 8 grid and 100 steps (5 s). [ASCII slices](slices.txt) show x-y and x-z midplanes before delivery and at steps 5, 20, 50, and 100 for dense AgCl, Ag+, Cl-, and current overlap. Before delivery, dense mass and consumed extent are zero. On the first delivery step, every nonzero dense cell has a local product source. At every step, including liquid-level change, tilt, and shake, dense mass equals consumed reagent within `1e-8`; all checked values are finite; other solid reservoirs remain empty. The largest measured mass-balance error was `2.831e-15`. Repeating a center pour produced identical arrays and diagnostics.
 
-## Numerical checks
+The dense center starts at y=`10.74` on the LOW grid, where the top wet cell is y=11. The above-0.04 vertical span grows from 2 cells at step 1 to 4 at step 5, 8 at step 20, and 12 at step 50. The fraction of dense mass in the lowest three rows rises from `0.001` at step 20 to `0.046` at step 50 and `0.279` at step 100. The final tilted and shaken field has one connected component of 440 cells above concentration 0.01. A center pour ends at x=`3.502` cells; a wall pour ends at x=`4.242` cells. These are numerical checks, not visual observations.
 
-The deterministic LOW-grid diagnostic uses an 8 × 18 × 8 grid and 100 simulation steps. It produces [ASCII slices](slices.txt) of x-y and x-z midplanes before the pour and at steps 5, 20, 50, and 100 for dense AgCl, Ag+, Cl-, and the current product source. Before delivery, dense mass and consumed extent were zero. On the first delivery step, every nonzero dense cell had a nonzero local product source. At every step, including after a liquid-level increase, tilt, and shake, dense mass equaled consumed reagent within `1e-8`; fine, coarse, floc, and sediment reservoirs remained empty. All checked ion, dense, and material-coordinate values were finite. Repeating the center-pour scenario gave identical arrays and diagnostics.
-
-The tilted and shaken scenario ended at extent `0.481689`. At normalized concentration threshold `0.01`, its dense field had **one connected component of 472 cells**. The dense center moved from x=`3.502` grid cells for a center pour to x=`4.325` for a wall pour. The measured maximum mass-balance error in the center and wall comparison was `2.887e-15`.
-
-## Verification
+## Verification and limitations
 
 - TypeScript: `node node_modules/typescript/bin/tsc --noEmit`, passed with zero errors.
-- Focused tests: 4 files, 43 passed, 0 failed. See [focused.log](focused.log).
-- Full suite, one Vitest process: 48 files passed; 315 tests passed, 2 expected failures, 0 unexpected failures. See [full-suite.log](full-suite.log).
-- `git diff --check`: no whitespace errors.
+- Focused Vitest run: 4 files, 43 passed, 0 failed. See [focused.log](focused.log).
+- Full Vitest run: 46 files passed, 2 failed; 313 tests passed, 2 failed, 2 expected failures. Both failures were non-silver CPU timing tests: a barium motion test timed out at 30 s, and a Cu(II) step averaged 3.27 ms against a 3 ms soft budget. See [full-suite.log](full-suite.log).
+- Those two files rerun alone: 2 files, 14 passed, 0 failed. See [non-silver-rerun.log](non-silver-rerun.log).
+- A second full-suite run was stopped after severe host slowdown caused widespread unrelated timeouts; it has no valid final pass count. Its partial output is in [full-suite-final.log](full-suite-final.log). The completed first full-suite run above is the reported result.
 
-Five silver renderer assertions that required visible floc instances, milkiness, or sediment were updated to assert the stage 1 field and hidden old representation. Non-silver assertions were preserved. Pure density mapping tests cover bounds, determinism, non-finite inputs, and zero density when solid mass is absent.
+## Files modified in iteration 2
 
-## Remaining verification and integration
+- `src/scenes/laboratory/lib/tubeSilverField.ts`: faster conserved dense settling, zero explicit dense diffusivity, and local conservative compaction.
+- `src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts`: ragged high-frequency cotton mapping, brighter density, radial fade, larger proxy bounds, and 56-step march.
+- `src/scenes/laboratory/lib/tubeReactionVisuals.ts`: silver-only proxy geometry enlargement.
+- `src/scenes/laboratory/lib/night/stage1/density.ts`: pure CPU counterpart of the shader mapping.
+- `tests/night/stage1/field.test.ts`: upper-origin, growing-extent, and floor-accumulation assertions and numerical profiles.
+- `docs/night/stage1/slices.txt` and this report: refreshed diagnostics and measured results. Test logs in this directory are generated and ignored by Git.
 
-No browser frames were captured. The actual cotton silhouette, source tint, transparency, performance, and WebGL shader compilation still need browser inspection. The LOW-grid ASCII slices show a broadening upper plume by step 100; whether the rendered threshold and material-space noise keep it visually distinct from a milky column remains unverified. There are no requested edits outside the owned paths and no integration blocker identified.
+No browser or GPU rendering was available in this worker. The silhouette, perceived whiteness, stream visibility in browser frames, and shader compilation time are unverified. The reference frames were inspected as read-only images. A later browser review must determine whether this numerical and shader change looks like the upper cotton curtain and bottom heap. No integration edit outside the owned paths was made. If the external `PourStream` is absent during an actual pour, its timing and visibility must be investigated in `src/scenes/laboratory/ui/PourStream.tsx` by its owner.

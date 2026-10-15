@@ -40,24 +40,26 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       float cotton(vec4 field) {
         if (field.r <= 0.0) return 0.0;
         vec3 p = field.gba;
-        float warp = noise3(p*4.0+vec3(3.1,0,0))-0.5;
-        p += vec3(warp,warp,-warp)*0.09;
-        float detail = 0.64*noise3(p*11.0)+0.25*noise3(p*23.0)
-          +0.11*noise3(p*47.0)-0.5;
-        return smoothstep(0.04,0.8,field.r)
-          * smoothstep(0.2,0.95,field.r+detail*0.4);
+        float warp = noise3(p*19.0+vec3(3.1,7.2,1.7))-0.5;
+        p += vec3(warp,-warp*0.5,warp*0.7)*0.024;
+        vec3 fibre = p*vec3(74.0,42.0,74.0);
+        float detail = 0.55*noise3(fibre)+0.30*noise3(fibre*2.1)
+          +0.15*noise3(fibre*4.3)-0.5;
+        float edge = smoothstep(0.025,0.135,field.r+detail*0.22);
+        float core = smoothstep(0.055,0.22,field.r);
+        return smoothstep(0.012,0.045,field.r)*edge*(0.42+0.58*core);
       }
       vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
         (p.y-uBottom)/uHeight, p.z/(2.0*uRadius)+0.5); }
       bool wet(vec3 p) {
         float radial = length(p.xz);
         float bowl = uBottom+uRadius-sqrt(max(0.0,uRadius*uRadius-radial*radial));
-        return radial < uRadius*0.98 && p.y >= bowl && dot(uUp,p) <= uLevel;
+        return radial < uRadius*0.985 && p.y >= bowl && dot(uUp,p) <= uLevel;
       }
       void main() {
         vec3 direction = normalize(vPoint-uCameraLocal);
-        vec3 boxMin = vec3(-uRadius,uBottom,-uRadius);
-        vec3 boxMax = vec3(uRadius,uBottom+uHeight,uRadius);
+        vec3 boxMin = vec3(-uRadius*1.2,uBottom-uRadius*0.15,-uRadius*1.2);
+        vec3 boxMax = vec3(uRadius*1.2,uBottom+uHeight+uRadius*0.15,uRadius*1.2);
         vec3 safeDirection = vec3(direction.x < 0.0 ? -1.0 : 1.0,
           direction.y < 0.0 ? -1.0 : 1.0, direction.z < 0.0 ? -1.0 : 1.0)
           * max(abs(direction),vec3(0.000001));
@@ -66,16 +68,17 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         float entry = max(0.0,max(max(min(a.x,b.x),min(a.y,b.y)),min(a.z,b.z)));
         float exitDistance = min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z));
         if (exitDistance <= entry) discard;
-        float stepLength = (exitDistance-entry)/48.0;
+        float stepLength = (exitDistance-entry)/56.0;
         vec3 accumulated = vec3(0.0);
         float alpha = 0.0;
-        // Fixed 48 primary taps and three light taps per occupied sample.
-        for (int step = 0; step < 48; step++) {
+        // Fixed 56 primary taps and three light taps per occupied sample.
+        for (int step = 0; step < 56; step++) {
           vec3 p = uCameraLocal+direction*(entry+(float(step)+0.5)*stepLength);
           if (!wet(p)) continue;
           vec3 grid = uvw(p);
           vec4 field = texture(uDense,grid);
-          float solid = cotton(field);
+          float rim = 1.0-smoothstep(0.87,0.985,length(p.xz)/uRadius);
+          float solid = cotton(field)*rim;
           float mixing = smoothstep(0.002,0.18,texture(uOverlap,grid).r);
           float shadow = 0.0;
           if (solid > 0.003) {
@@ -84,9 +87,9 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
               if (wet(lit)) shadow += texture(uDense,uvw(lit)).r;
             }
           }
-          float localAlpha = 1.0-exp(-(solid*7.0+mixing*0.15)*stepLength/uRadius);
+          float localAlpha = 1.0-exp(-(solid*19.0+mixing*0.12)*stepLength/uRadius);
           vec3 color = mix(vec3(0.66,0.88,0.96),
-            vec3(0.96,0.965,0.96)*clamp(0.94-shadow*0.045,0.68,0.94),
+            vec3(0.99,0.99,0.985)*clamp(1.0-shadow*0.075,0.68,1.0),
             solid/(solid+mixing*0.55+0.00001));
           accumulated += (1.0-alpha)*localAlpha*color;
           alpha += (1.0-alpha)*localAlpha;
