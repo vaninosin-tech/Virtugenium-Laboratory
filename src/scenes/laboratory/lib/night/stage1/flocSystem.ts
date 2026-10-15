@@ -34,6 +34,10 @@ export interface FlocConfig {
   surfaceHold: number;
   /** Share of the vertical carrier flow that the free surface blocks for a node lying in it. */
   surfaceBlock: number;
+  /** Mass (normalised reagent units) the free surface holds before new cotton displaces it downward. */
+  surfaceCapacity: number;
+  /** How fast the excess is displaced (1/s). */
+  displacementRate: number;
   /** Minimum centre distance as a share of the sum of radii (soft contact; <1 means wool-like overlap). */
   contact: number;
   /** Fraction of the stretch removed per relaxation sweep (position based, not a spring). */
@@ -60,6 +64,8 @@ export const DEFAULT_FLOC_CONFIG: Omit<FlocConfig, "radius" | "bottom" | "height
   eddyDiffusivity: 6e-6,
   surfaceHold: 0.04,
   surfaceBlock: 0.85,
+  surfaceCapacity: 0.06,
+  displacementRate: 4,
   contact: 0.75,
   linkStiffness: 0.35,
   yieldStretch: 1.25, plasticShare: 0.5,
@@ -191,6 +197,7 @@ export class FlocSystem {
       const rnd = (o: number) => { const v = Math.sin(hid + o * 37.719) * 43758.5453; return (v - Math.floor(v)) * 2 - 1; };
       n.x += n.vx * dt + eddy * rnd(1); n.y += n.vy * dt + eddy * 0.5 * rnd(2); n.z += n.vz * dt + eddy * rnd(3);
     }
+    this.crowdSurface(dt);
     for (let sweep = 0; sweep < 3; sweep++) { this.relaxLinks(); this.separate(); this.confine(); }
     if (c.allowBreakage) this.breakLinks();
   }
@@ -250,6 +257,37 @@ export class FlocSystem {
       const ceiling = this.surfaceY - 0.6 * r;
       if (n.y > ceiling) { n.y = ceiling; n.vy = Math.min(0, n.vy); }
     }
+  }
+
+  /**
+   * The free surface can hold a limited mass per unit area (surface tension against the weight of wet cotton).
+   * New cotton arriving at the surface crowds it: the most crowded surface nodes are pushed below and released
+   * (they lose the surface hold), so the raft is renewed from above and drains downward. No timer is involved.
+   */
+  private crowdSurface(dt: number) {
+    const c = this.config, held: number[] = [];
+    for (let i = 0; i < this.nodes.length; i++) {
+      const n = this.nodes[i];
+      if (n.y > this.surfaceY - 1.3 * nodeRadius(n.mass, c)) held.push(i);
+    }
+    if (!held.length) return;
+    const area = Math.PI * c.radius * c.radius;
+    let mass = 0; for (const i of held) mass += this.nodes[i].mass;
+    const capacity = c.surfaceCapacity;
+    if (mass <= capacity) return;
+    // Push down the nodes with the largest local overlap first; a node is displaced by the excess share per second.
+    const share = Math.min(1, (mass - capacity) / mass * c.displacementRate * dt);
+    const order = held.map(i => {
+      let crowd = 0;
+      for (const j of held) if (j !== i) { const a = this.nodes[i], b = this.nodes[j]; const d = Math.hypot(a.x - b.x, a.z - b.z); if (d < 2.2 * c.quantumRadius) crowd++; }
+      return { i, crowd };
+    }).sort((p, q) => q.crowd - p.crowd);
+    const count = Math.max(1, Math.round(held.length * share));
+    for (let k = 0; k < count && k < order.length; k++) {
+      const n = this.nodes[order[k].i], r = nodeRadius(n.mass, c);
+      n.y = this.surfaceY - 1.5 * r; n.vy = Math.min(n.vy, -slipSpeed(r, c));
+    }
+    void area;
   }
 
   private breakLinks() {
