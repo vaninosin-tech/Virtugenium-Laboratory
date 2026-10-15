@@ -55,13 +55,29 @@ export class TubeSilverField {
   private priorLevel = Infinity;
   private initialized = false;
   private readonly stageOne: boolean;
+  private readonly down = new THREE.Vector3();
+  private heapHeight = new Float64Array(0);
+  private heapFree = new Int32Array(0);
+  private readonly packWeights = new Float64Array(6);
+  private readonly packTargets = new Int32Array(6);
+  private get packingLimit() {
+    const override = (globalThis as { __silverPack?: unknown }).__silverPack;
+    return typeof override === "number" ? override : 2.5;
+  }
+  /** Body force per unit dense concentration (m/s^2); tuned against the reference video. */
+  private get loadStrength() {
+    const override = (globalThis as { __silverLoad?: unknown }).__silverLoad;
+    return typeof override === "number" ? override : 0.1;
+  }
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     readonly silverAmount = 1.15) {
-    const size = quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
+    this.stageOne = silverStage() === 1;
+    // Stage 1 carries a connected dense phase and needs the finer field grid.
+    const size = this.stageOne ? (quality === "LOW" ? TUBE_SIMULATION.field.LOW : TUBE_SIMULATION.field.HIGH)
+      : quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
     this.mask = new LiquidMask(size.width, size.height, size.depth, radius, bottom, height);
     this.velocity = new VelocityField(this.mask);
-    this.stageOne = silverStage() === 1;
     this.solver = new TubeFlowSolver(this.mask, this.stageOne ? { lowDiffusion: true } : {});
     this.species = { "Ag+": new SpeciesField("Ag+", this.mask),
       "Cl-": new SpeciesField("Cl-", this.mask) };
@@ -172,7 +188,9 @@ export class TubeSilverField {
       this.wallJet.z += inlet.z / m.radius * wall * 0.55;
       this.solver.step(step, inlet, this.wallJet,
         amount > 0 ? 0.2 * Math.min(3, Math.max(0.4, jetStrength)) : 0,
-        agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined);
+        agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined,
+        0, this.stageOne ? { values: this.dense, scale: m.activeCount * this.loadStrength,
+          down: this.down.copy(up).negate() } : undefined);
       const kinetic = this.solver.diagnostics().energy;
       const ionMixing = (this.stageOne ? 0.000002 : 0.00012) + agitation * 0.000003;
       for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing);
@@ -183,6 +201,8 @@ export class TubeSilverField {
           this.solver.transport(coordinate, step, 0);
         this.settleDense(step);
         this.compactDense();
+        this.packDense();
+        this.repose();
       }
       const calm = this.delivered >= 0.999 && agitation < 0.02
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
@@ -280,7 +300,7 @@ export class TubeSilverField {
       const j = i + sign * stride;
       if (!m.data[j] || this.dense[i] <= 0) continue;
       const concentration = this.dense[i] * m.activeCount;
-      const speed = 0.004 + 0.015 * concentration / (concentration + 0.3);
+      const speed = 0.002 + 0.008 * concentration / (concentration + 0.3);
       const fraction = Math.min(0.45, speed * dt / spacing);
       const moved = this.dense[i] * fraction;
       this.dense[i] -= moved; this.dense[j] += moved;
@@ -317,6 +337,91 @@ export class TubeSilverField {
           coordinate[from] -= portion; coordinate[to] += portion;
         }
         this.dense[from] -= amount; this.dense[to] += amount;
+      }
+    }
+  }
+
+  /** Wet curd has a maximum packing density; the excess slides sideways and upward into a heap. */
+  private packDense() {
+    const m = this.mask, up = this.velocity.gravityUp;
+    const cap = this.packingLimit / m.activeCount;
+    const strides = [1, m.nx, m.nx * m.ny], limits = [m.nx, m.ny, m.nz];
+    for (let pass = 0; pass < 8; pass++) {
+      for (let a = 0; a < m.activeCount; a++) {
+        const i = m.active[a];
+        const excess = this.dense[i] - cap;
+        if (excess <= 0) continue;
+        const coords = [i % m.nx, Math.floor(i / m.nx) % m.ny, Math.floor(i / (m.nx * m.ny))];
+        let total = 0, count = 0;
+        for (let axis = 0; axis < 3; axis++) for (const sign of [-1, 1]) {
+          if (coords[axis] + sign < 0 || coords[axis] + sign >= limits[axis]) continue;
+          const j = i + sign * strides[axis];
+          if (!m.data[j]) continue;
+          const lift = sign * up.getComponent(axis);
+          const room = Math.max(0, cap - this.dense[j]) + (lift > 0.5 ? cap * 0.05 : 0);
+          this.packWeights[count] = room * (lift > 0.5 ? 0.12 : 1);
+          this.packTargets[count++] = j;
+          total += this.packWeights[count - 1];
+        }
+        if (total <= 0) continue;
+        const moving = excess * 0.6;
+        for (let k = 0; k < count; k++) {
+          const j = this.packTargets[k], amount = moving * this.packWeights[k] / total;
+          if (amount <= 0) continue;
+          const fraction = amount / this.dense[i];
+          for (const coordinate of this.denseCoordinates) {
+            const portion = coordinate[i] * fraction;
+            coordinate[i] -= portion; coordinate[j] += portion;
+          }
+          this.dense[i] -= amount; this.dense[j] += amount;
+        }
+      }
+    }
+  }
+
+  /** Angle of repose (about 35 degrees): the top of a steep pile slides to lower neighbouring columns. Conservative. */
+  private repose() {
+    const m = this.mask, rows = m.nx, columns = m.nx * m.nz;
+    if (this.heapHeight.length !== columns) {
+      this.heapHeight = new Float64Array(columns); this.heapFree = new Int32Array(columns);
+    }
+    const cap = this.packingLimit / m.activeCount;
+    const limit = 0.45;
+    for (let pass = 0; pass < 3; pass++) {
+      for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
+        const c = z * m.nx + x;
+        let full = 0, free = -1;
+        for (let y = 0; y < m.ny; y++) {
+          const i = x + y * rows + z * rows * m.ny;
+          if (!m.data[i]) continue;
+          if (this.dense[i] >= 0.9 * cap) { full++; continue; }
+          free = i; break;
+        }
+        this.heapFree[c] = free;
+        this.heapHeight[c] = free < 0 ? full : full + this.dense[free] / cap;
+      }
+      for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
+        const c = z * m.nx + x, from = this.heapFree[c];
+        if (from < 0 || this.heapHeight[c] < 1) continue;
+        const source = this.dense[from] > 0.02 * cap ? from : from - rows;
+        if (source < 0 || !m.data[source] || this.dense[source] <= 0) continue;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= m.nx || nz >= m.nz) continue;
+          const n = nz * m.nx + nx, target = this.heapFree[n];
+          if (target < 0 || !m.data[target]) continue;
+          const drop = this.heapHeight[c] - this.heapHeight[n] - limit;
+          if (drop <= 0) continue;
+          const amount = Math.min(this.dense[source], Math.max(0, cap - this.dense[target]),
+            0.16 * drop * cap);
+          if (amount <= 0) continue;
+          const fraction = amount / this.dense[source];
+          for (const component of this.denseCoordinates) {
+            const portion = component[source] * fraction;
+            component[source] -= portion; component[target] += portion;
+          }
+          this.dense[source] -= amount; this.dense[target] += amount;
+        }
       }
     }
   }

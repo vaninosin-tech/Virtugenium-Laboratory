@@ -65,7 +65,7 @@ export class TubeFlowSolver {
   /** Adds momentum at the impact only, then transports, damps and projects the entire velocity. */
   step(dt: number, inlet: THREE.Vector3, direction: THREE.Vector3, impulse: number,
     agitation = 0, background?: (x: number, y: number, z: number) => ArrayLike<number>,
-    jetReach = 0) {
+    jetReach = 0, load?: { values: Float64Array; scale: number; down: THREE.Vector3 }) {
     const started = typeof performance !== "undefined" ? performance.now() : 0;
     const m = this.mask, old = this.previousFaces;
     for (let axis = 0; axis < 3; axis++) old[axis].set(this.faces[axis]);
@@ -107,6 +107,8 @@ export class TubeFlowSolver {
         this.faces[axis][i] = Math.max(-0.09, Math.min(0.09,
           (advected + dt * TUBE_SIMULATION.jetFlow.molecularDiffusivity * laplace) * damp
           + source * d.getComponent(axis)
+          // Heavy suspended solid loads the liquid: a body force along gravity.
+          + (load ? dt * load.scale * 0.5 * (load.values[i] + load.values[j]) * load.down.getComponent(axis) : 0)
           + (ambient?.[axis] ?? 0) * dt * (this.options.ambientStrength ?? 0.15)));
       }
     }

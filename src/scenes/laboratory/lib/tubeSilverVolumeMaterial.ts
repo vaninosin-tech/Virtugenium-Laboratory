@@ -42,8 +42,10 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         if (field.r <= 0.0) return 0.0;
         // Current physical coordinates keep every octave isotropic. Transported
         // birth coordinates only bend the broad clumps, with bounded stretch.
+        // Birth coordinates vary cell by cell where the mass is dilute and printed
+        // a lattice; the shift is therefore faded in only inside solid cores.
         vec3 materialShift = clamp((field.gba-grid)*vec3(2.0,uHeight/uRadius,2.0),
-          vec3(-0.12),vec3(0.12));
+          vec3(-0.12),vec3(0.12))*smoothstep(0.6,2.5,field.r);
         vec3 q = vec3(position.x,position.y-uBottom,position.z)/uRadius;
         vec3 broad = q + materialShift;
         vec3 warp = vec3(noise3(broad*1.25+vec3(3.1,7.2,1.7)),
@@ -71,7 +73,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         float core = smoothstep(0.12,0.45,concentration);
         // Erosion acts on the rim only: dense cores stay solid.
         float rimWeight = 1.0-smoothstep(0.30,0.80,concentration+0.25*lobe);
-        return smoothstep(0.02,0.10,field.r)*clump
+        return smoothstep(0.07,0.26,field.r)*clump
           * mix(1.0,torn,rimWeight)*(0.62+0.38*core);
       }
       vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
