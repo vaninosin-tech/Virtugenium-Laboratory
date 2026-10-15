@@ -9,9 +9,9 @@ import { silverStage } from "./silverStage";
 /** Stage-one precipitate partition: visible curd and conserved, optically hidden fine solid. */
 const STAGE_ONE_DENSE_FRACTION = 0.55;
 /** Surface film: layers that spread, thickness the film holds (normalised), peel rate, air that stays with the film. */
-const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.25, SURFACE_CAP = 1.6, SURFACE_PEEL = 0.15, SURFACE_AIR_KEPT = 0.35;
+const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.25, SURFACE_CAP = 1.0, SURFACE_PEEL = 0.35, SURFACE_AIR_KEPT = 0.1;
 /** Share of the film that wets and drains each second. */
-const SURFACE_LEAK = 0.12;
+const SURFACE_LEAK = 0.15;
 /** Passes of lateral spreading per step so the film can cover the whole surface within about a second. */
 const SURFACE_SPREAD_PASSES = 8;
 /** How much less a heap holds at the glass than at its centre. */
@@ -21,11 +21,13 @@ const YOUNG_PASSES = 2, YOUNG_SPREAD = 0.3;
 /** Haze shed by cotton per second (base, extra in the dense core). */
 /** Chips torn off per second (share of the ragged parts) and how fast they sink (m/s). */
 const CHIP_RATE = 0.002, CHIP_SINK = 0.012;
-const HAZE_BASE = 0.004, HAZE_CORE = 0.008, HAZE_DILUTE = 0.08;
+const HAZE_BASE = 0.002, HAZE_CORE = 0.004, HAZE_DILUTE = 0.04;
 /** Share of the smoke that dissolves into the water tint each second. */
 const SMOKE_TO_TINT = 0.2;
 /** Cotton sets into curd with age: it sinks faster and presses harder (seconds, extra settling and load factors). */
-const HARDEN_FROM = 1.5, HARDEN_TO = 6, HARDEN_SINK = 12, HARDEN_LOAD = 2;
+/** How strongly a big clump outruns a small one while sinking (m/s at full clump concentration). */
+const CLUMP_SINK = 0.006;
+const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_SINK = 12, HARDEN_LOAD = 2;
 
 /** R3 bookkeeping in normalized amounts. */
 export function reactR2(silver: number, chloride: number, fraction = 1) {
@@ -241,7 +243,7 @@ export class TubeSilverField {
       this.inject(inlet, amount, jetStrength);
       if (this.stageOne) {
         // Flocs that trapped air at the surface float until the liquid wets them.
-        const wetting = Math.exp(-step / 40), air = this.denseCoordinates[3];
+        const wetting = Math.exp(-step / 7), air = this.denseCoordinates[3];
         for (let a = 0; a < m.activeCount; a++) {
           const i = m.active[a];
           air[i] *= wetting;
@@ -298,6 +300,7 @@ export class TubeSilverField {
       this.solver.transport(this.coarse, step, this.stageOne ? 0.000004 : 0.000003, this.stageOne ? 0.8 : undefined);
       const ba = this.species["Ag+"].values, so = this.species["Cl-"].values;
       this.productSource.fill(0);
+      const surfaceTops = this.stageOne ? this.surfaceTop() : this.topCell;
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a];
         const formed = precipitatePair(ba[i], so[i], m.activeCount, 0.0005, step,
@@ -305,16 +308,19 @@ export class TubeSilverField {
         ba[i] -= formed; so[i] -= formed; this.extent += formed;
         this.productSource[i] = formed;
         if (this.stageOne) {
+          if (formed <= 0) continue;
           const curd = formed * STAGE_ONE_DENSE_FRACTION;
           this.suspension[0][i] += formed - curd;
-          this.dense[i] += curd;
-          this.denseCoordinates[0][i] += curd * ((i % m.nx + 0.5) / m.nx);
-          this.denseCoordinates[1][i] += curd * ((Math.floor(i / m.nx) % m.ny + 0.5) / m.ny);
-          this.denseCoordinates[2][i] += curd * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
-          const depthFromSurface = (level - m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
-            Math.floor(i / (m.nx * m.ny)), this.scratch).y) / m.radius;
-          this.denseCoordinates[4][i] += curd * this.age;
-          this.denseCoordinates[3][i] += curd * 0.98 * Math.exp(-Math.max(0, depthFromSurface) / 0.9);
+          // Where the reagents meet, the product first forms as air-laden cotton at the top of the liquid
+          // (the film); the flow and its own weight carry it down afterwards.
+          const column = Math.floor(i / (m.nx * m.ny)) * m.nx + i % m.nx;
+          const top = surfaceTops[column] >= 0 ? surfaceTops[column] : i;
+          this.dense[top] += curd;
+          this.denseCoordinates[0][top] += curd * ((top % m.nx + 0.5) / m.nx);
+          this.denseCoordinates[1][top] += curd * ((Math.floor(top / m.nx) % m.ny + 0.5) / m.ny);
+          this.denseCoordinates[2][top] += curd * ((Math.floor(top / (m.nx * m.ny)) + 0.5) / m.nz);
+          this.denseCoordinates[4][top] += curd * this.age;
+          this.denseCoordinates[3][top] += curd * 0.98;
           continue;
         }
         // Dense, freshly nucleated parcels flocculate locally. All visible
@@ -373,6 +379,20 @@ export class TubeSilverField {
     }
   }
 
+  /** Mean cotton mass of the cell and its six neighbours (centre weighted), the size of the clump it belongs to. */
+  private clumpMass(i: number): number {
+    const m = this.mask, rows = m.nx, planes = m.nx * m.ny;
+    const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / planes);
+    let sum = this.dense[i] * 2, weight = 2;
+    if (x > 0 && m.data[i - 1]) { sum += this.dense[i - 1]; weight++; }
+    if (x + 1 < m.nx && m.data[i + 1]) { sum += this.dense[i + 1]; weight++; }
+    if (y > 0 && m.data[i - rows]) { sum += this.dense[i - rows]; weight++; }
+    if (y + 1 < m.ny && m.data[i + rows]) { sum += this.dense[i + rows]; weight++; }
+    if (z > 0 && m.data[i - planes]) { sum += this.dense[i - planes]; weight++; }
+    if (z + 1 < m.nz && m.data[i + planes]) { sum += this.dense[i + planes]; weight++; }
+    return sum / weight;
+  }
+
   /** Density-dependent hindered settling between wet cells; each transfer is conservative. */
   private settleDense(dt: number) {
     const m = this.mask;
@@ -392,9 +412,10 @@ export class TubeSilverField {
       if (cell + sign < 0 || cell + sign >= limit) continue;
       const j = i + sign * stride;
       if (!m.data[j] || this.dense[i] <= 0) continue;
-      const concentration = this.dense[i] * m.activeCount;
+      // A clump sinks as a whole: its speed follows the mass of the neighbourhood, not of the single cell.
+      const concentration = this.clumpMass(i) * m.activeCount;
       const lift = Math.min(1, this.denseCoordinates[3][i] / this.dense[i]);
-      const speed = (0.0005 + 0.002 * concentration / (concentration + 0.3)) * (1 - 0.995 * lift)
+      const speed = (0.0005 + CLUMP_SINK * concentration / (concentration + 0.3)) * (1 - 0.995 * lift)
         * (1 + HARDEN_SINK * this.hardening(i));
       const fraction = Math.min(0.45, speed * dt / spacing);
       const moved = this.dense[i] * fraction;
@@ -590,21 +611,21 @@ export class TubeSilverField {
 
   /** Young, fluffy cotton is dispersed sideways by the turbulence of the stream; set cotton is not. Conservative. */
   private spreadYoung() {
-    const m = this.mask, strides = [1, m.nx * m.ny];
+    const m = this.mask, strides = [1, m.nx * m.ny, m.nx];
     for (let pass = 0; pass < YOUNG_PASSES; pass++) for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
       if (this.dense[i] <= 1e-20) continue;
-      const x = i % m.nx, z = Math.floor(i / (m.nx * m.ny));
-      for (let axis = 0; axis < 2; axis++) {
-        const coordinate = axis === 0 ? x : z;
-        if (coordinate + 1 >= (axis === 0 ? m.nx : m.nz)) continue;
+      const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
+      for (let axis = 0; axis < 3; axis++) {
+        const coordinate = axis === 0 ? x : axis === 1 ? z : y;
+        if (coordinate + 1 >= (axis === 0 ? m.nx : axis === 1 ? m.nz : m.ny)) continue;
         const j = i + strides[axis];
         if (!m.data[j]) continue;
         const gap = this.dense[i] - this.dense[j];
         if (Math.abs(gap) < 1e-14) continue;
         const donor = gap > 0 ? i : j, taker = gap > 0 ? j : i;
         const fresh = 1 - this.hardening(donor);
-        const fraction = YOUNG_SPREAD * fresh * Math.abs(gap) / Math.max(this.dense[donor], 1e-20);
+        const fraction = YOUNG_SPREAD * (axis === 2 ? 0 : 1) * fresh * Math.abs(gap) / Math.max(this.dense[donor], 1e-20);
         if (fraction <= 0) continue;
         for (const component of this.denseCoordinates) {
           const portion = component[donor] * fraction;

@@ -10,7 +10,14 @@ import { makeSilverVolumeMaterial } from "../scenes/laboratory/lib/tubeSilverVol
  */
 const RADIUS = 0.007, BOTTOM = 0, FIELD_HEIGHT = 0.1105;
 const LEVEL_START = 0.062, LEVEL_END = 0.077;
-const MAX_TIME = 19;
+// The reference video is time-lapsed: x1 up to 6.25 s of video, x5 until 9.4 s, x50 afterwards (on-screen labels).
+const SPEED_STEPS = [{ video: 6.25, real: 6.25 }, { video: 9.4, real: 6.25 + 3.15 * 5 }];
+const MAX_TIME = 180;
+function videoFromReal(t: number) {
+  if (t <= SPEED_STEPS[0].real) return t;
+  if (t <= SPEED_STEPS[1].real) return SPEED_STEPS[0].video + (t - SPEED_STEPS[0].real) / 5;
+  return Math.min(19.4, SPEED_STEPS[1].video + (t - SPEED_STEPS[1].real) / 50);
+}
 const params = new URLSearchParams(location.search);
 const pourParam = params.get("pour");
 let pourSeconds = pourParam === "fast" ? 2.2 : pourParam && Number(pourParam) > 0 ? Number(pourParam) : 1.5;
@@ -95,7 +102,7 @@ function layoutVideo() {
   video.style.left = `${box.clientWidth / 2 - 323 * scale}px`;
 }
 
-function videoTarget() { return Math.max(0, Math.min(video.duration || MAX_TIME, videoOffset + simTime * videoRate)); }
+function videoTarget() { return Math.max(0, Math.min(video.duration || 19.4, videoFromReal(simTime * videoRate) + videoOffset)); }
 
 function syncVideo(force = false) {
   const target = videoTarget();
@@ -103,9 +110,9 @@ function syncVideo(force = false) {
     if (!video.paused) video.pause();
     if (Math.abs(video.currentTime - target) > 0.03) video.currentTime = target;
   } else {
-    video.playbackRate = videoRate * speed;
-    if (video.paused) void video.play().catch(() => undefined);
-    if (Math.abs(video.currentTime - target) > 0.3) video.currentTime = target;
+    // The reference runs at x1, x5 and x50 in different parts: follow the mapped target by seeking.
+    if (!video.paused) video.pause();
+    if (Math.abs(video.currentTime - target) > 0.05) video.currentTime = target;
   }
 }
 
@@ -184,6 +191,5 @@ if (seekParam !== null) {
     draw();
     requestAnimationFrame(loop);
   };
-  void video.play().catch(() => undefined);
   requestAnimationFrame(loop);
 }
