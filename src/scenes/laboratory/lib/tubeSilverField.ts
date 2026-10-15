@@ -7,7 +7,7 @@ import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics
 import { silverStage } from "./silverStage";
 
 /** Stage-one precipitate partition: visible curd and conserved, optically hidden fine solid. */
-const STAGE_ONE_DENSE_FRACTION = 0.8;
+const STAGE_ONE_DENSE_FRACTION = 0.55;
 /** Surface film: layers that spread, thickness the film holds (normalised), peel rate, air that stays with the film. */
 const SURFACE_LAYERS = 2, SURFACE_SPREAD = 0.25, SURFACE_CAP = 1.6, SURFACE_PEEL = 0.15, SURFACE_AIR_KEPT = 0.35;
 /** Share of the film that wets and drains each second. */
@@ -15,12 +15,12 @@ const SURFACE_LEAK = 0.12;
 /** Passes of lateral spreading per step so the film can cover the whole surface within about a second. */
 const SURFACE_SPREAD_PASSES = 8;
 /** How much less a heap holds at the glass than at its centre. */
-const HEAP_EDGE = 0.5;
+const HEAP_EDGE = 0.0;
 /** Sideways dispersion of fresh cotton: passes per step and share of the gap moved per pass. */
 const YOUNG_PASSES = 2, YOUNG_SPREAD = 0.3;
 /** Haze shed by cotton per second (base, extra in the dense core). */
 /** Chips torn off per second (share of the ragged parts) and how fast they sink (m/s). */
-const CHIP_RATE = 0.012, CHIP_SINK = 0.012;
+const CHIP_RATE = 0.002, CHIP_SINK = 0.012;
 const HAZE_BASE = 0.004, HAZE_CORE = 0.008, HAZE_DILUTE = 0.08;
 /** Share of the smoke that dissolves into the water tint each second. */
 const SMOKE_TO_TINT = 0.2;

@@ -61,10 +61,10 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         float concentration = field.r/(field.r+0.23);
         float base = 1.05*concentration;
         float rim = 1.0-smoothstep(0.35,0.95,base);
-        float lump = billow3(q*4.6), big = billow3(q*2.2), fold = fbm3(q*8.0);
+        float lump = billow3(q*3.0), big = billow3(q*1.7), fold = fbm3(q*5.0);
         float f = base + (0.34+0.30*rim)*(lump-0.30) + 0.22*(big-0.30) + (0.10+0.16*rim)*(fold-0.5);
-        f += rim*0.42*(fbm3(q*15.0)-0.45) + rim*0.20*(noise3(q*37.0)-0.5);
-        return smoothstep(0.60,0.72,f);
+        f += rim*0.30*(fbm3(q*8.0)-0.45);
+        return smoothstep(0.58,0.80,f);
       }
       vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
         (p.y-uBottom)/uHeight, p.z/(2.0*uRadius)+0.5); }
@@ -73,10 +73,18 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         float bowl = uBottom+uRadius-sqrt(max(0.0,uRadius*uRadius-radial*radial));
         return radial < uRadius*0.985 && p.y >= bowl && dot(uUp,p) <= uLevel;
       }
+      // Packed heaps are stored column by column; a small cross blur in x and z removes the column pattern.
+      vec4 denseAt(vec3 g) {
+        vec3 d = vec3(1.0/float(textureSize(uDense,0).x),0.0,1.0/float(textureSize(uDense,0).z))*0.9;
+        vec4 c = texture(uDense,g)*0.4;
+        c += (texture(uDense,g+vec3(d.x,0,0))+texture(uDense,g-vec3(d.x,0,0))
+            +texture(uDense,g+vec3(0,0,d.z))+texture(uDense,g-vec3(0,0,d.z)))*0.15;
+        return c;
+      }
       float solidAt(vec3 p) {
         if (!wet(p)) return 0.0;
         vec3 g = uvw(p);
-        return cotton(texture(uDense,g),g,p);
+        return cotton(denseAt(g),g,p);
       }
       void main() {
         vec3 direction = normalize(vPoint-uCameraLocal);
@@ -98,7 +106,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           vec3 p = uCameraLocal+direction*(entry+(float(step)+0.5)*stepLength);
           if (!wet(p)) continue;
           vec3 grid = uvw(p);
-          vec4 field = texture(uDense,grid);
+          vec4 field = denseAt(grid);
           float rim = 1.0-smoothstep(0.87,0.985,length(p.xz)/uRadius);
           float solid = cotton(field,grid,p)*rim;
           float source = texture(uOverlap,grid).r;
