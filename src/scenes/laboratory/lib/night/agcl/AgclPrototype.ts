@@ -27,6 +27,7 @@ export interface PrototypeOptions {
   height?: number;
   nx?: number;
   nz?: number;
+  sediment?: SilverSedimentField;
   seed?: number;
   /** Effective viscosity includes unresolved fluid drag, in Pa s. */
   dragViscosity?: number;
@@ -59,7 +60,8 @@ export class AgclPrototype {
     this.dragViscosity = options.dragViscosity ?? 0.03;
     this.shearViscosity = options.shearViscosity ?? 0.001;
     this.maxAggregates = options.maxAggregates ?? 128;
-    this.sediment = new SilverSedimentField(options.nx ?? 12, options.nz ?? 12);
+    this.sediment = options.sediment ?? new SilverSedimentField(options.nx ?? 12, options.nz ?? 12);
+    this.injectedMass = this.sediment.mass;
     this.rngState = (options.seed ?? 1) >>> 0 || 1;
   }
 
@@ -169,15 +171,21 @@ export class AgclPrototype {
   }
 
   private shearRate(p: Vec3, span: number) {
-    let square = 0;
+    const gradient = [0, 0, 0, 0, 0, 0, 0, 0, 0];
     for (let axis = 0; axis < 3; axis++) {
       const plus = [...p] as Vec3, minus = [...p] as Vec3;
       plus[axis] += span; minus[axis] -= span;
       const a = this.flow(...plus), b = this.flow(...minus);
       for (let component = 0; component < 3; component++)
-        square += ((a[component] - b[component]) / (2 * span)) ** 2;
+        gradient[component * 3 + axis] = (a[component] - b[component]) / (2 * span);
     }
-    return Math.sqrt(square);
+    // The symmetric velocity gradient excludes rigid rotation from shear stress.
+    let square = 0;
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
+      const strainRate = (gradient[row * 3 + col] + gradient[col * 3 + row]) * 0.5;
+      square += strainRate * strainRate;
+    }
+    return Math.sqrt(2 * square);
   }
 
   /** Fragment only if local viscous stress beats the wet network's strength. */

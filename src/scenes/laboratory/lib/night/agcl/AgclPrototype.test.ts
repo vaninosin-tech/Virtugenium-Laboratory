@@ -51,6 +51,39 @@ describe("isolated AgCl cotton prototype", () => {
     expect(p.aggregates[0].axes[1]).toBeGreaterThan(1);
   });
 
+  it("deforms a parent before a supercritical fracture", () => {
+    const p = new AgclPrototype(shear, { seed: 13 });
+    p.pour([0, 0.03, 0], 0.02, 1, 0.8);
+    p.step(0.05);
+    expect(p.aggregates.length).toBeGreaterThan(1);
+    expect(p.aggregates[0].strain).toBeGreaterThan(0);
+    expect(p.aggregates[0].axes[1]).toBeGreaterThan(1);
+    expect(Math.abs(p.massError)).toBeLessThan(1e-14);
+  });
+
+  it("does not confuse rigid rotation with shear fracture", () => {
+    const rotation: VelocitySampler = (x, _y, z) => [-120 * z, 0, 120 * x];
+    const p = new AgclPrototype(rotation, { seed: 13 });
+    p.pour([0, 0.03, 0], 0.02, 1, 0.8);
+    p.step(0.05);
+    expect(p.aggregates).toHaveLength(1);
+    expect(p.aggregates[0].strain).toBe(0);
+  });
+
+  it("conserves mass and momentum when touching curds coalesce", () => {
+    const p = new AgclPrototype(still, { seed: 5 });
+    const first = p.create([0, 0.04, 0], 0.01, 0.5);
+    const second = p.create([0.00005, 0.04, 0], 0.02, 0.7);
+    first.velocity = [0.0001, 0, 0];
+    second.velocity = [-0.00005, 0, 0];
+    p.addAggregate(first);
+    p.addAggregate(second);
+    p.step(0.05);
+    expect(p.aggregates).toHaveLength(1);
+    expect(p.aggregates[0].mass).toBeCloseTo(0.03, 14);
+    expect(Math.abs(p.massError)).toBeLessThan(1e-14);
+  });
+
   it("settles unequal sizes from one moving continuous pour at different depths", () => {
     const flow: VelocitySampler = (x, y) => [0.00003 * Math.sin(y * 90),
       x > 0 ? 0.00015 : 0, 0];
