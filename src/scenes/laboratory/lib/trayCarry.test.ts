@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { bottleFromTray, bottleToTray, standFromTray, standToTray, tubeFromTray, tubeToTray, unloadTray } from "./trayCarry";
+import { bottleFromTray, bottleToTray, lampFromTray, lampToTray, standFromTray, standToTray, tubeFromTray, tubeToTray, unloadTray } from "./trayCarry";
 import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
 import { useBurnerStore } from "./useBurnerStore";
 import { useReagentStorageStore, type StoredReagent } from "./useReagentStorageStore";
@@ -61,14 +61,22 @@ describe("carrying things on the tray (VL-017)", () => {
     expect(useBunsenStandStorageStore.getState().onWorkbench).toBe(true);
   });
 
-  it("carries the stand with the lamp beside it — capped — and sets them down together", () => {
+  it("carries the stand on its own — the lamp is its own piece of equipment and stays (VL-020)", () => {
     useBurnerStore.setState({ place: "workbench", phase: "lit", lit: true });
     expect(standToTray("workbench")).toBe(true);
     expect(useBunsenStandStorageStore.getState()).toMatchObject({ onTray: true, onWorkbench: false });
-    expect(useBurnerStore.getState()).toMatchObject({ place: "tray", lit: false });
+    expect(useBurnerStore.getState()).toMatchObject({ place: "workbench", lit: true });
 
     standFromTray("fumeHood");
     expect(useBunsenStandStorageStore.getState()).toMatchObject({ onTray: false, onFumeHood: true });
+    expect(useBurnerStore.getState().place).toBe("workbench");
+  });
+
+  it("puts the lamp on the tray capped, and down again on its own (VL-020)", () => {
+    useBurnerStore.setState({ place: "workbench", phase: "lit", lit: true });
+    expect(lampToTray("workbench")).toBe(true);
+    expect(useBurnerStore.getState()).toMatchObject({ place: "tray", lit: false, phase: "capped" });
+    expect(lampFromTray("fumeHood")).toBe(true);
     expect(useBurnerStore.getState().place).toBe("fumeHood");
   });
 

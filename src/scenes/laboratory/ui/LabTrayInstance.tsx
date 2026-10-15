@@ -24,6 +24,8 @@ import { prepareTrayMaterials } from "../lib/trayMaterials";
 import { useHandStore } from "../lib/useHandStore";
 import { TAKE_FROM_TRAY, takeFromTray } from "../lib/trayUnloadPlace";
 import { GlassRim, PourMotion } from "./StandMotion";
+import { TUBE_OUTLINE_PARTS } from "./NormalHoverOutline";
+import { NormalHoverOutline } from "./NormalHoverOutlineGroup";
 import { trayUnloadPlace } from "../lib/trayUnloadPlace";
 import { TABLE_TRAY } from "../lib/tableTray";
 import { pressToTake } from "../lib/pressToTake";
@@ -303,6 +305,7 @@ export function LabTrayInstance({
       ? trayTestTubeSnapshot
       : liveTrayTestTubeItems;
   const heldId = useHandStore((state) => state.held?.instanceId ?? null);
+  const hintOwner = useStandHintStore((state) => state.owner);
   // On the tray set down in the hood (turned to face into it), the things on
   // it are turned back round to face the player (VL-017).
   const itemYaw = mode === "held" && focusedCabinetId === "fume-hood" ? Math.PI : 0;
@@ -648,7 +651,10 @@ export function LabTrayInstance({
         >
           <PourMotion instanceId={item.instanceId} pourPointHeight={0} position={computeTubeSlotPosition(TRAY_RACK_ANCHOR, index)}>
             <GlassRim active={heldId === item.instanceId}>
-              <LabTestTubeInstance contents={item.contents} />
+              {/* Hovered (its caption up): the silhouette outline. */}
+              <NormalHoverOutline active={hintOwner === item.instanceId && heldId !== item.instanceId} parts={TUBE_OUTLINE_PARTS}>
+                <LabTestTubeInstance contents={item.contents} />
+              </NormalHoverOutline>
             </GlassRim>
           </PourMotion>
         </group>

@@ -18,8 +18,13 @@ import * as THREE from "three";
 export const HELD_TUBE_TILT = THREE.MathUtils.degToRad(45);
 /** Outer radius of `LabTestTube.glb`'s glass. */
 const TUBE_RADIUS = 0.0098;
-/** How far up the tube, from its bottom, the vertex of the V puts the flame. */
-export const V_REACH = 0.1;
+/**
+ * How far up the tube, from its bottom, the vertex of the V puts the flame:
+ * the top of the liquid (VL-020 — the contents are heated, not the whole
+ * tube). `LabTestTube.glb`'s `ContentsVolume` runs 0.0005..0.0555 m up the
+ * 0.15 m tube, and any nonempty tube is filled to it (`testTubeLiquidFill`).
+ */
+export const V_REACH = 0.0555;
 /** Where along the tube the tops of the V put the flame: the rounded bottom. */
 const V_TIP = 0.005;
 /** Stretch of `sweep` around the vertex over which the lean swings from one side to the other. */

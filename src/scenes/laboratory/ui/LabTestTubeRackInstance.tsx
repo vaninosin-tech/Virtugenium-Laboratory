@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import type { Position3 } from "../lib/layout";
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
-import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useNormalHoverOutline } from "./NormalHoverOutline";
 import { useBoxObstacle } from "../lib/worktopBounds";
 
 const MODEL_PATH = "/assets/models/LabTestTubeRack.glb";
@@ -70,6 +70,9 @@ export const LabTestTubeRackInstance = forwardRef<THREE.Group, {
   const instanceRef = useMemo(() => ({ current: instance }), [instance]);
   useBoxObstacle(`rack${obstacleId}`, instanceRef, RACK_FOOTPRINT, "rack");
 
+  // Hover: the silhouette outline (`NormalHoverOutline`).
+  useNormalHoverOutline({ root: instance, active: interactive && hoverActive });
+
   const hoverHitboxGeometry = useMemo(
     () => (interactive ? createHoverHitboxGeometry(instance) : null),
     [instance, interactive],
@@ -100,11 +103,10 @@ export const LabTestTubeRackInstance = forwardRef<THREE.Group, {
       <primitive object={instance} />
       {interactive && hoverHitboxGeometry && (
         <>
-          <ReagentHoverRim object={instance} active={hoverActive} />
           {/* The ONLY raycast target while interactive (see `createHoverHitboxGeometry`'s
               doc) — `instance`'s own meshes had raycasting disabled above. */}
           <mesh geometry={hoverHitboxGeometry}>
-            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+            <meshBasicMaterial visible={false} />
           </mesh>
         </>
       )}

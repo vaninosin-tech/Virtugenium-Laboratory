@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
-import { runStandAction, standActionFor } from "./standTableActions";
+import { heatInHandAction, runStandAction, standActionFor } from "./standTableActions";
 import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
 import { useBurnerStore } from "./useBurnerStore";
 import { useHeatingStore } from "./useHeatingStore";
@@ -85,29 +85,61 @@ describe("stand actions on the table (VL-014)", () => {
     expect(hoodTubes()[0].contents).toEqual(["cu", "hno3"]);
   });
 
-  it("the clamped tube goes back to the rack while the lamp is out, and is heated once it is lit", () => {
-    useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
-    expect(standActionFor({ kind: "clamped-tube" })?.label).toBe("Вернуть пробирку в штатив для пробирок");
+  it("one click on the lamp lights it and takes the clamp to the flame — the mini-game starts (VL-020)", () => {
+    useTestTubeStorageStore.setState({ fumeHoodTestTubes: [tube("t0", "cu", "hno3"), tube("t1")] });
+    expect(standActionFor({ kind: "burner" })).toMatchObject({ blocked: true, label: "Сначала закрепите пробирку в лапке штатива" });
 
-    useBurnerStore.setState({ phase: "lit", lit: true });
-    runStandAction({ kind: "clamped-tube" });
-    expect(useHeatingStore.getState().active).toBe(true);
+    useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
+    expect(standActionFor({ kind: "burner" })).toMatchObject({ blocked: false, label: "Нагреть пробирку в лапке" });
+    runStandAction({ kind: "burner" });
+    expect(useBurnerStore.getState().lit).toBe(true);
+    expect(useHeatingStore.getState()).toMatchObject({ active: true, target: { mode: "clamp" } });
     expect(useBunsenStandStorageStore.getState().attachedTubeSlotIndex).toBe(0);
   });
 
-  it("heats only with the lamp at the stand — a lamp left on the workbench does not count", () => {
+  it("the clamped tube is heated by a click on it too, while the lamp stands here", () => {
+    useTestTubeStorageStore.setState({ fumeHoodTestTubes: [tube("t0", "cu", "hno3"), tube("t1")] });
     useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
-    useBurnerStore.setState({ phase: "lit", lit: true, place: "workbench" });
-    expect(standActionFor({ kind: "clamped-tube" })?.label).toBe("Вернуть пробирку в штатив для пробирок");
+    expect(standActionFor({ kind: "clamped-tube" })?.label).toBe("Нагреть пробирку в лапке");
+    runStandAction({ kind: "clamped-tube" });
+    expect(useBurnerStore.getState().lit).toBe(true);
+    expect(useHeatingStore.getState().active).toBe(true);
   });
 
-  it("steps the lamp: cap off, light, put out", () => {
-    expect(standActionFor({ kind: "burner" })?.label).toBe("Снять колпачок со спиртовки");
-    runStandAction({ kind: "burner" });
-    settle();
-    expect(standActionFor({ kind: "burner" })?.label).toBe("Зажечь спиртовку");
-    runStandAction({ kind: "burner" });
+  it("heats nothing that has no reaction needing heat — the lamp says so, the tube just goes back (VL-020)", () => {
+    useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
+    expect(standActionFor({ kind: "burner" })).toMatchObject({
+      blocked: true,
+      label: "Нагревать нечего — в пробирке нет реакции, которой нужен нагрев",
+    });
+    expect(standActionFor({ kind: "clamped-tube" })?.label).toBe("Вернуть пробирку в штатив для пробирок");
+    runStandAction({ kind: "clamped-tube" });
+    expect(useHeatingStore.getState().active).toBe(false);
+    expect(useBurnerStore.getState().lit).toBe(false);
+  });
+
+  it("heats only with the lamp in the same place — a lamp left on the workbench does not count", () => {
+    useTestTubeStorageStore.setState({ fumeHoodTestTubes: [tube("t0", "cu", "hno3"), tube("t1")] });
+    useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
+    useBurnerStore.setState({ place: "workbench" });
+    expect(standActionFor({ kind: "clamped-tube" })?.label).toBe("Вернуть пробирку в штатив для пробирок");
+    expect(standActionFor({ kind: "burner" })?.blocked).toBe(true);
+  });
+
+  it("a tube in the hand is heated over the lamp too — the lamp lights itself — and that is charged as a mistake (VL-020)", () => {
+    useTestTubeStorageStore.setState({ fumeHoodTestTubes: [tube("t0", "cu", "hno3"), tube("t1", "cu")] });
+    useLaboratoryStore.setState({ scoreEvents: [], errors: [] });
+
+    expect(heatInHandAction("fumeHood", 1)?.blocked).toBe(true);
+    const heat = heatInHandAction("fumeHood", 0);
+    expect(heat?.blocked).toBe(false);
+    heat?.run();
     expect(useBurnerStore.getState().lit).toBe(true);
+    expect(useHeatingStore.getState()).toMatchObject({
+      active: true,
+      target: { mode: "hand", location: "fumeHood", index: 0, instanceId: "t0" },
+    });
+    expect(useLaboratoryStore.getState().scoreEvents.map((event) => event.ruleId)).toContain("error-1-heat-hand");
   });
 
   it("a bottle pours when it is tipped over the tube, and the stand takes no clicks until it is back", () => {

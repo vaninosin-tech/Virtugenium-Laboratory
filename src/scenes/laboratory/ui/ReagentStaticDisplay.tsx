@@ -25,6 +25,7 @@ import {
   MODEL_PATH,
 } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useNormalHoverOutline } from "./NormalHoverOutline";
 
 interface StaticDisplayOwnedResources {
   readonly geometries: THREE.BufferGeometry[];
@@ -48,10 +49,9 @@ interface StaticDisplayOwnedResources {
  * swapping. Only meaningful for tray items — workbench copies omit
  * `instanceId` and use `hoverable` instead, gaining the same visual hover
  * cue without the tray-only click-to-shelf action.
- * Interactive items get the SAME hover treatment as a shelf original —
- * `ReagentHoverRim`'s on-object Fresnel glow is the primary, reliable hover
- * cue (see its own doc for why), without an additional postprocessing
- * outline pass — via a single invisible
+ * Interactive items show hover as a silhouette outline round the bottle
+ * (`NormalHoverOutline`, the scene's one outline pass); `ReagentHoverRim`'s
+ * on-object glow is kept for a bottle held in the hand — hover is found via a single invisible
  * hitbox mesh, for the same flicker-avoiding reason — see
  * `createHoverHitboxGeometry`'s doc.
  */
@@ -198,7 +198,10 @@ export function ReagentStaticDisplay({
   const anyInspected = useReagentInspectionStore((state) => state.inspectedId !== null);
   const canReturnToShelf = !!instanceId && !anyInspected;
   const interactive = (hoverable || !!instanceId) && !anyInspected;
-  const showHighlight = interactive && (hovered || highlighted);
+  // Held in the hand: the on-object rim, as before. Merely hovered: the
+  // silhouette outline (`NormalHoverOutline`) — never both at once.
+  const showHighlight = interactive && highlighted;
+  useNormalHoverOutline({ root: instance, active: interactive && hovered && !highlighted, container: true });
   const groupRef = useRef<THREE.Group>(null);
   useFrame(() => {
     if (worldScale === undefined) return;
@@ -290,7 +293,7 @@ export function ReagentStaticDisplay({
         // `instanceId`) and items disabled during another inspection have
         // no click handler to trigger, see the module doc.
         <mesh ref={interactionRef} geometry={hoverHitboxGeometry} onPointerDown={onPointerDown}>
-          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+          <meshBasicMaterial visible={false} />
         </mesh>
       )}
     </group>

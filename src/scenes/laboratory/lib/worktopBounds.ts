@@ -108,6 +108,21 @@ function distanceTo(zone: LocalRect, point: THREE.Vector3): number {
 }
 
 /**
+ * The zone in play `point` is over (seen from above) — a tray before the
+ * worktop it stands on; null over none. A tray counts over all of it: what
+ * rides at its very edge (the lamp) is still over its tray above its own place.
+ */
+export function worktopZoneAt(point: THREE.Vector3): WorktopZoneId | null {
+  let found: WorktopZoneId | null = null;
+  for (const { id, rect } of activeWorktopZones()) {
+    if (distanceTo(rect, point) > 0) continue;
+    if (id.endsWith("tray")) return id;
+    found = id;
+  }
+  return found;
+}
+
+/**
  * The zones of the place `home` is at — its worktop and its tray: the place
  * of the zone nearest to it. However tight the rectangles are tuned (F8),
  * an item standing outside them still belongs to the nearest one and is

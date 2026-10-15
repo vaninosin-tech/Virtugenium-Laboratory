@@ -5,6 +5,7 @@ import {
   isNativeTypingTarget,
   readCapsLockFromEvent,
 } from "../lib/physicalKeyboard";
+import { registerTypingKeyboard } from "../lib/typingKeyboards";
 import { colors, typography } from "./tabletStyles";
 
 type IndexMode = "none" | "sub" | "super";
@@ -236,7 +237,10 @@ export function SubstanceNameKeyboard({
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
+    // Letters typed here must not also trigger E (open/close the tablet).
+    const unregisterTyping = registerTypingKeyboard();
     return () => {
+      unregisterTyping();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);

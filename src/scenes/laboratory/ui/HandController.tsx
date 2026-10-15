@@ -2,11 +2,15 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
-import { handActionFor, standActionFor } from "../lib/standTableActions";
-import { HAND, useHandStore, type HeldItem } from "../lib/useHandStore";
+import { handActionFor, heatInHandAction, jarPourAction, standActionFor } from "../lib/standTableActions";
+import { JAR_AIM, jarAt } from "../lib/pourSources";
+import { hoveredDragTarget, resolveDragTargets, useDragTargetStore } from "../lib/dragTargets";
+import { carriedObstacleIds } from "../lib/equipmentCarry";
+import { HAND, useHandStore, type HandAim, type HeldItem } from "../lib/useHandStore";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { WORKBENCH_CARRY } from "../lib/tableTray";
-import { trayHandAction } from "../lib/trayUnloadPlace";
+import { trayHandAction, trayUnloadPlace } from "../lib/trayUnloadPlace";
+import { useWorkbenchReservationStore, workbenchInsertIndex } from "../lib/workbenchLayout";
 import { constrainOnWorktop } from "../lib/worktopBounds";
 import { clearGhostShape } from "../lib/handGhost";
 import { HandGhosts } from "./HandGhosts";
@@ -48,6 +52,8 @@ export function HandController() {
   useEffect(() => {
     if (!held) return;
     const canvas = gl.domElement;
+    // Drag start: every target lit for this item at once (`dragTargets`).
+    useDragTargetStore.getState().publish(resolveDragTargets(held), null);
     setEvents({ enabled: false });
     canvas.style.cursor = "none";
 
@@ -78,12 +84,13 @@ export function HandController() {
         putBack();
         return;
       }
-      const action = held.kind === "workbench-tube" ? null : (held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.rawPoint));
+      const action = held.kind === "workbench-tube" ? null : (held.kind === "tray" ? trayHandAction(held, HAND.rawPoint) : handActionFor(held, HAND.rawPoint));
       if (!action || action.blocked) return;
       // From where the item is drawn (snapped beside its target), not the bare hand.
       const from = HAND.itemPosValid ? HAND.itemPos : HAND.point;
       action.run([from.x, from.y, from.z]);
-      letGo();
+      // A tube a bottle is pouring into stays in the hand.
+      if (!action.keepHeld) letGo();
     };
     // Dragged (`HAND.dragging`): letting go sets it down — does what a click
     // would there, or, anywhere else, puts it back where it was taken from.
@@ -92,14 +99,15 @@ export function HandController() {
       event.stopPropagation();
       event.preventDefault();
       HAND.dragging = false;
-      const action = held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.rawPoint);
+      const action = held.kind === "tray" ? trayHandAction(held, HAND.rawPoint) : handActionFor(held, HAND.rawPoint);
       if (!action || action.blocked) {
         putBack();
         return;
       }
       const from = HAND.itemPosValid ? HAND.itemPos : HAND.point;
       action.run([from.x, from.y, from.z]);
-      letGo();
+      // A tube a bottle is pouring into stays in the hand.
+      if (!action.keepHeld) letGo();
     };
     const handleContextMenu = (event: MouseEvent) => event.preventDefault();
     const handleKey = (event: KeyboardEvent) => {
@@ -131,6 +139,10 @@ export function HandController() {
       window.removeEventListener("keydown", handleKey, true);
       document.removeEventListener("pointerlockchange", handleLockChange);
       unsubscribeCarry();
+      // Dropped, put back or cancelled: nothing stays lit, no slot stays kept.
+      useDragTargetStore.getState().clear();
+      useWorkbenchReservationStore.getState().clear();
+      JAR_AIM.source = null;
       setEvents({ enabled: true });
       canvas.style.cursor = "";
       clearGhostShape();
@@ -162,7 +174,10 @@ export function HandController() {
   useFrame(() => {
     if (!held) return;
     if (held.kind === "workbench-tube") {
+      aimAtJar(held);
       HAND.action = workbenchTubeHint(held);
+      // The simulation may change under the carried item (the stand done moving): re-resolved every frame.
+      useDragTargetStore.getState().publish(resolveDragTargets(held), hoveredDragTarget(held, null, null, null));
       s.projected.set(sharedMouseNdc.x, sharedMouseNdc.y, 0.5);
     } else {
       if (!HAND.homeValid) return;
@@ -186,21 +201,29 @@ export function HandController() {
       // Over its worktop and off everything on it (VL-018). The magnet still
       // answers to the bare hand: the item snaps beside the tube it is kept off.
       HAND.rawPoint.copy(s.hit);
-      constrainOnWorktop(s.hit, HAND.radius, HAND.home, new Set([held.instanceId]));
+      constrainOnWorktop(s.hit, HAND.radius, HAND.home, new Set([held.instanceId, ...carriedObstacleIds(held)]));
       HAND.point.copy(s.hit);
       HAND.valid = true;
-      const action = held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.rawPoint);
+      aimAtJar(held);
+      const action = held.kind === "tray" ? trayHandAction(held, HAND.rawPoint) : handActionFor(held, HAND.rawPoint);
       HAND.action = action ? { label: action.label, blocked: action.blocked } : null;
       // A bottle always aims at the tube in the clamp; a tube at the clamp
       // while it is empty, else at the tube in it (to pour into).
       const clampTaken = useBunsenStandStorageStore.getState().attachedTubeSlotIndex !== null;
-      useHandStore
-        .getState()
-        .setAim(
-          action && action.part !== "tray"
-            ? { part: held.kind === "bottle" || clampTaken ? "tube" : "clamp", refused: action.blocked }
-            : null,
-        );
+      const aim: HandAim | null =
+        action && action.part === undefined && !JAR_AIM.source
+          ? { part: held.kind === "bottle" || clampTaken ? "tube" : "clamp", refused: action.blocked }
+          : null;
+      useHandStore.getState().setAim(aim);
+      useDragTargetStore.getState().publish(resolveDragTargets(held), hoveredDragTarget(held, action, aim, HAND.rawPoint));
+      // A bottle from the tray that letting go now would set into the bench's
+      // row keeps its slot there, the others making room (`workbenchLayout`).
+      const slot =
+        held.kind === "tray" && held.what === "bottle" && action && !action.blocked && trayUnloadPlace() === "workbench"
+          ? workbenchInsertIndex(HAND.rawPoint)
+          : null;
+      if (slot !== null && held.kind === "tray") useWorkbenchReservationStore.getState().reserve({ instanceId: held.instanceId, index: slot });
+      else useWorkbenchReservationStore.getState().clear();
       s.projected.copy(HAND.itemPosValid ? HAND.itemPos : HAND.point).project(camera);
     }
     const rect = gl.domElement.getBoundingClientRect();
@@ -228,7 +251,23 @@ const shadowMaterials = SHADOW_OPACITY.map(
 );
 
 /** The workbench carry clamps by itself near the ring; the hand only says so. */
+/** The bottle the held tube is brought to now, if any (`JAR_AIM`): a bottle at its own place, beside the tube's mouth. */
+function aimAtJar(held: HeldItem): void {
+  const location = held.kind === "workbench-tube" ? "workbench" : held.kind === "tube" ? held.location : null;
+  JAR_AIM.source = location && HAND.mouthValid ? jarAt(location, HAND.mouth) : null;
+}
+
 function workbenchTubeHint(held: Extract<HeldItem, { kind: "workbench-tube" }>): { label: string; blocked: boolean } | null {
+  if (JAR_AIM.source) {
+    // Held up to a bottle: it pours in, or says why not.
+    const pour = jarPourAction(held, JAR_AIM.source);
+    if (pour) return { label: pour.label, blocked: pour.blocked };
+  }
+  if (WORKBENCH_CARRY.nearFlame) {
+    // Under the lamp's flame (VL-020): what a click does there, or why not.
+    const heat = heatInHandAction("workbench", held.index);
+    if (heat) return { label: heat.label, blocked: heat.blocked };
+  }
   if (WORKBENCH_CARRY.overTray) return { label: "Поставить на поднос", blocked: false };
   const near = useTestTubeDragStore.getState().isNearHolder;
   if (near) return { label: "Поставить обратно в штатив для пробирок", blocked: false };

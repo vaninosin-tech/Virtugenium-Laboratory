@@ -1,9 +1,8 @@
 import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import * as THREE from "three";
 
-import { applyErrorRule } from "../../../features/tablet/lib/penalties";
 import { TUBE_CLAMP_MODEL_PATH } from "../lib/bunsenStandAssembly";
 import { CLAMP_TUBE_AXIS_X } from "../lib/bunsenStandGeometry";
 import { heldClampPose } from "../lib/heldClampPose";
@@ -11,17 +10,18 @@ import type { Position3 } from "../lib/layout";
 import { TUBE_RING_INSERT_DEPTH, TUBE_RING_LOCAL_OFFSET } from "../lib/useBunsenStandStorageStore";
 import { useBurnerStore } from "../lib/useBurnerStore";
 import { bottomInFlame, crackSpotForZone, useHeatingStore } from "../lib/useHeatingStore";
-import { useLabNoticeStore } from "../lib/useLabNoticeStore";
-import { TUBE_FOCUS } from "../lib/useTubeCloseUpStore";
+import { LAMP_FLAME } from "../lib/lampFlame";
 import { ROOM_TEMPERATURE_CHEMISTRY, advanceChemistry, useTubeReactionStore } from "../lib/tubeReactions";
 import type { StoredTestTube, TubeLocation } from "../lib/useTestTubeStorageStore";
 import { LabTestTubeInstance } from "./LabTestTubeInstance";
-import { FLAME_BASE_Y, FLAME_HEIGHT, SpiritBurner } from "./SpiritBurner";
-import { standTargetEvents } from "./standTargetEvents";
-import { ArrivalFlight, GlassRim } from "./StandMotion";
-import { ReagentHoverRim } from "./ReagentHoverRim";
-import { useHandStore } from "../lib/useHandStore";
-import { CLAMP_TUBE_MOUTH, useStandMotionStore } from "../lib/useStandMotionStore";
+import { FLAME_BASE_Y, FLAME_HEIGHT } from "./SpiritBurner";
+import { clampedTubeEvents, clampEvents } from "./standTargetEvents";
+import { ArrivalFlight, PourMotion } from "./StandMotion";
+import { CLAMP_INSTANCE } from "../lib/clampCarry";
+import { TUBE_OUTLINE_PARTS } from "./NormalHoverOutline";
+import { NormalHoverOutline } from "./NormalHoverOutlineGroup";
+import { useStandHintStore } from "../lib/useStandHintStore";
+import { CLAMP_HEAT_POSE, CLAMP_TUBE_MOUTH, useStandMotionStore } from "../lib/useStandMotionStore";
 import { registerWorktopObstacle, shownInWorld, useCircleObstacle } from "../lib/worktopBounds";
 
 /**
@@ -46,14 +46,6 @@ const LAMP_ASIDE = 0.13;
 const CLAMP_MOVE_SECONDS = 0.7;
 /** How high the clamp lifts clear of the boss on its way. */
 const CLAMP_MOVE_LIFT = 0.03;
-/**
- * Height above the tube's base that the close-up camera aims at: the middle
- * of the 15 cm tube. Lower cut off the gas leaving the mouth — the one sign
- * experiment 1 hinges on — at the top of the frame.
- */
-const TUBE_FOCUS_HEIGHT = 0.08;
-/** Experiment 1's «пробирка нагрета без предварительного прогрева» — what a crack costs. */
-const HEAT_ERROR_RULE_ID = "error-1-heat";
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -74,30 +66,6 @@ export function lampLayout(away: THREE.Vector3): { readonly lamp: Position3; rea
 }
 
 /**
- * Drives the heating mini-game's clock and charges the crack. The penalty is
- * raised here, on the phase EDGE, rather than inside `useHeatingStore`: the
- * store stays a pure model of glass and flame that tests can drive without a
- * running experiment.
- */
-function HeatingRuntime() {
-  const tick = useHeatingStore((state) => state.tick);
-
-  useFrame((_, delta) => {
-    const before = useHeatingStore.getState().phase;
-    // Clamped so a stalled frame (tab switch, shader compile) can't jump
-    // the glass straight past the crack threshold.
-    tick(Math.min(delta, 0.1), useBurnerStore.getState().lit);
-    if (before !== "cracked" && useHeatingStore.getState().phase === "cracked") {
-      const penalty = applyErrorRule(HEAT_ERROR_RULE_ID, "safety-violation");
-      const points = penalty?.charged ? ` (${penalty.rule.points})` : "";
-      useLabNoticeStore.getState().show(`Ошибка: пробирка лопнула от неравномерного нагрева${points}`, "error");
-    }
-  });
-
-  return null;
-}
-
-/**
  * Runs the clamped tube's chemistry — see `advanceChemistry`. The contents
  * are in the flame only while the player holds the clamp with the tube's
  * bottom in it: back on the stand the tube hangs well above the flame.
@@ -110,6 +78,7 @@ function TubeReactionRuntime({ tube }: { readonly tube: StoredTestTube | undefin
       useBurnerStore.getState().lit &&
       heating.started &&
       heating.active &&
+      heating.target.mode === "clamp" &&
       heating.phase !== "cracked" &&
       // The contents heat only with the bottom in the flame; the rest of the
       // V warms the glass, not the liquid.
@@ -161,6 +130,8 @@ function TubeMouthAnchor() {
   useFrame(() => {
     if (!ref.current) return;
     ref.current.getWorldPosition(CLAMP_TUBE_MOUTH.point);
+    // The group the clamped tube stands in: where a tube put in the clamp ends up (`placementGhosts`).
+    if (ref.current.parent) CLAMP_TUBE_MOUTH.root.copy(ref.current.parent.matrixWorld);
     CLAMP_TUBE_MOUTH.valid = true;
   });
   useEffect(
@@ -172,43 +143,29 @@ function TubeMouthAnchor() {
   return <group ref={ref} position={[0, TUBE_MOUTH_HEIGHT, 0]} />;
 }
 
-/** Publishes the station's focus point for `CameraRig`'s close-up — see `TUBE_FOCUS`. Positioned by its owner. */
-function TubeFocusAnchor({ anchorRef }: { readonly anchorRef: RefObject<THREE.Group | null> }) {
-  useFrame(() => {
-    if (!anchorRef.current) return;
-    anchorRef.current.getWorldPosition(TUBE_FOCUS.point);
-    TUBE_FOCUS.valid = true;
-  });
-  useEffect(
-    () => () => {
-      TUBE_FOCUS.valid = false;
-    },
-    [],
-  );
-  return <group ref={anchorRef} />;
-}
-
 /**
  * The removable clamp with its tube. At rest it sits in the boss exactly
  * where the stand model has it; while heating it comes off, lifts clear and
  * holds the tube in the lamp's still flame at the spot the ellipse on the V
- * picks (`heldClampPose`), then goes back. Driven per frame on the object
- * rather than through React state: the ellipse can move every frame.
- *
- * Also publishes the camera's close-up focus, which follows the tube down to
- * the flame and back.
+ * picks (`heldClampPose`), then goes back. The lamp stands in its own place
+ * (VL-020), so the clamp goes to wherever its flame is (`LAMP_FLAME`). Driven
+ * per frame on the object rather than through React state: the ellipse can
+ * move every frame.
  */
+
+const heatPose = new THREE.Matrix4();
+const ONE = new THREE.Vector3(1, 1, 1);
+
 function HeldClampRig({
   away,
-  hotSpot,
+  location,
   children,
 }: {
   readonly away: THREE.Vector3;
-  readonly hotSpot: THREE.Vector3;
+  readonly location: TubeLocation;
   readonly children: ReactNode;
 }) {
   const { scene } = useGLTF(TUBE_CLAMP_MODEL_PATH);
-  const aim = useHandStore((state) => state.aim);
   const clamp = useMemo(() => {
     const clone = scene.clone(true);
     clone.traverse((object) => {
@@ -221,18 +178,20 @@ function HeldClampRig({
   }, [scene]);
 
   const rigRef = useRef<THREE.Group>(null);
-  const focusRef = useRef<THREE.Group>(null);
   const held = useRef(0);
   const restJaws = useMemo(() => new THREE.Vector3(...TUBE_RING_LOCAL_OFFSET), []);
   const restQuaternion = useMemo(() => new THREE.Quaternion(), []);
-  // Close-up focus while heating: a little above the flame, where the tube passes through it.
-  const heatingFocus = useMemo(() => hotSpot.clone().setY(hotSpot.y + 0.03), [hotSpot]);
+  // The flame in the stand's own space; until the lamp is seen here, right above the clamp's rest.
+  const hotSpot = useMemo(() => restJaws.clone(), [restJaws]);
 
   useFrame((_, rawDelta) => {
     const rig = rigRef.current;
     if (!rig) return;
     const heating = useHeatingStore.getState();
-    const target = heating.active ? 1 : 0;
+    if (LAMP_FLAME.valid && LAMP_FLAME.place === location && rig.parent) {
+      rig.parent.worldToLocal(hotSpot.copy(LAMP_FLAME.point));
+    }
+    const target = heating.active && heating.target.mode === "clamp" ? 1 : 0;
     held.current = THREE.MathUtils.clamp(
       held.current + Math.sign(target - held.current) * (Math.min(rawDelta, 0.1) / CLAMP_MOVE_SECONDS),
       0,
@@ -240,33 +199,29 @@ function HeldClampRig({
     );
     const k = THREE.MathUtils.smoothstep(held.current, 0, 1);
     const pose = heldClampPose(heating.sweep, hotSpot, away, TUBE_RING_INSERT_DEPTH);
+    // Where it will be held in the flame, in the world — for a carried clamp's outline there (`placementGhosts`).
+    const lampHere = LAMP_FLAME.valid && LAMP_FLAME.place === location && !!rig.parent;
+    if (lampHere) CLAMP_HEAT_POSE.matrix.multiplyMatrices(rig.parent!.matrixWorld, heatPose.compose(pose.jaws, pose.quaternion, ONE));
+    CLAMP_HEAT_POSE.valid = lampHere;
     rig.position.lerpVectors(restJaws, pose.jaws, k);
     rig.position.y += CLAMP_MOVE_LIFT * Math.sin(Math.PI * k);
     rig.quaternion.slerpQuaternions(restQuaternion, pose.quaternion, k);
-
-    const focus = focusRef.current;
-    if (focus) {
-      // Halfway up the hanging tube at rest; just above the flame while
-      // heating — steadier than following every move of the ellipse.
-      focus.position.set(restJaws.x, restJaws.y - TUBE_RING_INSERT_DEPTH + TUBE_FOCUS_HEIGHT, restJaws.z);
-      focus.position.lerp(heatingFocus, k);
-    }
   });
 
   return (
     <>
       <group ref={rigRef}>
-        <group position={[-CLAMP_TUBE_AXIS_X, 0, 0]}>
-          <primitive object={clamp} />
-          {/* Lit while a tube in the hand is brought to the empty clamp (VL-015). */}
-          <ReagentHoverRim object={clamp} active={aim?.part === "clamp"} tone={aim?.refused ? "refused" : "normal"} />
-        </group>
-        <group position={[0, -TUBE_RING_INSERT_DEPTH, 0]}>
-          {children}
-          <TubeMouthAnchor />
-        </group>
+        {/* Taken into the hand with its tube (`clampCarry`): it follows the hand, and goes back onto the stand. */}
+        <PourMotion instanceId={CLAMP_INSTANCE} pourPointHeight={0} keepCap obstacle={false} ghostWhole>
+          <group position={[-CLAMP_TUBE_AXIS_X, 0, 0]} userData={{ standClamp: true }} {...clampEvents(location)}>
+            <primitive object={clamp} />
+          </group>
+          <group position={[0, -TUBE_RING_INSERT_DEPTH, 0]}>
+            {children}
+            <TubeMouthAnchor />
+          </group>
+        </PourMotion>
       </group>
-      <TubeFocusAnchor anchorRef={focusRef} />
     </>
   );
 }
@@ -288,27 +243,23 @@ export function StandStation({
   readonly tube: StoredTestTube | undefined;
   readonly crackZone: number | null;
 }) {
-  const { lamp, hotSpot } = useMemo(() => lampLayout(away), [away]);
-  // The lamp is its own item (VL-014): it may still be in the cabinet, or
-  // left behind on the table when the stand went into the hood.
-  const lampHere = useBurnerStore((state) => state.place === location);
   const clampArrival = useStandMotionStore((state) => state.clampArrival);
-  const aim = useHandStore((state) => state.aim);
+  const tubeOwner = tube ? `clamped:${tube.instanceId}` : null;
+  // Hovered (its caption up): the silhouette outline.
+  const tubeHovered = useStandHintStore((state) => tubeOwner !== null && state.owner === tubeOwner);
 
   return (
     <>
-      {lampHere && <SpiritBurner position={lamp} />}
       <RodAnchor tubeClamped={!!tube} />
-      <HeatingRuntime />
       <TubeReactionRuntime tube={tube} />
-      <HeldClampRig away={away} hotSpot={hotSpot}>
+      <HeldClampRig away={away} location={location}>
         {tube && (
           // The tube stands in front of the stand's rod: its handlers stop
-          // the event, so a click here never falls through to the stand's.
-          // Lamp lit — heat it; otherwise — back to the rack (VL-014).
-          <group {...standTargetEvents(`clamped:${tube.instanceId}`, { kind: "clamped-tube" })}>
-            {/* Lit while a bottle (or a tube to pour) is brought to it (VL-015). */}
-            <GlassRim active={aim?.part === "tube"} tone={aim?.refused ? "refused" : "normal"}>
+          // the event, so a press here never falls through to the stand's.
+          // A press takes it out of the clamp into the hand.
+          <group {...clampedTubeEvents(`clamped:${tube.instanceId}`)} userData={{ clampedTube: true }}>
+            {/* What a carried item would do here shows as its own outline (`placementGhosts`), not on this tube. */}
+            <NormalHoverOutline active={tubeHovered} parts={TUBE_OUTLINE_PARTS}>
               <ArrivalFlight arrival={clampArrival}>
                 <LabTestTubeInstance
                   contents={tube.contents}
@@ -318,7 +269,7 @@ export function StandStation({
                   inStand
                 />
               </ArrivalFlight>
-            </GlassRim>
+            </NormalHoverOutline>
           </group>
         )}
       </HeldClampRig>

@@ -1030,6 +1030,9 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
         }
         return;
       }
+      // Only LMB walks anywhere. RMB toggles the crosshair (`aimDisabled`)
+      // and must never also carry the player to whatever it was aimed at.
+      if (event.button !== 0) return;
       const state = useSceneInteractionStore.getState();
       // Outside "room" phase the player has a free cursor for real UI
       // interaction (the cabinet inspection screen's own R3F pointer
@@ -1051,6 +1054,8 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
       }
 
       if (state.activeTargetId !== "overview") return;
+      // RMB turned aiming off: LMB goes nowhere until RMB turns it back on.
+      if (state.aimDisabled) return;
 
       const hoveredId = state.hoveredTargetId;
       if (!hoveredId) return;
@@ -1229,12 +1234,29 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      // Q: look closely at the tube with the reaction, and back (Esc too).
+      if (event.code === "KeyQ" && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        if (useLaboratoryStore.getState().tabletOpen || useReagentInspectionStore.getState().inspectedId) return;
+        const scene = useSceneInteractionStore.getState();
+        const atStation = scene.cabinetPhase === "inspecting" || scene.activeTargetId === "table";
+        const closeUp = useTubeCloseUpStore.getState();
+        if (!closeUp.viewing && (!atStation || !TUBE_FOCUS.valid)) return;
+        event.preventDefault();
+        closeUp.setViewing(!closeUp.viewing);
+        return;
+      }
       if (event.key !== "Escape") return;
       // Esc with something in the hand puts it back, nothing more (VL-015).
       if (escapeTakenByHand()) return;
       // The tablet owns all input while it covers the scene. Escape must not
       // return/lock the cabinet behind an open tablet.
       if (useLaboratoryStore.getState().tabletOpen) return;
+      // Out of the tube close-up first; the station itself stays.
+      if (useTubeCloseUpStore.getState().viewing) {
+        event.preventDefault();
+        useTubeCloseUpStore.getState().close();
+        return;
+      }
       // A reagent being inspected owns Escape exclusively (it's equivalent
       // to clicking ОСТАВИТЬ — see `ReagentInspectionOverlay`) — without this
       // guard, the SAME keypress would also fly the camera back out of the
@@ -1534,7 +1556,10 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
       // Settled — hold position/orientation exactly, apart from the tube
       // close-up (heating, or the player looking at the tube), which blends
       // off this held pose and back onto it.
-      const closeUp = useHeatingStore.getState().active || useTubeCloseUpStore.getState().viewing;
+      // The tube close-up on Q (`useTubeCloseUpStore`), onto the tube with the
+      // reaction (`TUBE_FOCUS`). Heating itself is watched from the zone's own
+      // view (VL-020) — it no longer opens this.
+      const closeUp = useTubeCloseUpStore.getState().viewing && TUBE_FOCUS.valid;
       if (closeUp && !heatBasePosition.current) {
         heatBasePosition.current = camera.position.clone();
         heatBaseQuaternion.current.copy(camera.quaternion);
@@ -1614,8 +1639,11 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
       camera.position.z + directionZ,
     );
 
-    const standCloseUp =
-      atTable && (useHeatingStore.getState().active || useTubeCloseUpStore.getState().viewing);
+    // At the table the same close-up on Q leans in to the tube with the reaction.
+    const standCloseUp = atTable && useTubeCloseUpStore.getState().viewing && TUBE_FOCUS.valid;
+    // Out in the room (not at the table, not in a cabinet or the hood): the
+    // close-up does not wait for the next station.
+    if (!atTable && useTubeCloseUpStore.getState().viewing) useTubeCloseUpStore.getState().close();
     tableDolly.current = THREE.MathUtils.damp(tableDolly.current, standCloseUp ? 1 : 0, HEAT_DOLLY_DAMPING, delta);
     if (tableDolly.current > 0.001 && TUBE_FOCUS.valid) {
       closeUpPosition.current
@@ -1629,7 +1657,7 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
       camera.quaternion.slerp(closeUpQuaternion.current, tableDolly.current);
     }
 
-    if (activeTargetId === "overview" && state.isPointerLocked) {
+    if (activeTargetId === "overview" && state.isPointerLocked && !state.aimDisabled) {
       // Real geometry raycast, not a distance-to-anchor-point heuristic —
       // any part of a hotspot's actual mesh under the (always-centered)
       // crosshair counts, not just a small radius around one fixed point.

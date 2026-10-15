@@ -11,14 +11,16 @@ import { useBurnerStore } from "../lib/useBurnerStore";
 import { useStandHintStore } from "../lib/useStandHintStore";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
-import { useStandStationStore } from "../lib/useStandStationStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { computeTubeSlotLocalOffset, useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
+import { TUBE_OUTLINE_PARTS } from "./NormalHoverOutline";
+import { NormalHoverOutline } from "./NormalHoverOutlineGroup";
 import { LabTestTubeInstance } from "./LabTestTubeInstance";
 import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
 import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
 import { SpiritBurner } from "./SpiritBurner";
-import { StandStation, lampLayout } from "./StandStation";
+import { StandStation } from "./StandStation";
+import { HOOD_AWAY_FROM_PLAYER, HOOD_LONE_LAMP_POSITION, HOOD_STAND_ROTATION_Y } from "./equipmentPlaces";
 import { HOOD_RACK_LOCAL, HOOD_STAND_LOCAL, HOOD_WORKTOP_Y, hoodBottleLocal } from "../lib/hoodLayout";
 import { takeTargetEvents } from "./standTargetEvents";
 import { useHandStore } from "../lib/useHandStore";
@@ -43,28 +45,10 @@ const WORKTOP_Y = HOOD_WORKTOP_Y;
 const RACK_LOCAL: Position3 = HOOD_RACK_LOCAL;
 const STAND_LOCAL: Position3 = HOOD_STAND_LOCAL;
 
-/**
- * A dead-on quarter turn put the rod exactly behind the tube: the metal
- * showed through the liquid and the whole column read as a steel rod. This
- * much off the camera axis moves the rod beside the tube while the tube
- * still faces the camera.
- */
-const STAND_TURN_ASIDE = 0.5;
-
-/**
- * The stand's ring arm points along the model's +X, i.e. sideways across
- * the hood, so the clamped tube hid beside the rod. A quarter turn points
- * the arm at the sash — at the camera — with the tube in front of the rod,
- * and turns the heating sweep (the tube's local Z) into left-right motion on
- * screen, the same axis as the knob's track.
- */
-const STAND_ROTATION_Y = -Math.PI / 2 + STAND_TURN_ASIDE;
-
-/** "Away from the player" (the hood's back wall, hood -Z) in the stand's own turned space. */
-const AWAY_FROM_PLAYER = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), -STAND_ROTATION_Y);
-
-/** Stand-local spot of a lamp in the hood without the stand — where `StandStation` would put it. */
-const LONE_LAMP_POSITION = lampLayout(AWAY_FROM_PLAYER).lamp;
+// The stand's turn, its "away" and the lamp's own spot in the hood (`equipmentPlaces`).
+const STAND_ROTATION_Y = HOOD_STAND_ROTATION_Y;
+const AWAY_FROM_PLAYER = HOOD_AWAY_FROM_PLAYER;
+const LONE_LAMP_POSITION = HOOD_LONE_LAMP_POSITION;
 
 /** A tube's mouth above its base — the 15 cm `LabTestTube.glb`. */
 const TUBE_MOUTH_HEIGHT = 0.15;
@@ -72,7 +56,8 @@ const TUBE_MOUTH_HEIGHT = 0.15;
 const reagentConfig = (id: string): ReagentContainerConfig | undefined =>
   (REAGENTS as Record<string, ReagentContainerConfig | undefined>)[id];
 
-function StandInFumeHood({ onActivate }: { readonly onActivate: () => void }) {
+/** The stand itself does nothing on a click — there is no close-up of it any more (VL-020). */
+function StandInFumeHood() {
   const scene = useBunsenStandScene();
   const { instance } = useMemo(() => {
     const clone = scene.clone(true);
@@ -91,18 +76,8 @@ function StandInFumeHood({ onActivate }: { readonly onActivate: () => void }) {
   return (
     <primitive
       object={instance}
-      onClick={(event: ThreeEvent<MouseEvent>) => {
-        event.stopPropagation();
-        onActivate();
-      }}
-      onPointerOver={(event: ThreeEvent<PointerEvent>) => {
-        event.stopPropagation();
-        document.body.style.cursor = "pointer";
-      }}
-      onPointerOut={(event: ThreeEvent<PointerEvent>) => {
-        event.stopPropagation();
-        document.body.style.cursor = "auto";
-      }}
+      // Still swallows the click, so it never falls through to what stands behind the stand.
+      onClick={(event: ThreeEvent<MouseEvent>) => event.stopPropagation()}
     />
   );
 }
@@ -140,20 +115,19 @@ export function FumeHoodWorkArea() {
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
   const sandbox = useLaboratoryStore((state) => state.mode === "sandbox");
   const crackZone = useHeatingStore((state) => (state.phase === "cracked" ? state.crackZone : null));
+  // A tube heated in the hand is drawn over the lamp meanwhile (`HandHeatRig`, VL-020).
+  const heatedInHandId = useHeatingStore((state) =>
+    state.active && state.target.mode === "hand" && state.target.location === "fumeHood" ? state.target.instanceId : null,
+  );
   const lampInHood = useBurnerStore((state) => state.place === "fumeHood");
   const heldId = useHandStore((state) => state.held?.instanceId ?? null);
+  const hintOwner = useStandHintStore((state) => state.owner);
+  const standArrival = useStandMotionStore((state) => (state.equipmentArrival?.what === "stand" ? state.equipmentArrival : null));
+  const lampArrival = useStandMotionStore((state) => (state.equipmentArrival?.what === "lamp" ? state.equipmentArrival : null));
   const rackArrival = useStandMotionStore((state) => (state.rackArrival?.location === "fumeHood" ? state.rackArrival : null));
 
   const clampedIndex = standInHood ? attachedTubeSlotIndex : null;
   const hasContent = hoodTubes.length > 0 || hoodItems.length > 0 || standInHood || lampInHood;
-
-  // The stand itself only brings the camera in close, to watch the
-  // reaction. Everything done AT the stand is a click on the object it is
-  // done with — the rack's tubes, the bottles, the lamp, the clamped tube
-  // (VL-014, `standTableActions`).
-  const handleStandClick = () => {
-    if (!useHeatingStore.getState().active) useStandStationStore.getState().open();
-  };
 
   if (!hasContent) return null;
 
@@ -164,7 +138,7 @@ export function FumeHoodWorkArea() {
         <LabTestTubeRackInstance position={RACK_LOCAL}>
           {hoodTubes.map((tube, index) =>
             // The clamped tube is drawn in the stand's ring instead.
-            index === clampedIndex ? null : (
+            index === clampedIndex || tube.instanceId === heatedInHandId ? null : (
               <group
                 key={tube.instanceId}
                 {...takeTargetEvents(
@@ -177,10 +151,13 @@ export function FumeHoodWorkArea() {
                   {/* In the hand it follows it, outlined, and pours like a bottle (VL-015). */}
                   <PourMotion instanceId={tube.instanceId} pourPointHeight={TUBE_MOUTH_HEIGHT}>
                     <GlassRim active={heldId === tube.instanceId}>
-                      {/* Back from the clamp: seen flying home to its slot. */}
-                      <ArrivalFlight arrival={rackArrival?.index === index ? rackArrival : null}>
-                        <LabTestTubeInstance contents={tube.contents} />
-                      </ArrivalFlight>
+                      {/* Hovered (its caption up): the silhouette outline. */}
+                      <NormalHoverOutline active={hintOwner === tube.instanceId && heldId !== tube.instanceId} parts={TUBE_OUTLINE_PARTS}>
+                        {/* Back from the clamp: seen flying home to its slot. */}
+                        <ArrivalFlight arrival={rackArrival?.index === index ? rackArrival : null}>
+                          <LabTestTubeInstance contents={tube.contents} />
+                        </ArrivalFlight>
+                      </NormalHoverOutline>
                     </GlassRim>
                   </PourMotion>
                 </group>
@@ -192,20 +169,27 @@ export function FumeHoodWorkArea() {
 
       {standInHood && (
         <group position={STAND_LOCAL} rotation={[0, STAND_ROTATION_Y, 0]}>
-          <StandInFumeHood onActivate={handleStandClick} />
-          <StandStation
-            location="fumeHood"
-            away={AWAY_FROM_PLAYER}
-            tube={clampedIndex === null ? undefined : hoodTubes[clampedIndex]}
-            crackZone={crackZone}
-          />
+          {/* Set down off the tray: seen going from the hand into its place. */}
+          <ArrivalFlight arrival={standArrival} fromFirstFrame>
+            <StandInFumeHood />
+            <StandStation
+              location="fumeHood"
+              away={AWAY_FROM_PLAYER}
+              tube={clampedIndex === null ? undefined : hoodTubes[clampedIndex]}
+              crackZone={crackZone}
+            />
+          </ArrivalFlight>
         </group>
       )}
 
-      {/* Carried in without the stand: it stands where it will be beside it. */}
-      {lampInHood && !standInHood && (
+      {/* In its own place beside the stand's, with the stand or without it (VL-020). */}
+      {lampInHood && (
         <group position={STAND_LOCAL} rotation={[0, STAND_ROTATION_Y, 0]}>
-          <SpiritBurner position={LONE_LAMP_POSITION} />
+          <group position={LONE_LAMP_POSITION}>
+            <ArrivalFlight arrival={lampArrival} fromFirstFrame>
+              <SpiritBurner position={[0, 0, 0]} place="fumeHood" />
+            </ArrivalFlight>
+          </group>
         </group>
       )}
 
@@ -213,7 +197,8 @@ export function FumeHoodWorkArea() {
         const reagent = reagentConfig(item.reagentId);
         if (!reagent) return null;
         const target = { kind: "bottle", location: "fumeHood", reagentId: item.reagentId, instanceId: item.instanceId } as const;
-        const { onClick } = takeTargetEvents(item.instanceId, target, {
+        // Taken on the press — dragged or clicked (`pressToTake`, VL-018).
+        const { onClick, onPointerDown } = takeTargetEvents(item.instanceId, target, {
           kind: "bottle",
           location: "fumeHood",
           instanceId: item.instanceId,
@@ -221,10 +206,11 @@ export function FumeHoodWorkArea() {
           containerType: reagent.containerType,
         });
         return (
-          <group key={item.instanceId} onClick={onClick}>
+          <group key={item.instanceId} onClick={onClick} onPointerDown={onPointerDown}>
             <PourMotion
               instanceId={item.instanceId}
               pourPointHeight={POUR_POINT_HEIGHT[reagent.containerType]}
+              pourSource={{ reagentId: item.reagentId, location: "fumeHood" }}
               position={
                 sandbox
                   ? sandboxBottlePosition(index)

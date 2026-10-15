@@ -6,11 +6,13 @@ import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
 import type { Position3 } from "../lib/layout";
 import { createHoverHitboxGeometry } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useNormalHoverOutline } from "./NormalHoverOutline";
 import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
 import { TAKE_FROM_TRAY, takeFromTray, trayUnloadPlace } from "../lib/trayUnloadPlace";
 import { useHandStore } from "../lib/useHandStore";
 import { pressToTake } from "../lib/pressToTake";
-import { PourMotion } from "./StandMotion";
+import { ArrivalFlight, PourMotion } from "./StandMotion";
+import { useStandMotionStore } from "../lib/useStandMotionStore";
 import { useStandHintStore } from "../lib/useStandHintStore";
 
 /** Held-tray true/real-world size — matches `useShelfTrayFlight`'s own flight target scale. */
@@ -74,6 +76,8 @@ export function TrayEquipmentDisplay({
 
   // While a bottle is being inspected (ВЗЯТЬ / ОСТАВИТЬ), the tray is out of play.
   const inspecting = useReagentInspectionStore((state) => state.inspectedId !== null);
+  const arrival = useStandMotionStore((state) => (state.equipmentArrival?.what === what ? state.equipmentArrival : null));
+  useNormalHoverOutline({ root: instance, active: hovered && !inspecting && !held });
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     if (yieldsToLamp(what, event)) return;
@@ -135,12 +139,16 @@ export function TrayEquipmentDisplay({
         useStandHintStore.getState().hide(owner);
       }}
     >
+      {/* Set down onto the tray from the hand: seen going there (`equipmentCarry`). */}
+      <ArrivalFlight arrival={arrival} fromFirstFrame>
       <PourMotion instanceId={owner} pourPointHeight={0} keepCap>
         <primitive object={instance} />
-        <ReagentHoverRim object={instance} active={(hovered && !inspecting) || held} />
+        {/* In the hand: the on-object rim; merely hovered: the silhouette outline (`NormalHoverOutline`). */}
+        <ReagentHoverRim object={instance} active={held} />
       </PourMotion>
+      </ArrivalFlight>
       <mesh geometry={hoverHitboxGeometry} userData={{ trayEquipment: what }}>
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        <meshBasicMaterial visible={false} />
       </mesh>
     </group>
   );

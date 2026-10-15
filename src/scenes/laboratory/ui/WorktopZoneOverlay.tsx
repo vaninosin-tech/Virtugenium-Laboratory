@@ -23,7 +23,7 @@ const box = new THREE.Box3();
 const corner = new THREE.Vector3();
 
 /** How high (world) the zone's surface is: the countertop, the hood's worktop, the tray's floor. */
-function surfaceY(id: WorktopZoneId, object: THREE.Object3D): number {
+export function surfaceY(id: WorktopZoneId, object: THREE.Object3D): number {
   if (id === "table") {
     const top = object.getObjectByName("Countertop") ?? object;
     return box.setFromObject(top).max.y;

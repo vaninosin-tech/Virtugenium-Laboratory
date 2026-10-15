@@ -134,6 +134,9 @@ export function TrayReturnZone() {
         6,
         delta,
       );
+      // Faded out: not drawn at all — an empty volume still writes depth into
+      // the hover outline's mask and hides the bottles on the tray (`NormalHoverOutline`).
+      outerMaterialRef.current.visible = outerMaterialRef.current.opacity > 0.001;
     }
     if (fogMaterialRef.current) {
       fogMaterialRef.current.uniforms.uTime.value = state.clock.elapsedTime;
@@ -148,6 +151,7 @@ export function TrayReturnZone() {
         4.5,
         delta,
       );
+      fogMaterialRef.current.visible = fogMaterialRef.current.uniforms.uOpacity.value > 0.001;
     }
   });
 
@@ -165,6 +169,7 @@ export function TrayReturnZone() {
           color="#ef4444"
           transparent
           opacity={0}
+          visible={false}
           depthWrite={false}
           side={THREE.DoubleSide}
           blending={THREE.AdditiveBlending}
@@ -181,6 +186,7 @@ export function TrayReturnZone() {
         />
         <shaderMaterial
           ref={fogMaterialRef}
+          visible={false}
           uniforms={fogUniforms}
           vertexShader={FOG_VERTEX_SHADER}
           fragmentShader={FOG_FRAGMENT_SHADER}

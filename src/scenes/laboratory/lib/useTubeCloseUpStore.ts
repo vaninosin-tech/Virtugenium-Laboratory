@@ -15,9 +15,9 @@ export const TUBE_FOCUS = {
 
 interface TubeCloseUpState {
   /**
-   * The player is at the stand: the camera is in close on the clamp and the
-   * stand's action panel (`StandActionPanel`) is up. Independent of heating,
-   * which gets the same close-up on its own.
+   * The player is at the stand, looking at its tube close up. Nothing opens
+   * this any more — there is no close-up of the stand (VL-020) — so it stays
+   * false; kept for the readers that still ask.
    */
   readonly viewing: boolean;
   setViewing: (viewing: boolean) => void;

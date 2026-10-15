@@ -1,34 +1,39 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useThree, type ThreeEvent } from "@react-three/fiber";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 
 import { TUBE_CLAMP_PIVOT, useBunsenStandScene } from "../lib/bunsenStandAssembly";
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
-import { CAMERA_TARGETS, type Position3 } from "../lib/layout";
-import { STAND_BASE_BOTTOM_OFFSET, STAND_TABLE_YAW, useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+import type { Position3 } from "../lib/layout";
+import {
+  STAND_BASE_BOTTOM_OFFSET,
+  STAND_TABLE_YAW,
+  useBunsenStandStorageStore,
+} from "../lib/useBunsenStandStorageStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
-import { useStandStationStore } from "../lib/useStandStationStore";
 import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useWorkbenchReagentAreaStore } from "../lib/useWorkbenchReagentAreaStore";
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useNormalHoverOutline } from "./NormalHoverOutline";
 import { SpiritBurner } from "./SpiritBurner";
-import { StandStation, lampLayout } from "./StandStation";
-import { overTableTray } from "../lib/tableTray";
-import { standToTray } from "../lib/trayCarry";
+import { StandStation } from "./StandStation";
+import { useStandMotionStore } from "../lib/useStandMotionStore";
+import { AWAY_AT_TABLE, LAMP_TABLE_SPOT } from "./equipmentPlaces";
+import { EQUIPMENT_INSTANCE, takeEquipment } from "../lib/equipmentCarry";
+import { pressToTake } from "../lib/pressToTake";
+import { useHandStore } from "../lib/useHandStore";
+import { ArrivalFlight, PourMotion } from "./StandMotion";
 
-/**
- * "Away from the player" at the table: the table viewpoint's own look
- * direction, flattened. The stand is never turned on the table, so its local
- * space is the world's.
- */
-const AWAY_AT_TABLE = new THREE.Vector3(Math.sin(CAMERA_TARGETS.table.yaw), 0, -Math.cos(CAMERA_TARGETS.table.yaw))
-  .normalize()
-  // In the stand's own space: it stands turned round on the table (`STAND_TABLE_YAW`).
-  .applyAxisAngle(new THREE.Vector3(0, 1, 0), -STAND_TABLE_YAW);
-/** A press that moves the stand less than this is a click (walk up to it), not a drag. */
-const CLICK_SLOP = 0.004;
+/** Whether a press or hover over the stand's hitbox is really on its clamp or the tube in it (`StandStation`) — those are taken on their own. */
+const onClampedTube = (event: ThreeEvent<PointerEvent>) =>
+  event.intersections.some((hit) => {
+    for (let object: THREE.Object3D | null = hit.object; object; object = object.parent) {
+      if (object.userData.clampedTube || object.userData.standClamp) return true;
+    }
+    return false;
+  });
 
 /**
  * The stand's final resting place вЂ” rendered once `useBunsenStandStorageStore`'s
@@ -38,17 +43,14 @@ const CLICK_SLOP = 0.004;
  * this is genuine free placement, not a fixed slot with drag-to-swap/
  * drag-to-return: the player explicitly asked to be able to move it around
  * the table, so a drop anywhere just persists that spot
- * (`setTablePosition`), no snap-back. Implemented with its own local
- * pointermove/pointerup listeners (a horizontal-plane raycast against the
- * camera, same technique `CameraRig`'s own table drags use) rather than
- * hooking into `CameraRig`'s global pointer handling вЂ” self-contained, no
- * changes needed to that already-large file for a single free-standing prop.
+ * (`setTablePosition`), no snap-back. It is carried in the hand like
+ * everything else on the table (`equipmentCarry`, `PourMotion`): set down
+ * on the table where it is let go, or onto the tray.
  */
 export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly tableWorldPosition: Position3 }) {
   const scene = useBunsenStandScene();
-  const { camera, gl } = useThree();
   const [hovered, setHovered] = useState(false);
-  const [dragging, setDragging] = useState(false);
+  const held = useHandStore((state) => state.held?.instanceId === EQUIPMENT_INSTANCE.stand);
 
   const tablePosition = useBunsenStandStorageStore((state) => state.tablePosition);
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
@@ -57,7 +59,6 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
   );
   const crackZone = useHeatingStore((state) => (state.phase === "cracked" ? state.crackZone : null));
   // At the stand the camera is right on it — no hover outline then.
-  const atStand = useStandStationStore((state) => state.viewing);
   // A carried test tube's own click handler decides release-vs-attach by
   // proximity to the ring alone (`InspectableTestTubeSlot`'s `nearRingRef`) вЂ”
   // it never checks whether the click ALSO hit the stand's own hitbox. Left
@@ -103,13 +104,10 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
   const groupRef = useRef<THREE.Group>(null);
   const worldY = tableWorldPosition[1] + counterSurfaceY + STAND_BASE_BOTTOM_OFFSET;
 
-  // Kept in sync with the live store position whenever NOT actively
-  // dragging (a fresh mount, or `tablePosition` changing from elsewhere) вЂ”
-  // while dragging, the imperative pointermove handler below owns
-  // `group.position` directly every frame, the same "don't fight the drag
-  // with a declarative prop" rule `DraggableWorkbenchReagent` follows.
-  useEffect(() => {
-    if (dragging) return;
+  // Kept at its spot on the table (carried, it moves inside: `PourMotion`).
+  // Before the first frame (a layout effect), so whatever flies in under it
+  // (`ArrivalFlight`) measures its start against where the stand really is.
+  useLayoutEffect(() => {
     const group = groupRef.current;
     if (!group) return;
     group.position.set(
@@ -117,81 +115,34 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
       worldY,
       tableWorldPosition[2] + tablePosition.z,
     );
-  }, [dragging, tablePosition, tableWorldPosition, worldY]);
+  }, [tablePosition, tableWorldPosition, worldY]);
 
+  // In the hand like everything else on the table (`equipmentCarry`): a
+  // press takes it — dragged or clicked — onto the tray or elsewhere on the
+  // table. A press on the tube in its clamp takes the tube instead: the
+  // stand's hitbox is all round it, so it gives way to the tube.
   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
-    // Deliberately does NOT mark itself as "pressed" for the held tube's own
-    // click-drop listener the way a jar's `handlePointerDown` does (see
-    // `markPickablePressed`'s doc) вЂ” the stand's hitbox covers the whole
-    // physical model, including right over `TubeRing`, and that listener's
-    // own ring-proximity check (`nearRingRef`) is what decides whether a
-    // click there attaches the tube instead of dropping it; marking this
-    // press "handled" here would short-circuit that check before it ever
-    // ran, breaking the attach gesture.
-    if (event.button !== 0 || tubeHeld) return;
+    if (event.button !== 0 || tubeHeld || onClampedTube(event)) return;
     event.stopPropagation();
-    const group = groupRef.current;
-    if (!group) return;
-
-    const raycaster = new THREE.Raycaster();
-    const dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-      new THREE.Vector3(0, 1, 0),
-      new THREE.Vector3(0, worldY, 0),
-    );
-    const dragPoint = new THREE.Vector3();
-    const rect = gl.domElement.getBoundingClientRect();
-    const ndcAt = (clientX: number, clientY: number) =>
-      new THREE.Vector2(
-        ((clientX - rect.left) / rect.width) * 2 - 1,
-        -((clientY - rect.top) / rect.height) * 2 + 1,
-      );
-
-    raycaster.setFromCamera(ndcAt(event.clientX, event.clientY), camera);
-    if (!raycaster.ray.intersectPlane(dragPlane, dragPoint)) return;
-    const planeOffset = group.position.clone().sub(dragPoint);
-    const pressedAt = group.position.clone();
-
-    setDragging(true);
-    document.body.style.cursor = "grabbing";
-
-    const handleMove = (moveEvent: PointerEvent) => {
-      raycaster.setFromCamera(ndcAt(moveEvent.clientX, moveEvent.clientY), camera);
-      if (!raycaster.ray.intersectPlane(dragPlane, dragPoint)) return;
-      group.position.set(dragPoint.x + planeOffset.x, worldY, dragPoint.z + planeOffset.z);
-    };
-    const handleUp = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-      setDragging(false);
-      document.body.style.cursor = "auto";
-      if (group.position.distanceTo(pressedAt) < CLICK_SLOP) {
-        // A click, not a drag: walk up to the stand.
-        group.position.copy(pressedAt);
-        if (!useHeatingStore.getState().active) useStandStationStore.getState().open();
-        return;
-      }
-      // Dropped on the tray on the table: onto it, with the lamp beside it (VL-017).
-      if (overTableTray(group.position)) {
-        group.position.copy(pressedAt);
-        standToTray("workbench");
-        return;
-      }
-      useBunsenStandStorageStore
-        .getState()
-        .setTablePosition(group.position.x - tableWorldPosition[0], group.position.z - tableWorldPosition[2]);
-    };
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
+    pressToTake(event.nativeEvent, () => takeEquipment("stand"));
   };
+
+  const arrival = useStandMotionStore((state) => (state.equipmentArrival?.what === "stand" ? state.equipmentArrival : null));
+  // Hovered: the silhouette outline (`NormalHoverOutline`); in the hand: the on-object rim.
+  useNormalHoverOutline({ root: instance, active: hovered && !held });
 
   return (
     <group ref={groupRef} rotation={[0, STAND_TABLE_YAW, 0]}>
+      {/* Set down off the tray: seen going from the hand into its place (`placementGhosts` shows where). */}
+      <ArrivalFlight arrival={arrival} fromFirstFrame>
+      <PourMotion instanceId={EQUIPMENT_INSTANCE.stand} pourPointHeight={0} keepCap obstacle={false}>
       <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={(hovered || dragging) && !atStand} />
+      <ReagentHoverRim object={instance} active={held} />
       <mesh
         geometry={hoverHitboxGeometry}
         onPointerDown={handlePointerDown}
         onPointerOver={(event) => {
+          if (onClampedTube(event)) return;
           event.stopPropagation();
           if (!tubeHeld) document.body.style.cursor = "grab";
           setHovered(true);
@@ -202,36 +153,37 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
           setHovered(false);
         }}
       >
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        <meshBasicMaterial visible={false} />
       </mesh>
       <StandStation location="workbench" away={AWAY_AT_TABLE} tube={clampedTube} crackZone={crackZone} />
+      </PourMotion>
+      </ArrivalFlight>
     </group>
   );
 }
 
 
-/** Table-local spot of a lamp on the table without the stand — where `StandStation` would put it. */
-const LONE_LAMP_OFFSET = lampLayout(AWAY_AT_TABLE).lamp;
 
-/**
- * The spirit lamp on the table while the stand is not (still in the cabinet,
- * or already in the hood). It stands where it will be beside the stand —
- * the spot it moves to when the stand arrives — and works the same: cap,
- * light, put out (`standTableActions`).
- */
+/** The spirit lamp on the table, in its own place — whether the stand is on the table or not. */
 export function LoneSpiritLampOnWorkbench({ tableWorldPosition }: { readonly tableWorldPosition: Position3 }) {
-  const tablePosition = useBunsenStandStorageStore((state) => state.tablePosition);
   const counterSurfaceY = useWorkbenchReagentAreaStore((state) => state.config.originY);
+  const arrival = useStandMotionStore((state) => (state.equipmentArrival?.what === "lamp" ? state.equipmentArrival : null));
   return (
     <group
       position={[
-        tableWorldPosition[0] + tablePosition.x,
+        tableWorldPosition[0] + LAMP_TABLE_SPOT.x,
         tableWorldPosition[1] + counterSurfaceY,
-        tableWorldPosition[2] + tablePosition.z,
+        tableWorldPosition[2] + LAMP_TABLE_SPOT.z,
       ]}
       rotation={[0, STAND_TABLE_YAW, 0]}
     >
-      <SpiritBurner position={LONE_LAMP_OFFSET} />
+      {/* Set down off the tray: seen going from the hand into its place. */}
+      <ArrivalFlight arrival={arrival} fromFirstFrame>
+        {/* Carried in the hand off the table (`equipmentCarry`). */}
+        <PourMotion instanceId={EQUIPMENT_INSTANCE.lamp} pourPointHeight={0} keepCap obstacle={false}>
+          <SpiritBurner position={[0, 0, 0]} place="workbench" />
+        </PourMotion>
+      </ArrivalFlight>
     </group>
   );
 }

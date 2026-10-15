@@ -4,6 +4,11 @@ import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStor
 import { HAND, useHandStore } from "../lib/useHandStore";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
+import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
+import { ControlGlyph, type ControlKey } from "./ControlGlyphs";
+// Golos Text (ParaType, SIL OFL 1.1) — built for on-screen Russian; self-hosted for the offline Tauri build.
+import "@fontsource/golos-text/500.css";
+import "@fontsource/golos-text/700.css";
 
 /** Below-right of the held item, so the caption never covers it. */
 const OFFSET_X = 26;
@@ -46,7 +51,12 @@ export function HeldItemHint() {
   return <div ref={boxRef} style={hintStyle} data-testid="held-hint" />;
 }
 
-type Row = readonly [keys: string, what: string];
+interface Row {
+  readonly controls: readonly ControlKey[];
+  /** Where/how, after the drawn control: «у лапки», «по предмету». */
+  readonly at?: string;
+  readonly what: string;
+}
 
 /**
  * The controls for what the player is doing right now, bottom right:
@@ -54,58 +64,78 @@ type Row = readonly [keys: string, what: string];
  */
 export function ControlsHint() {
   const held = useHandStore((state) => state.held);
+  const closeUpViewing = useTubeCloseUpStore((state) => state.viewing);
   const tabletOpen = useLaboratoryStore((state) => state.tabletOpen);
   const heating = useHeatingStore((state) => state.active);
   const target = useSceneInteractionStore((state) => state.activeTargetId);
   const phase = useSceneInteractionStore((state) => state.cabinetPhase);
   const locked = useSceneInteractionStore((state) => state.isPointerLocked);
+  const aimDisabled = useSceneInteractionStore((state) => state.aimDisabled);
 
   // The tablet and the heating panel carry their own instructions.
   if (tabletOpen || heating) return null;
 
+  // Kept to a word or two each: the drawn control already says most of it.
   let rows: readonly Row[];
   if (held?.kind === "workbench-tube") {
     rows = [
-      ["Мышь", "вести пробирку"],
-      ["ЛКМ у лапки", "закрепить в штативе"],
-      ["К склянке", "набрать реактив"],
-      ["Двойной ЛКМ", "положить на место"],
+      { controls: ["mouse"], what: "вести" },
+      { controls: ["lmb"], at: "у лапки", what: "закрепить" },
+      { controls: ["mouse"], at: "к склянке", what: "набрать" },
+      { controls: ["rmb"], what: "вернуть" },
     ];
   } else if (held) {
     rows = [
-      ["Мышь", "вести предмет"],
-      ["ЛКМ у цели", held.kind === "bottle" ? "налить в пробирку в лапке" : "закрепить или перелить"],
-      ["Двойной ЛКМ", "положить на место"],
-      ["Esc", "положить на место"],
+      { controls: ["mouse"], what: "вести" },
+      { controls: ["lmb"], at: "у цели", what: held.kind === "bottle" ? "налить" : "закрепить / перелить" },
+      { controls: ["rmb", "esc"], what: "вернуть" },
     ];
   } else if (target === "overview" && phase === "room") {
-    rows = locked
-      ? [
-          ["Мышь", "осмотреться"],
-          ["ЛКМ", "подойти к зоне под прицелом"],
-          ["ПКМ", "скрыть / показать прицел"],
-          ["Esc", "освободить курсор"],
-        ]
-      : [["ЛКМ", "продолжить осмотр"]];
+    rows = !locked
+      ? [{ controls: ["lmb"], what: "осмотр" }]
+      : aimDisabled
+        ? [
+            { controls: ["mouse"], what: "осмотр" },
+            { controls: ["rmb"], what: "вернуть прицел" },
+            { controls: ["esc"], what: "курсор" },
+          ]
+        : [
+            { controls: ["mouse"], what: "осмотр" },
+            { controls: ["lmb"], what: "подойти" },
+            { controls: ["rmb"], what: "убрать прицел" },
+            { controls: ["esc"], what: "курсор" },
+          ];
   } else if (phase === "inspecting" && target !== "fume-hood") {
     rows = [
-      ["ЛКМ по предмету", "взять на поднос"],
-      ["Назад / Esc", "к общему виду"],
+      { controls: ["lmb"], at: "по предмету", what: "на поднос" },
+      { controls: ["esc"], what: "к обзору" },
     ];
   } else {
-    rows = [
-      ["ЛКМ по предмету", "взять в руку"],
-      ["Наведите", "подсказка, что будет"],
-      ["Назад / Esc", "к общему виду"],
-    ];
+    rows = closeUpViewing
+      ? [{ controls: ["q", "esc"], what: "отойти от пробирки" }]
+      : [
+          { controls: ["lmb"], at: "по предмету", what: "взять" },
+          { controls: ["hover"], at: "наведите", what: "подсказка" },
+          { controls: ["q"], what: "ближе к пробирке" },
+          { controls: ["esc"], what: "к обзору" },
+        ];
   }
+
+  // E works everywhere in the lab; with something in the hand the rows stay about the hand.
+  const shown: readonly Row[] = held ? rows : [...rows, { controls: ["e"], what: "планшет" }];
 
   return (
     <div style={panelStyle} data-testid="controls-hint">
-      {rows.map(([keys, what]) => (
-        <div key={keys} style={rowStyle}>
-          <span style={keyStyle}>{keys}</span>
-          <span>{what}</span>
+      {shown.map((row) => (
+        <div key={`${row.controls.join("+")}:${row.what}`} style={rowStyle}>
+          <span style={controlsStyle}>
+            {row.controls.map((control) => (
+              <ControlGlyph key={control} control={control} />
+            ))}
+          </span>
+          <span style={textStyle}>
+            {row.at ? <span style={atStyle}>{row.at} </span> : null}— {row.what}
+          </span>
         </div>
       ))}
     </div>
@@ -132,24 +162,41 @@ const hintStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+/**
+ * No backing panel: the text sits straight on the scene, so it carries its own
+ * contrast — one colour throughout, a dark outline drawn under the glyphs
+ * (`paint-order`) and a soft shadow, readable over the white walls and the
+ * dark furniture alike. The drawn controls (`ControlGlyph`) get the same
+ * outline. Controls in one column, text in the next, both left-aligned.
+ */
 const panelStyle: CSSProperties = {
   position: "absolute",
-  right: 20,
+  right: 24,
   bottom: 64,
   zIndex: 10,
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-  padding: "9px 12px",
-  borderRadius: 10,
-  border: "1px solid rgba(56, 189, 248, 0.25)",
-  background: "rgba(8, 14, 26, 0.72)",
-  color: "#cbd5e1",
-  fontSize: 12,
-  lineHeight: 1.4,
+  display: "grid",
+  gridTemplateColumns: "auto auto",
+  columnGap: 12,
+  rowGap: 10,
+  alignItems: "center",
+  justifyItems: "start",
+  color: "#ffffff",
+  fontFamily: '"Golos Text", "Segoe UI", Arial, sans-serif',
+  fontSize: 18,
+  fontWeight: 500,
+  lineHeight: 1.35,
+  WebkitTextStroke: "3px rgba(0, 0, 0, 0.7)",
+  paintOrder: "stroke fill",
+  textShadow: "0 1px 4px rgba(0, 0, 0, 0.6)",
   pointerEvents: "none",
 };
 
-const rowStyle: CSSProperties = { display: "flex", gap: 10, justifyContent: "space-between" };
+/** `display: contents` puts each row's control and text straight into the panel's two grid columns. */
+const rowStyle: CSSProperties = { display: "contents" };
 
-const keyStyle: CSSProperties = { color: "#7dd3fc", fontWeight: 700, whiteSpace: "nowrap" };
+/** Centred in its column, so glyphs of different widths (mouse, Esc key) stack on one axis. */
+const controlsStyle: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, justifySelf: "center" };
+
+const textStyle: CSSProperties = { whiteSpace: "nowrap" };
+
+const atStyle: CSSProperties = { fontWeight: 700 };

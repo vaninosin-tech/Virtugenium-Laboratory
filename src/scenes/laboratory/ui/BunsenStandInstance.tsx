@@ -12,7 +12,7 @@ import { STAND_BASE_BOTTOM_OFFSET, useBunsenStandStorageStore } from "../lib/use
 import { standTrayRestPosition, useTrayReagentAreaStore } from "../lib/useTrayReagentAreaStore";
 import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
-import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useNormalHoverOutline } from "./NormalHoverOutline";
 
 
 
@@ -104,6 +104,9 @@ export function BunsenStandInstance({
     if (beginTake()) setHovered(false);
   };
 
+  // Hover: the silhouette outline (`NormalHoverOutline`).
+  useNormalHoverOutline({ root: instance, active: hovered && isCabinetInspectable });
+
   // Gone from the shelf wherever it is now — the hood included, or a second
   // stand stood in the cabinet after «Перенести».
   if (onTray || onWorkbench || onFumeHood) return null;
@@ -124,9 +127,8 @@ export function BunsenStandInstance({
       }}
     >
       <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered && isCabinetInspectable} />
       <mesh geometry={hoverHitboxGeometry}>
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        <meshBasicMaterial visible={false} />
       </mesh>
     </group>
   );

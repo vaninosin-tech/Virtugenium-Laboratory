@@ -121,8 +121,33 @@ function directionVector(target: CameraTarget): [number, number, number] {
   ];
 }
 
-/** Source-of-truth default for a preset, read from the real gameplay config — never fabricated. */
+/**
+ * Approved F8 poses (`F8_camera_objects_positions.md`, saved 2026-10-02) baked
+ * in as the defaults, so every fresh browser / the Tauri build opens with them
+ * without a localStorage save. A preset missing here falls back to `layoutDefault`.
+ */
+const APPROVED_POSES: Partial<Record<CalibrationPresetId, CalibrationPose>> = {
+  "table": { position: [0, 1.45, -2.000739], target: [0, 0.37618, 1.381552], fov: 55 },
+  "cabinet-acids": { position: [1.374342, 1.43575, 0.7], target: [3.104, 1.43575, 0.7], fov: 38 },
+  "cabinet-salts": { position: [1.374342, 1.43575, -0.7], target: [3.104, 1.43575, -0.7], fov: 38 },
+  "cabinet-bases": { position: [1.374342, 1.43575, -2.1], target: [3.104, 1.43575, -2.1], fov: 38 },
+  "ppe-cabinet": { position: [-2.191081, 1.3, -0.85], target: [-4.545, 1.3, -0.85], fov: 45 },
+  "cabinet-simple": { position: [0.3, 1.43575, 0.074342], target: [0.3, 1.43575, 1.804], fov: 38 },
+  "cabinet-oxides": { position: [1.374342, 1.43575, 2.1], target: [3.104, 1.43575, 2.1], fov: 38 },
+  "cabinet-glassware": { position: [-1.1, 1.43575, 0.074342], target: [-1.1, 1.43575, 1.804], fov: 38 },
+  "fume-hood": { position: [-3.320689, 1.65, 0.5], target: [-6.12, -0.7, 0.5], fov: 45 },
+  "fume-hood-staging": { position: [-1.970689, 1.45, 0.5], target: [-5.22, 1.45, 0.5], fov: 45 },
+  "cabinet-lab-equipment": { position: [-2.5, 1.43575, 0.074342], target: [-2.5, 1.43575, 1.804], fov: 38 },
+};
+
+/** Default pose for a preset: the approved F8 pose if there is one, otherwise derived from `layout.ts`. */
 function sourceDefault(id: CalibrationPresetId): CalibrationPose {
+  const approved = APPROVED_POSES[id];
+  return approved ? clonePose(approved) : layoutDefault(id);
+}
+
+/** Pose derived from the real gameplay config in `layout.ts` — never fabricated. */
+function layoutDefault(id: CalibrationPresetId): CalibrationPose {
   if (id === "table") {
     const t = CAMERA_TARGETS.table;
     const [dx, dy, dz] = directionVector(t);

@@ -17,7 +17,6 @@ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { Select } from "@react-three/postprocessing";
 import { BunsenStandInstance } from "./BunsenStandInstance";
 import { SpiritLampShelfInstance } from "./SpiritLampItem";
-import { HoverFresnelRim } from "./HoverFresnelRim";
 import { LabTestTubeCabinetInstance } from "./LabTestTubeCabinetInstance";
 import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
 import { computeTubeSlotPosition, TEST_TUBE_TRAY_CAPACITY } from "../lib/useTestTubeStorageStore";
@@ -366,7 +365,6 @@ export function ReagentCabinetInstance({ cabinet }: { readonly cabinet: CabinetD
           onPointerLeave={() => controlPanelScreen.handlePointerLeave()}
         />
       </Select>
-      <HoverFresnelRim object={instance} active={isHovered} />
       {reagentIds.map((reagentId, index) => (
         <ReagentContainerInstance
           key={reagentId}

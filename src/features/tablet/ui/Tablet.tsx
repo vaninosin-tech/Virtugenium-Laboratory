@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+import { mustChooseExperiment, useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+import { useLabBootStore } from "../../lab-boot/lib/useLabBootStore";
+import { isTypingKeyboardUp } from "../lib/typingKeyboards";
 import { TabletIcon } from "./TabletIcon";
 import { TabletOverlay } from "./TabletOverlay";
 import "./tabletTransitions.css";
@@ -100,6 +102,32 @@ export function Tablet({ onReturnToGame }: { readonly onReturnToGame?: () => voi
     openTablet(selectedExperimentId ? "stages" : "tasks");
   };
 
+  // E opens and closes the tablet from anywhere in the lab — same rules as
+  // its own buttons: it can't be closed before an experiment is chosen, and
+  // nothing happens while the loading screen is up. By physical key, so it is
+  // the same key (У) on the Russian layout; never while something is being
+  // typed (a text field, or one of the tablet's on-screen keyboards).
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "KeyE" || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      if (isTypingKeyboardUp() || isEditable(event.target)) return;
+      if (useLabBootStore.getState().phase !== "done") return;
+      event.preventDefault();
+      const lab = useLaboratoryStore.getState();
+      if (!lab.tabletOpen) {
+        if (openingLockRef.current) return;
+        lab.openTablet(lab.selectedExperimentId ? "stages" : "tasks");
+        return;
+      }
+      if (mustChooseExperiment(lab)) return;
+      // The key press is the user activation Pointer Lock needs to come back.
+      onReturnToGame?.();
+      lab.closeTablet();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onReturnToGame]);
+
   return (
     <>
       {holoMounted ? (
@@ -123,4 +151,8 @@ export function Tablet({ onReturnToGame }: { readonly onReturnToGame?: () => voi
       ) : null}
     </>
   );
+}
+
+function isEditable(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || target.matches("input, textarea, select"));
 }

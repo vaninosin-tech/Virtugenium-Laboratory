@@ -5,7 +5,10 @@ import * as THREE from "three";
 import type { Position3 } from "../lib/layout";
 import { HAND, useHandStore } from "../lib/useHandStore";
 import { constrainOnWorktop, registerWorktopObstacle, shownInWorld } from "../lib/worktopBounds";
-import { publishGhostShape } from "../lib/handGhost";
+import { HAND_GHOST, publishGhostShape } from "../lib/handGhost";
+import { pourPose } from "../lib/pourPose";
+import { registerPourSource } from "../lib/pourSources";
+import type { TubeLocation } from "../lib/useTestTubeStorageStore";
 import { ReagentHoverRim } from "./ReagentHoverRim";
 import { PourStream } from "./PourStream";
 import {
@@ -19,6 +22,32 @@ import {
 /** How high a flying tube arcs over whatever stands between rack and clamp. */
 const ARC_LIFT = 0.07;
 const UP = new THREE.Vector3(0, 1, 0);
+const IDENTITY = new THREE.Quaternion();
+
+const partBox = new THREE.Box3();
+/**
+ * The box of what is drawn of `root` — its visible meshes only. Not
+ * `Box3.setFromObject`, which counts hidden helpers too: the pour stream's
+ * drops wait hidden at full size under the bottle (`PourStream`) and made a
+ * bottle a metre wide — its pour stood off, its obstacle filled the table.
+ * Nor instanced pools: a reacting tube's bubbles made the clamp two metres wide.
+ */
+function drawnBox(root: THREE.Object3D, box: THREE.Box3): THREE.Box3 {
+  box.makeEmpty();
+  root.updateWorldMatrix(true, true);
+  root.traverse((object) => {
+    // Instanced pools (a tube's reaction bubbles): their geometry's box is one unit particle, not where they are.
+    if (!(object instanceof THREE.Mesh) || object instanceof THREE.InstancedMesh) return;
+    for (let at: THREE.Object3D | null = object; at && at !== root.parent; at = at.parent) if (!at.visible) return;
+    const material = object.material as THREE.Material | THREE.Material[];
+    if (!Array.isArray(material) && !material.visible) return;
+    if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+    box.union(partBox.copy(object.geometry.boundingBox!).applyMatrix4(object.matrixWorld));
+  });
+  return box;
+}
+/** How late a `fromFirstFrame` flight may still begin after it was asked for. */
+const LATE_MOUNT_MS = 1000;
 
 const smooth = (t: number) => THREE.MathUtils.smoothstep(THREE.MathUtils.clamp(t, 0, 1), 0, 1);
 
@@ -27,19 +56,38 @@ const smooth = (t: number) => THREE.MathUtils.smoothstep(THREE.MathUtils.clamp(t
  * rack slot — from where it was (`arrival.world`), along an arc. Wrap the
  * tube in it at its RESTING place: this group's own origin is where it lands.
  * Runs off the clock, so it plays correctly even if it mounts a frame late.
+ *
+ * @param fromFirstFrame start the flight's clock when it is first drawn, not
+ *   when it was asked for — for what mounts only once it has arrived (the
+ *   stand, the lamp set down off the tray): a slow mount must not eat the
+ *   start of the flight. A flight asked for over a second ago is not played.
  */
-export function ArrivalFlight({ arrival, children }: { readonly arrival: TubeArrival | null; readonly children: ReactNode }) {
+export function ArrivalFlight({
+  arrival,
+  fromFirstFrame = false,
+  children,
+}: {
+  readonly arrival: TubeArrival | null;
+  readonly fromFirstFrame?: boolean;
+  readonly children: ReactNode;
+}) {
   const groupRef = useRef<THREE.Group>(null);
-  const from = useRef<{ at: number; local: THREE.Vector3; up: THREE.Vector3 } | null>(null);
+  const from = useRef<{ at: number; local: THREE.Vector3; up: THREE.Vector3; turn: THREE.Quaternion | null } | null>(null);
+  const started = useRef<{ at: number; when: number } | null>(null);
 
   useFrame(() => {
     const group = groupRef.current;
     const parent = group?.parent;
     if (!group || !parent) return;
-    const elapsed = arrival ? Date.now() - arrival.at : Infinity;
+    if (fromFirstFrame && arrival && started.current?.at !== arrival.at) {
+      started.current = { at: arrival.at, when: Date.now() - arrival.at < TUBE_FLIGHT_MS + LATE_MOUNT_MS ? Date.now() : -Infinity };
+    }
+    const startedAt = fromFirstFrame && arrival ? started.current!.when : arrival?.at ?? 0;
+    const elapsed = arrival ? Date.now() - startedAt : Infinity;
     if (!arrival || elapsed >= TUBE_FLIGHT_MS) {
       if (from.current) {
         group.position.set(0, 0, 0);
+        group.quaternion.identity();
         from.current = null;
       }
       return;
@@ -50,26 +98,21 @@ export function ArrivalFlight({ arrival, children }: { readonly arrival: TubeArr
       // World up, in the parent's frame (it may be turned or scaled).
       const origin = parent.worldToLocal(new THREE.Vector3());
       const up = parent.worldToLocal(UP.clone()).sub(origin);
-      from.current = { at: arrival.at, local, up };
+      // How it was turned there, in the parent's frame — it turns into place as it flies.
+      const turn = arrival.quaternion
+        ? parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(new THREE.Quaternion(...arrival.quaternion))
+        : null;
+      from.current = { at: arrival.at, local, up, turn };
     }
     const t = smooth(elapsed / TUBE_FLIGHT_MS);
     group.position.copy(from.current.local).multiplyScalar(1 - t);
     group.position.addScaledVector(from.current.up, ARC_LIFT * Math.sin(Math.PI * t));
+    if (from.current.turn) group.quaternion.slerpQuaternions(from.current.turn, IDENTITY, t);
   });
 
   return <group ref={groupRef}>{children}</group>;
 }
 
-/** Tip of a pouring bottle (radians): its neck well down over the tube's mouth. */
-const POUR_TILT = 1.6;
-/**
- * The gap between the tipped bottle's lip — its lowest edge, a neck's radius
- * below the middle of its mouth (`BottleRest.neckRadius`) — and the tube's
- * rim while pouring (VL-018): the neck stays over the tube, never in it.
- */
-const POUR_LIP_GAP = 0.008;
-/** …and higher while it comes over and goes back, clear of the clamp. */
-const APPROACH_ABOVE_MOUTH = 0.05;
 /** How high a bottle arcs on its way over from its place: above the tube's mouth and the clamp. */
 const TRAVEL_LIFT = 0.12;
 /** Phases of a pour, as fractions of `POUR_MS`. */
@@ -83,14 +126,6 @@ const CAP_ASIDE = 0.085;
 const CARRY_FOLLOW_RATE = 20;
 /** Seconds for a taken item to fly from its place to the hand; after that it follows the mouse 1:1. */
 const FLY_IN_SECONDS = 0.22;
-/** How fast an item snaps to its target near the stand, and off again (1/s, exponential). */
-const SNAP_RATE = 16;
-/** A tube brought to the empty clamp hovers this far above its clamped place, ready to drop in. */
-const CLAMP_HOVER = 0.04;
-/** Gap between a bottle snapped beside the clamped tube and the tube. */
-const READY_GAP = 0.02;
-/** The tube in the clamp's half-width: a bottle beside it stands this much further off. */
-const CLAMPED_TUBE_RADIUS = 0.011;
 /** Seconds for the cap to come off or go back on. */
 const CAP_SECONDS = 0.35;
 
@@ -137,19 +172,35 @@ export function PourMotion({
   pourPointHeight,
   position,
   keepCap = false,
+  inert = false,
+  obstacle = true,
+  pourSource,
+  ghostWhole = false,
   children,
 }: {
   readonly instanceId: string;
   readonly pourPointHeight: number;
   /** Carried capped — taken off the tray only to be set down, not to pour (VL-017). */
   readonly keepCap?: boolean;
+  /**
+   * A stand-in copy that is not the real thing yet (a tray bottle prewarmed on
+   * the bench, `WorkbenchReagentDisplayArea`): never carried, never pours —
+   * only the copy the player took moves with the hand and speaks for it (`HAND`).
+   */
+  readonly inert?: boolean;
+  /** In the way of what else is carried (a circle round it, VL-018) — off for what has its own (the stand, the lamp). */
+  readonly obstacle?: boolean;
+  /** Its outline is all it is made of, even holding a tube (the clamp) — not just a container's glass. */
+  readonly ghostWhole?: boolean;
+  /** A bottle standing at a place: a tube held up to it is poured into (`pourSources`). */
+  readonly pourSource?: { readonly reagentId: string; readonly location: TubeLocation };
   readonly position?: Position3;
   readonly children: ReactNode;
 }) {
   const { camera } = useThree();
   const groupRef = useRef<THREE.Group>(null);
-  const pour = useStandMotionStore((state) => (state.pour?.instanceId === instanceId ? state.pour : null));
-  const held = useHandStore((state) => state.held?.instanceId === instanceId);
+  const pour = useStandMotionStore((state) => (!inert && state.pour?.instanceId === instanceId ? state.pour : null));
+  const held = useHandStore((state) => !inert && state.held?.instanceId === instanceId);
   const restRef = useRef<BottleRest | null>(null);
   const motion = useRef({
     away: false,
@@ -166,8 +217,6 @@ export function PourMotion({
     homeArc: 0.05,
     flyIn: 1,
     flyStart: new THREE.Vector3(),
-    snap: 0,
-    snapGoal: new THREE.Vector3(),
     pourAt: 0,
     pourFrom: new THREE.Vector3(),
     pourFromPlace: true,
@@ -179,10 +228,9 @@ export function PourMotion({
       right: new THREE.Vector3(),
       side: new THREE.Vector3(),
       axis: new THREE.Vector3(),
-      tilt: new THREE.Quaternion(),
+      pourQuat: new THREE.Quaternion(),
       worldQuat: new THREE.Quaternion(),
       target: new THREE.Vector3(),
-      point: new THREE.Vector3(),
       from: new THREE.Vector3(),
       parentQuat: new THREE.Quaternion(),
       onBottle: new THREE.Vector3(),
@@ -195,6 +243,7 @@ export function PourMotion({
   // Standing on the worktop, it is in the way of whatever else is carried
   // there (VL-018): a circle round it, measured once at rest.
   useEffect(() => {
+    if (!obstacle) return;
     const footprint = { measured: false, dx: 0, dz: 0, r: 0 };
     const at = new THREE.Vector3();
     const box = new THREE.Box3();
@@ -205,7 +254,7 @@ export function PourMotion({
         group.getWorldPosition(at);
         if (!footprint.measured) {
           if (motion.current.away) return [];
-          box.setFromObject(group);
+          drawnBox(group, box);
           if (box.isEmpty()) return [];
           const centre = box.getCenter(new THREE.Vector3());
           const size = box.getSize(new THREE.Vector3());
@@ -214,7 +263,7 @@ export function PourMotion({
         return [{ kind: "circle", x: at.x + footprint.dx, z: at.z + footprint.dz, r: footprint.r }];
       },
     });
-  }, [instanceId]);
+  }, [instanceId, obstacle]);
 
   /** Measures the bottle at rest — its mouth, where its cap goes — before it first leaves its place. */
   const measure = (group: THREE.Group) => {
@@ -224,7 +273,7 @@ export function PourMotion({
     });
     const cap = found as THREE.Object3D | null;
     s.right.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
-    const size = new THREE.Box3().setFromObject(group).getSize(new THREE.Vector3());
+    const size = drawnBox(group, new THREE.Box3()).getSize(new THREE.Vector3());
     const radius = Math.max(size.x, size.z) / 2;
     if (!cap) {
       restRef.current = {
@@ -258,6 +307,28 @@ export function PourMotion({
     };
   };
 
+  // A tube held up to it is poured into: it says where it is and how it pours (`pourSources`).
+  const sourceReagent = pourSource?.reagentId;
+  const sourceLocation = pourSource?.location;
+  useEffect(() => {
+    if (inert || !sourceReagent || !sourceLocation) return;
+    const group = groupRef.current;
+    if (!group) return;
+    return registerPourSource({
+      instanceId,
+      reagentId: sourceReagent,
+      location: sourceLocation,
+      root: group,
+      geometry: () => {
+        if (motion.current.away || !shownInWorld(group)) return null;
+        if (!restRef.current) measure(group);
+        return restRef.current;
+      },
+    });
+    // `measure` reads only refs and the camera: stable for this bottle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instanceId, inert, sourceReagent, sourceLocation]);
+
   /** The side of the tube, as the player sees it, that the stand's rod is not on — into `s.side`, `s.axis`. */
   const sideAwayFromRod = (mouth: THREE.Vector3) => {
     s.right.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize();
@@ -286,7 +357,9 @@ export function PourMotion({
     group.getWorldQuaternion(s.restQuat);
 
     const elapsed = pour ? Date.now() - pour.at : Infinity;
-    const pouring = !!pour && elapsed < POUR_MS && CLAMP_TUBE_MOUTH.valid;
+    // Into the tube in the clamp — or into the tube in the hand, held up to it.
+    const intoHand = pour?.into === "hand";
+    const pouring = !!pour && elapsed < POUR_MS && (intoHand ? HAND.mouthValid : CLAMP_TUBE_MOUTH.valid);
     if (!m.away && !held && !pouring) {
       // At its place and staying there.
       m.cur.copy(s.rest);
@@ -309,8 +382,13 @@ export function PourMotion({
 
     if (pouring) {
       const k = elapsed / POUR_MS;
-      const mouth = CLAMP_TUBE_MOUTH.point;
-      sideAwayFromRod(mouth);
+      const mouth = intoHand ? HAND.mouth : CLAMP_TUBE_MOUTH.point;
+      if (intoHand) {
+        // It comes to the tube from its own side.
+        s.side.subVectors(s.rest, mouth).setY(0);
+        if (s.side.lengthSq() < 1e-8) s.side.set(1, 0, 0);
+        s.side.normalize();
+      } else sideAwayFromRod(mouth);
       if (m.pourAt !== pour.at) {
         // The pour starts from wherever the item is: its place, or snapped beside the tube.
         m.pourAt = pour.at;
@@ -319,18 +397,8 @@ export function PourMotion({
       }
 
       const tip = k < COME ? 0 : k < TIP ? smooth((k - COME) / (TIP - COME)) : k < HOLD ? 1 : k < UNTIP ? 1 - smooth((k - HOLD) / (UNTIP - HOLD)) : 0;
-      // Tipped, its lip hangs a neck's radius below the middle of its mouth.
-      const pourAbove = r.neckRadius * Math.sin(Math.min(POUR_TILT, Math.PI / 2) * tip) + POUR_LIP_GAP;
-      const above = THREE.MathUtils.lerp(Math.max(APPROACH_ABOVE_MOUTH, pourAbove + 0.02), pourAbove, tip);
-      // Tipping towards the tube turns the bottle's up about `axis` by −angle.
-      s.tilt.setFromAxisAngle(s.axis, -POUR_TILT * tip);
-      // The bottle sits so that its (tipped) mouth is just over the tube's, on the bottle's side.
-      s.point.copy(r.mouthOffset).applyQuaternion(s.tilt);
-      s.target.copy(mouth).addScaledVector(UP, above).addScaledVector(s.side, 0.004).sub(s.point);
-      // Upright, its mouth over the tube's would put its body round the tube
-      // (VL-018): until it is tipped it stands beside the tube instead, and
-      // swings over only as it tips.
-      s.target.addScaledVector(s.side, (r.radius + READY_GAP + CLAMPED_TUBE_RADIUS) * (1 - tip));
+      // Beside the tube upright, then tipped over its mouth (`pourPose` — the outline before it shows the same).
+      pourPose(r, s.restQuat, mouth, s.side, tip, s.target, s.pourQuat);
 
       if (k < UNTIP) {
         // Over to the tube from where it was — its place (arcing over), or right beside it.
@@ -341,43 +409,39 @@ export function PourMotion({
       } else {
         m.cur.copy(s.target);
       }
-      m.curQuat.copy(s.tilt).multiply(s.restQuat);
+      m.curQuat.copy(s.pourQuat);
     } else if (held) {
       if (!m.wasHeld) {
         // Where it stood, for its outline there while it is carried (VL-018).
-        publishGhostShape(group);
-        // Just taken: a short flight to the hand, then it IS the hand.
+        publishGhostShape(group, { whole: ghostWhole });
+        // Just taken: a short flight to the hand, then it IS the hand — from
+        // where it really was when taken from elsewhere (out of the clamp).
         m.flyIn = 0;
-        m.flyStart.copy(m.cur);
-        m.snap = 0;
+        m.flyStart.copy(HAND.takenFromValid ? HAND.takenFrom : m.cur);
+        HAND.takenFromValid = false;
         m.homeT = -1;
       }
       m.flyIn = Math.min(1, m.flyIn + delta / FLY_IN_SECONDS);
+      // It goes where the hand takes it, freely — what it would do near the
+      // stand shows as its outline there (`placementGhosts`), never by pulling it.
       const free = HAND.valid ? HAND.point : s.rest;
-      // Near the stand it snaps into a ready pose (VL-015): a tube over the
-      // empty clamp, a bottle (or a tube to pour) upright beside the clamped
-      // tube, mouth level with its mouth — no aiming at a 2 cm opening.
-      const aim = useHandStore.getState().aim;
-      if (aim && CLAMP_TUBE_MOUTH.valid) {
-        const mouth = CLAMP_TUBE_MOUTH.point;
-        if (aim.part === "clamp") {
-          m.snapGoal.copy(mouth).sub(r.mouthOffset).addScaledVector(UP, CLAMP_HOVER);
-        } else {
-          sideAwayFromRod(mouth);
-          m.snapGoal
-            .copy(mouth)
-            .addScaledVector(s.side, r.radius + READY_GAP)
-            .sub(r.mouthOffset)
-            .addScaledVector(UP, READY_GAP);
-        }
+      if (CLAMP_TUBE_MOUTH.valid) {
+        // Where it would be pouring into the clamped tube, tipped over its mouth —
+        // for its outline there while it is carried (`placementGhosts`).
+        sideAwayFromRod(CLAMP_TUBE_MOUTH.point);
+        pourPose(r, s.restQuat, CLAMP_TUBE_MOUTH.point, s.side, 1, HAND_GHOST.pourPosition, HAND_GHOST.pourQuaternion);
+        HAND_GHOST.posesValid = true;
       }
-      m.snap = THREE.MathUtils.lerp(m.snap, aim ? 1 : 0, 1 - Math.exp(-SNAP_RATE * delta));
-      s.target.copy(free).lerp(m.snapGoal, smooth(m.snap));
+      s.target.copy(free);
       if (m.flyIn < 1) m.cur.copy(m.flyStart).lerp(s.target, smooth(m.flyIn));
       // Then after the hand, a touch behind it: a jerk of the mouse is not a jerk of the bottle (VL-018).
       else m.cur.lerp(s.target, 1 - Math.exp(-CARRY_FOLLOW_RATE * delta));
       m.curQuat.copy(s.restQuat);
       HAND.itemPos.copy(m.cur);
+      HAND.itemQuat.copy(m.curQuat);
+      // Its mouth, upright as it is carried — what a bottle pours into, if it is a tube.
+      HAND.mouth.copy(m.cur).add(r.mouthOffset);
+      HAND.mouthValid = true;
       HAND.itemPosValid = true;
     } else {
       // On its way home (VL-018): up in a low arc, across, and set down

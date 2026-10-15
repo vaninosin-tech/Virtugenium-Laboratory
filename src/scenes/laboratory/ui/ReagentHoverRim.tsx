@@ -2,17 +2,16 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 
-// Same blue as the shared cabinet Outline (`Laboratory.tsx`), scaled up
-// since AdditiveBlending needs real punch to read against bright white lab
-// geometry — this IS the whole hover cue for reagents now (postprocessing
-// `Outline`/`Select` proved too fragile: transparent-glass depth-write
-// quirks, pixelated at low intensity, garish at high intensity, and hard to
-// verify live at all given this session's environment issues). A simple
-// on-object glow has none of those dependencies — it just renders.
+import { NO_OUTLINE } from "./NormalHoverOutline";
+
+// Same blue as the hover outline (`HoverOutline`), scaled up since
+// AdditiveBlending needs real punch to read against bright white lab
+// geometry. Plain hover is the silhouette outline (`NormalHoverOutline`);
+// this on-object glow is for what is carried in the hand.
 const HOVER_RIM_COLOR = new THREE.Color("#1D4ED8").multiplyScalar(3);
 const REFUSED_RIM_COLOR = new THREE.Color("#DC2626").multiplyScalar(3);
 
-/** Local-space transform of `node` relative to `root`, from each ancestor's own `.matrix` — same technique as `HoverFresnelRim`. */
+/** Local-space transform of `node` relative to `root`, from each ancestor's own `.matrix`. */
 function relativeMatrix(node: THREE.Object3D, root: THREE.Object3D): THREE.Matrix4 {
   const chain: THREE.Matrix4[] = [];
   for (let current: THREE.Object3D | null = node; current && current !== root; current = current.parent) {
@@ -65,8 +64,7 @@ function createRimMaterial(opacity: number, color: THREE.Color = HOVER_RIM_COLOR
 const rimMaterial = createRimMaterial(DEFAULT_RIM_OPACITY);
 
 /**
- * Same non-destructive Fresnel-rim technique as `HoverFresnelRim`, but for a
- * reagent container: every VISIBLE mesh in the instance joins the rim
+ * A non-destructive Fresnel rim over a model: every VISIBLE mesh in the instance joins the rim
  * (glass, cap, label, and contents when shown) so hover reads as one
  * unified silhouette around the whole bottle/jar, not a per-part effect —
  * unlike the cabinet rim, there's no structural-shell name filter here
@@ -144,6 +142,7 @@ export function ReagentHoverRim({
         const rim = new THREE.Mesh(child.geometry, material);
         rim.renderOrder = 10;
         rim.raycast = () => {};
+        rim.userData[NO_OUTLINE] = true;
         caps.push({ cap: child, seat: child.position.clone(), rim });
         return;
       }
@@ -163,6 +162,8 @@ export function ReagentHoverRim({
         // as "nearest hit", reintroducing the same flicker the hitbox
         // exists to prevent.
         rim.raycast = () => {};
+        // Riding inside the model (a cap, `GlassRim`'s glass): never part of its hover outline (`NormalHoverOutline`).
+        rim.userData[NO_OUTLINE] = true;
         g.add(rim);
       }
     });

@@ -14,6 +14,11 @@ import {
 } from "../lib/useTestTubeStorageStore";
 import { InspectableTestTubeSlot } from "./InspectableTestTubeSlot";
 import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
+import { WORKBENCH_RACK } from "../lib/tableTray";
+import { pressToTake } from "../lib/pressToTake";
+import { takeIntoHand, useHandStore } from "../lib/useHandStore";
+import { standBusy } from "../lib/useStandMotionStore";
+import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 
 const INSTANCE_ID = "workbench-test-tube-rack";
 
@@ -27,6 +32,8 @@ const RETURN_POSITION_EPSILON = 0.01;
 const WORKBENCH_TUBE_SLOT_INDICES = Array.from({ length: TEST_TUBE_TRAY_CAPACITY }, (_, index) => index);
 /** Computed once, module scope — a stable array reference so passing these as each slot's `position` prop never fights the slot's own imperative hover-raise (see `InspectableTestTubeSlot`'s doc). */
 const TUBE_SLOT_LOCAL_OFFSETS = WORKBENCH_TUBE_SLOT_INDICES.map((index) => computeTubeSlotLocalOffset(index));
+/** How near a tube (on screen) a press must land to take that tube rather than bring the rack up. */
+const TUBE_PICK_PX = 14;
 
 type Phase = "atRest" | "pickupLift" | "inspecting" | "returnMove" | "returnLower";
 
@@ -231,6 +238,48 @@ export function WorkbenchTestTubeRackInstance() {
     group.scale.setScalar(THREE.MathUtils.damp(group.scale.x, stageScaleRef.current, MOVE_DAMPING, delta));
   });
 
+  // A press right on a tube takes it into the hand (VL-018) — dragged, or
+  // clicked and carried; a press on the rack itself, away from its tubes,
+  // still brings the rack up to look at.
+  const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+    const group = groupRef.current;
+    if (!group || anyInspected || event.button !== 0) return;
+    if (useHandStore.getState().held || useTestTubeDragStore.getState().heldInstanceId !== null) return;
+    // The tube nearest the cursor on screen — the rack's hitbox is one box,
+    // and the tubes stick up out of it.
+    const count = useTestTubeStorageStore.getState().workbenchTestTubes.length;
+    const stand = useBunsenStandStorageStore.getState();
+    const clamped = stand.onWorkbench ? stand.attachedTubeSlotIndex : null;
+    const rect = gl.domElement.getBoundingClientRect();
+    const at = new THREE.Vector3();
+    let index = -1;
+    let best = TUBE_PICK_PX;
+    for (let i = 0; i < count; i += 1) {
+      if (i === clamped) continue;
+      const [x, y, z] = TUBE_SLOT_LOCAL_OFFSETS[i];
+      for (const up of [0.02, 0.07, 0.12]) {
+        group.localToWorld(at.set(x, y + up, z)).project(camera);
+        const px = rect.left + ((at.x + 1) / 2) * rect.width;
+        const py = rect.top + ((1 - at.y) / 2) * rect.height;
+        const d = Math.hypot(px - event.nativeEvent.clientX, py - event.nativeEvent.clientY);
+        if (d < best) {
+          best = d;
+          index = i;
+        }
+      }
+    }
+    if (index < 0) return;
+    event.stopPropagation();
+    pressToTake(event.nativeEvent, () => {
+      if (useHandStore.getState().held || standBusy()) return false;
+      const instanceId = `workbench-tube-slot-${index}`;
+      takeIntoHand({ kind: "workbench-tube", index, instanceId }, [0, 0, 0]);
+      useTestTubeDragStore.setState({ heldInstanceId: instanceId, pendingPickInstanceId: null });
+      setHovered(false);
+      return true;
+    });
+  };
+
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     if (anyInspected) return; // only one thing inspected at a time
@@ -294,14 +343,13 @@ export function WorkbenchTestTubeRackInstance() {
 
   const workbenchTubeCount = useTestTubeStorageStore((state) => state.workbenchTestTubes.length);
   const anyTubeHeld = useTestTubeDragStore((state) => state.heldInstanceId !== null);
-  // While a tube is being carried, `isNearHolder` (a live 3D distance check
-  // — see its own doc) drives the highlight instead of R3F pointer hover:
-  // the TUBE is what's moving while the cursor may sit still, and hover
-  // events only fire on an actual mouse move, so they either got stuck lit
-  // far from the rack or never lit up right next to it. Distance is
-  // reevaluated every frame regardless of mouse movement, so it can't go
-  // stale the way hover did.
-  const isNearHolder = useTestTubeDragStore((state) => state.isNearHolder);
+  // The rack the tubes go back into, for their outlines there while one is carried (`placementGhosts`).
+  useEffect(() => {
+    WORKBENCH_RACK.object = groupRef.current;
+    return () => {
+      WORKBENCH_RACK.object = null;
+    };
+  }, []);
 
   return (
     <LabTestTubeRackInstance
@@ -310,6 +358,7 @@ export function WorkbenchTestTubeRackInstance() {
       rotation={rotationArray}
       scale={config.scale}
       onClick={handleClick}
+      onPointerDown={handlePointerDown}
       onPointerOver={(event) => {
         event.stopPropagation();
         if (!anyInspected && !anyTubeHeld) setHovered(true);
@@ -318,7 +367,8 @@ export function WorkbenchTestTubeRackInstance() {
         event.stopPropagation();
         setHovered(false);
       }}
-      hoverActive={anyTubeHeld ? isNearHolder : hovered && !anyInspected}
+      // While a tube is carried the rack is not lit: the tube's outline in its hole shows where it goes (`placementGhosts`).
+      hoverActive={!anyTubeHeld && hovered && !anyInspected}
     >
       {/* Tubes already taken from the glassware cabinet, standing in this
           SAME rack — rendered as children so they fly to the inspection

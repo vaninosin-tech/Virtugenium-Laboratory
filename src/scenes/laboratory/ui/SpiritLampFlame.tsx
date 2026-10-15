@@ -3,6 +3,7 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { flameAirflow, flameHotZone } from "../lib/flameAirflow";
 import { EQUIPMENT } from "../lib/layout";
+import { LAMP_FLAME } from "../lib/lampFlame";
 import { useBurnerStore } from "../lib/useBurnerStore";
 import { useFumeHoodControlsStore } from "../lib/useFumeHoodControlsStore";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
@@ -195,7 +196,7 @@ export function SpiritLampFlame({ strength, baseY, height }: SpiritLampFlameProp
         zone.point.y,
         axis.z * height * airflow.heightScale * 0.8);
       mesh.parent?.localToWorld(hotCenter);
-      // VL-020 (not yet committed) publishes this tilted hot spot as LAMP_FLAME.point.
+      LAMP_FLAME.point.copy(hotCenter);
     }
     material.uniforms.uTime.value = t;
     // Grows from the wick when lit, shrinks into it when smothered.

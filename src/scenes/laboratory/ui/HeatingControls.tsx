@@ -83,19 +83,20 @@ export function HeatingControls() {
   const grab = useHeatingStore((state) => state.grab);
   const exit = useHeatingStore((state) => state.exit);
 
+  const target = useHeatingStore((state) => state.target);
   const standInHood = useBunsenStandStorageStore((state) => state.onFumeHood);
-  const hoodTubes = useTestTubeStorageStore((state) =>
-    standInHood ? state.fumeHoodTestTubes : state.workbenchTestTubes,
-  );
+  const inHood = target.mode === "hand" ? target.location === "fumeHood" : standInHood;
+  const hoodTubes = useTestTubeStorageStore((state) => (inHood ? state.fumeHoodTestTubes : state.workbenchTestTubes));
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
+  // The tube in the flame: the clamped one, or the one heated in the hand (VL-020).
+  const heatedIndex = target.mode === "hand" ? target.index : attachedTubeSlotIndex;
 
   const trackRef = useRef<SVGSVGElement>(null);
   const draggingRef = useRef(false);
 
   // Contents are still a single reagent id per tube (`StoredTestTube`), so a
   // solid on its own means nothing has been poured onto it yet.
-  const clampedTube =
-    attachedTubeSlotIndex === null ? undefined : hoodTubes[attachedTubeSlotIndex];
+  const clampedTube = heatedIndex === null ? undefined : hoodTubes[heatedIndex];
   const nothingToReact =
     clampedTube !== undefined &&
     clampedTube.contents.length > 0 &&
@@ -142,7 +143,7 @@ export function HeatingControls() {
     ? "Пробирка треснула: стекло прогрето неравномерно."
     : phase === "preheat"
       ? started
-        ? "Водите эллипс по V, пока стекло не прогреется равномерно."
+        ? "Водите эллипс по V, пока стекло не прогреется равномерно по высоте жидкости."
         : "Возьмите эллипс и водите пробирку по V через пламя."
       : phase === "heating"
         ? "Прогрев выполнен. Держите дно пробирки в пламени — у верха V."
@@ -243,7 +244,7 @@ export function HeatingControls() {
           </button>
         ) : null}
         <button type="button" style={exitButtonStyle} onClick={exit}>
-          Вернуть лапку в штатив
+          {target.mode === "hand" ? "Вернуть пробирку в штатив для пробирок" : "Вернуть лапку в штатив"}
         </button>
       </div>
     </div>

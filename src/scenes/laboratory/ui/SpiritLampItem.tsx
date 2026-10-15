@@ -9,7 +9,7 @@ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
 import { useShelfTrayFlight } from "../lib/useShelfTrayFlight";
 import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerInstance";
-import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useNormalHoverOutline } from "./NormalHoverOutline";
 import { SPIRIT_LAMP_MODEL_PATH, prepareLampMaterials } from "./SpiritBurner";
 import { TrayEquipmentDisplay } from "./TrayEquipmentDisplay";
 
@@ -66,6 +66,9 @@ export function SpiritLampShelfInstance({
     onReturnHandled: useBurnerStore.getState().clearReturnRequest,
   });
 
+  // Hover: the silhouette outline (`NormalHoverOutline`).
+  useNormalHoverOutline({ root: instance, active: hovered && isCabinetInspectable });
+
   if (place !== "shelf") return null;
 
   return (
@@ -89,9 +92,8 @@ export function SpiritLampShelfInstance({
       }}
     >
       <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered && isCabinetInspectable} />
       <mesh geometry={hoverHitboxGeometry}>
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        <meshBasicMaterial visible={false} />
       </mesh>
     </group>
   );

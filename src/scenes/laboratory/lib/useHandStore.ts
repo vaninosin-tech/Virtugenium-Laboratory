@@ -32,7 +32,14 @@ export type HeldItem =
    * Something taken off the tray at the table or the hood, to be put down
    * there in its usual place (VL-017) — or back on the tray with RMB.
    */
-  | { readonly kind: "tray"; readonly what: "bottle" | "tube" | "stand" | "lamp"; readonly instanceId: string };
+  | { readonly kind: "tray"; readonly what: "bottle" | "tube" | "stand" | "lamp"; readonly instanceId: string }
+  /**
+   * The stand or the spirit lamp off the table (`equipmentCarry`): onto the
+   * tray there, or — the stand — elsewhere on the table.
+   */
+  | { readonly kind: "equipment"; readonly what: "stand" | "lamp"; readonly location: "workbench"; readonly instanceId: string }
+  /** The stand's clamp, with whatever tube is in it (`clampCarry`): to the lamp's flame, or back onto the stand. */
+  | { readonly kind: "clamp"; readonly location: TubeLocation; readonly instanceId: string };
 
 /**
  * The hand, as plain mutable state read and written every frame (never a
@@ -57,6 +64,18 @@ export const HAND = {
   radius: 0.03,
   /** Where the held item itself is (its base), as drawn — snapped to a target or on the hand. */
   itemPos: new THREE.Vector3(),
+  /** How it is turned there, in the world — published with `itemPos`. */
+  itemQuat: new THREE.Quaternion(),
+  /**
+   * Taken from somewhere other than its own place (a tube out of the clamp,
+   * `takeClampedTube`): where it was, in the world — it comes to the hand
+   * from there. Consumed by the item on its first carried frame.
+   */
+  takenFrom: new THREE.Vector3(),
+  takenFromValid: false,
+  /** The carried item's mouth, in the world (a tube's top) — published by whatever carries it, for a bottle to pour into. */
+  mouth: new THREE.Vector3(),
+  mouthValid: false,
   itemPosValid: false,
   /** Where the hand is on screen, in CSS px, for the caption next to the item. */
   screen: new THREE.Vector2(),
@@ -117,6 +136,8 @@ export const useHandStore = create<HandState>((set) => ({
     HAND.valid = false;
     HAND.homeValid = false;
     HAND.itemPosValid = false;
+    HAND.takenFromValid = false;
+    HAND.mouthValid = false;
     HAND.action = null;
     set({ held, home });
   },

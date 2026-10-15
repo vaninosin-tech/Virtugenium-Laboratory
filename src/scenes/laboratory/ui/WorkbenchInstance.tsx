@@ -16,11 +16,7 @@ const MODEL_PATH = "/assets/models/LaboratoryWorkbench.glb";
  * click-to-view-table zoom), but nothing rendered the hover feedback for
  * it — every other hotspot (cabinets, fume hood, PPE cabinet) wraps its
  * instance in `<Select>` so the postprocessing outline pass lights up on
- * hover; this only adds that same generic outline. Unlike the reagent
- * cabinets, this asset has no consistently-named structural-shell meshes to
- * match `HoverFresnelRim`'s cabinet-specific name list against, so — same
- * as `FumeHood`/`PPECabinet` — it skips that extra on-surface rim and uses
- * just the outline.
+ * hover; this only adds that same generic outline (`HoverOutline`).
  */
 export function WorkbenchInstance({ position }: { readonly position: Position3 }) {
   const { scene } = useGLTF(MODEL_PATH);

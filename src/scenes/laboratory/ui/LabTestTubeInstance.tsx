@@ -12,7 +12,15 @@ import { useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
 import { useTubeVisualTuningStore } from "../lib/useTubeVisualTuningStore";
 import { useLabNoticeStore } from "../lib/useLabNoticeStore";
 import { useHeatingStore, type CrackSpot } from "../lib/useHeatingStore";
-import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
+import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
+
+/**
+ * The tube the close-up (Q, `CameraRig`) looks at: the one something was last
+ * poured into, or that last showed a running reaction. Each tube claims it
+ * with its own token; only the owner writes `TUBE_FOCUS`.
+ */
+let focusOwner: object | null = null;
+const focusPoint = new THREE.Vector3();
 
 const MODEL_PATH = "/assets/models/LabTestTube.glb";
 
@@ -83,6 +91,13 @@ export function LabTestTubeInstance({
 
   const visuals = useRef<ReturnType<typeof createTubeReactionVisuals>>(null);
   const previousContents = useRef<readonly string[] | null>(null);
+  const focusToken = useMemo(() => ({}), []);
+  useEffect(() => () => {
+    if (focusOwner === focusToken) {
+      focusOwner = null;
+      TUBE_FOCUS.valid = false;
+    }
+  }, [focusToken]);
   const displayedChemistry = useRef({ progress: 0, rate: 0, temperature: 0, age: 0 });
   const splashStart = useRef(-Infinity);
   useEffect(() => {
@@ -104,9 +119,14 @@ export function LabTestTubeInstance({
       && previous.every((id, index) => id === contents?.[index]) ? configs[configs.length - 1] : undefined;
     const incomingLiquid = incoming && incoming.contentsKind !== "solid" ? incoming : undefined;
     const liquidCount = configs.filter(config => config.contentsKind !== "solid").length;
+    // Something was just poured in: this is the tube to look at closely.
+    if (previous && (contents?.length ?? 0) > previous.length) focusOwner = focusToken;
     previousContents.current = contents?.slice() ?? [];
     const binding = fillTestTubeContents(instance, configs);
-    const kind = reactionKindFor(contents ?? []);
+    const kind = reactionKindFor(contents ?? [])
+      ?? (import.meta.env.DEV && typeof window !== "undefined"
+        && (window as Window & { __tubeTracerOnly?: boolean }).__tubeTracerOnly
+        && contents?.includes("bacl2") ? "barium-sulfate" : null);
     visuals.current = configs.length || inStand
       ? createTubeReactionVisuals(instance, kind, {
         activeSurface: inStand && !(import.meta.env.DEV && import.meta.env.VITE_TUBE_WAVES === "0"),
@@ -161,6 +181,17 @@ export function LabTestTubeInstance({
       performance.now() / 1000 - splashStart.current, refraction, camera.position);
     if (inStand) {
       for (const uniform of crackUniforms.current) uniform.value.set(crackSpot?.side ?? 0, crackSpot?.height ?? -1);
+    }
+    // A running reaction is what there is to look at.
+    if (contents?.length && chemistry.progress > 0 && chemistry.progress < 0.999 && chemistry.rate > 0.01)
+      focusOwner = focusToken;
+    if (focusOwner === focusToken) {
+      // The middle of the liquid column (`TubeReactionVisuals` sits on it).
+      const liquid = instance.getObjectByName("TubeReactionVisuals");
+      if (liquid) liquid.getWorldPosition(focusPoint).y += 0.02;
+      else instance.getWorldPosition(focusPoint).y += 0.05;
+      TUBE_FOCUS.point.copy(focusPoint);
+      TUBE_FOCUS.valid = true;
     }
   });
 

@@ -14,7 +14,7 @@ import {
   useTestTubeStorageStore,
 } from "../lib/useTestTubeStorageStore";
 import { LabTestTubeInstance } from "./LabTestTubeInstance";
-import { ReagentHoverRim } from "./ReagentHoverRim";
+import { TUBE_OUTLINE_PARTS, useNormalHoverOutline } from "./NormalHoverOutline";
 
 const MODEL_PATH = "/assets/models/LabTestTube.glb";
 let takenTubeSequence = 0;
@@ -97,6 +97,9 @@ export function LabTestTubeCabinetInstance({
   const flightStartScaleRef = useRef(1);
   const flightEndScaleRef = useRef(1);
   const pendingInstanceIdRef = useRef<string | null>(null);
+
+  // Hover: an outline round the tube's silhouette (`NormalHoverOutline`) — its contents give no lines of their own.
+  useNormalHoverOutline({ root: instance, active: hovered && canTake, parts: TUBE_OUTLINE_PARTS });
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
@@ -225,7 +228,6 @@ export function LabTestTubeCabinetInstance({
       }}
     >
       <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered && canTake} />
       {isFlying && (
         <group ref={flightGroupRef}>
           <LabTestTubeInstance />

@@ -30,13 +30,13 @@ export interface NavButtonConfig {
  * adjustable via the F9 panel's "Triangle W/H" controls.
  */
 const DEFAULTS: Record<NavButtonKey, NavButtonConfig> = {
-  left: { buttonWidth: 110, buttonHeight: 190, triangleWidth: 77, triangleHeight: 133 },
-  right: { buttonWidth: 110, buttonHeight: 190, triangleWidth: 77, triangleHeight: 133 },
-  bottom: { buttonWidth: 280, buttonHeight: 90, triangleWidth: 140, triangleHeight: 54 },
+  left: { buttonWidth: 64, buttonHeight: 300, triangleWidth: 77, triangleHeight: 133 },
+  right: { buttonWidth: 64, buttonHeight: 300, triangleWidth: 77, triangleHeight: 133 },
+  bottom: { buttonWidth: 300, buttonHeight: 64, triangleWidth: 133, triangleHeight: 77 },
 };
 
 /** How far LEFT/RIGHT sit from the horizontal center (`left`/`right` CSS, px) — matches the original hardcoded `130px`. Shared by both sides so they can only ever move mirror-symmetrically; there is deliberately no per-side override. */
-const DEFAULT_SIDE_DISTANCE = 130;
+const DEFAULT_SIDE_DISTANCE = 333;
 
 /** ОСТАВИТЬ (left)/ВЗЯТЬ (right) reagent-inspection buttons — `ReagentInspectionOverlay` reads this directly instead of hardcoded CSS. */
 export type InspectionButtonSide = "left" | "right";
@@ -53,8 +53,8 @@ export interface InspectionButtonConfig {
 }
 
 const INSPECTION_BUTTON_DEFAULTS: Record<InspectionButtonSide, InspectionButtonConfig> = {
-  left: { width: 300, height: 84, offsetX: -180, top: 76, fontSize: 20 },
-  right: { width: 300, height: 84, offsetX: 180, top: 76, fontSize: 20 },
+  left: { width: 390, height: 115, offsetX: -205, top: 83, fontSize: 20 },
+  right: { width: 390, height: 115, offsetX: 205, top: 83, fontSize: 20 },
 };
 
 /**
@@ -100,12 +100,12 @@ export interface HeldTrayConfig {
 }
 
 const HELD_TRAY_DEFAULTS: HeldTrayConfig = {
-  x: 0.2,
-  y: -0.22,
-  z: 0.75,
-  scale: 0.85,
+  x: -0.1,
+  y: -0.26,
+  z: 0.81,
+  scale: 0.7,
   rotX: 0,
-  rotY: 0,
+  rotY: Math.PI,
   rotZ: 0,
   // Was 0.4 — noticeably smaller than the bottle's own true size (the
   // workbench reagent area renders the same jars at scale 1) and than how

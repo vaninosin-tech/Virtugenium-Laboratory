@@ -34,7 +34,9 @@ export function TabletBezel({ children, onClick, title, asButton, className }: T
         <div style={cameraDotStyle} />
       </div>
       <div style={screenFrameStyle}>
-        <div style={screenGlassStyle}>{children}</div>
+        <div style={screenGlassStyle} data-tablet-screen>
+          {children}
+        </div>
       </div>
       <div style={sideRailStyle} aria-hidden>
         <div style={homeBarStyle} />
@@ -61,7 +63,9 @@ const shellStyle: CSSProperties = {
 const expandedShellStyle: CSSProperties = {
   top: "50%",
   left: "50%",
-  transform: "translate(-50%, -50%)",
+  // `--tablet-boot-scale`: the lab loading screen scales the tablet up to
+  // fill the monitor, then back down to 1 (see `LabLoadingScreen`).
+  transform: "translate(-50%, -50%) scale(var(--tablet-boot-scale, 1))",
   width: tabletChrome.expandedWidth,
   maxWidth: `calc(100vw - ${tabletChrome.viewportInset}px)`,
   height: tabletChrome.heightPx,

@@ -1,5 +1,8 @@
 import { create } from "zustand";
 
+import { V_REACH as LIQUID_REACH } from "./heldClampPose";
+import type { TubeLocation } from "./useTestTubeStorageStore";
+
 /**
  * The heating mini-game, after `docs/assets/SpiritLamp_flame_logic.txt`: the
  * clamp comes off the stand and the player drags an ellipse along a V-shaped
@@ -57,6 +60,19 @@ export const HEAT_SECONDS = 3.5;
 
 export type HeatingPhase = "preheat" | "heating" | "done" | "cracked";
 
+/**
+ * What is held in the flame (VL-020): the clamp taken off the stand with its
+ * tube — the proper way — or a bare tube in the player's hand, which is
+ * allowed but charged as a mistake.
+ */
+export type HeatingTarget =
+  | { readonly mode: "clamp" }
+  | { readonly mode: "hand"; readonly location: TubeLocation; readonly index: number; readonly instanceId: string };
+
+const CLAMP: HeatingTarget = { mode: "clamp" };
+const sameTarget = (a: HeatingTarget, b: HeatingTarget) =>
+  a.mode === b.mode && (a.mode === "clamp" || (b.mode === "hand" && a.instanceId === b.instanceId));
+
 interface HeatingState {
   /** Whether the heating mini-game currently owns the controls. */
   readonly active: boolean;
@@ -74,8 +90,10 @@ interface HeatingState {
   readonly phase: HeatingPhase;
   /** The zone that was hottest when the glass cracked — where the crack starts. Null until a crack. */
   readonly crackZone: number | null;
+  /** What is in the flame — the clamp, or a tube in the hand. */
+  readonly target: HeatingTarget;
   /** `random` is injectable so tests can pick the starting top of the V. */
-  enter: (random?: () => number) => void;
+  enter: (random?: () => number, target?: HeatingTarget) => void;
   exit: () => void;
   grab: () => void;
   setSweep: (sweep: number) => void;
@@ -112,8 +130,8 @@ export interface CrackSpot {
   readonly height: number;
 }
 
-/** Tube length the V covers from the bottom, as a fraction of the 15 cm tube (`heldTubePose`). */
-const V_REACH = 0.1 / 0.15;
+/** Tube length the V covers from the bottom — the liquid's height — as a fraction of the 15 cm tube (`heldClampPose`). */
+const V_REACH = LIQUID_REACH / 0.15;
 
 export const crackSpotForZone = (zone: number): CrackSpot => {
   const u = zoneCentre(zone) / (1 - FLAME_HALF_WIDTH);
@@ -145,13 +163,16 @@ const INITIAL = {
   heatProgress: 0,
   phase: "preheat" as HeatingPhase,
   crackZone: null as number | null,
+  target: CLAMP,
 };
 
 export const useHeatingStore = create<HeatingState>((set, get) => ({
   ...INITIAL,
 
-  enter: (random = Math.random) =>
+  enter: (random = Math.random, target = CLAMP) =>
     set((state) => {
+      // Another tube in the flame is fresh glass.
+      if (!sameTarget(state.target, target)) return { active: true, target, ...freshPreheat(random) };
       // Re-entering mid-preheat keeps the glass as it was; only an untouched
       // preheat gets a fresh starting side.
       const untouched = state.phase === "preheat" && !state.started;

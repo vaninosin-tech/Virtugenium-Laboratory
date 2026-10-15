@@ -23,6 +23,12 @@ interface SceneInteractionState {
   readonly activeTargetId: SceneTargetId;
   /** Which hotspot the crosshair is currently aimed at, if any (only computed in overview). */
   readonly hoveredTargetId: HotspotTargetId | null;
+  /**
+   * RMB in the overview: the crosshair is hidden and aiming is off — nothing
+   * gets highlighted and LMB goes nowhere, so the player can just look round.
+   * RMB again turns it back on.
+   */
+  readonly aimDisabled: boolean;
   /** Cabinet inspection camera phase — see `CabinetPhase`. */
   readonly cabinetPhase: CabinetPhase;
   /** Which cabinet is focused/being inspected, if any. */
@@ -66,6 +72,7 @@ interface SceneInteractionState {
   setPointerLocked: (locked: boolean) => void;
   setActiveTarget: (id: SceneTargetId) => void;
   setHoveredTarget: (id: HotspotTargetId | null) => void;
+  toggleAimDisabled: () => void;
   beginCabinetFocus: (id: HotspotTargetId) => void;
   setCabinetPhase: (phase: CabinetPhase) => void;
   requestCabinetReturn: () => void;
@@ -89,6 +96,7 @@ export const useSceneInteractionStore = create<SceneInteractionState>((set) => (
   isPointerLocked: false,
   activeTargetId: "overview",
   hoveredTargetId: null,
+  aimDisabled: false,
   cabinetPhase: "room",
   focusedCabinetId: null,
   returnRequested: false,
@@ -102,6 +110,10 @@ export const useSceneInteractionStore = create<SceneInteractionState>((set) => (
   setActiveTarget: (activeTargetId) => set({ activeTargetId, hoveredTargetId: null }),
 
   setHoveredTarget: (hoveredTargetId) => set({ hoveredTargetId }),
+
+  // Turning aiming off drops the current highlight at once.
+  toggleAimDisabled: () =>
+    set((state) => (state.aimDisabled ? { aimDisabled: false } : { aimDisabled: true, hoveredTargetId: null })),
 
   beginCabinetFocus: (id) =>
     set({

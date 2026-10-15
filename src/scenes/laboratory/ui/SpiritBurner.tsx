@@ -1,11 +1,18 @@
 import { useGLTF } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
+import { LAMP_FLAME } from "../lib/lampFlame";
+import { lampToTray } from "../lib/trayCarry";
 import { useBurnerStore } from "../lib/useBurnerStore";
-import { standTargetEvents } from "./standTargetEvents";
+import type { TubeLocation } from "../lib/useTestTubeStorageStore";
+import { useNormalHoverOutline } from "./NormalHoverOutline";
+import { takeEquipment } from "../lib/equipmentCarry";
+import { pressToTake } from "../lib/pressToTake";
+import { useStandHintStore } from "../lib/useStandHintStore";
 import { SpiritLampFlame } from "./SpiritLampFlame";
+import { standTargetEvents } from "./standTargetEvents";
 import { useCircleObstacle } from "../lib/worktopBounds";
 
 export const SPIRIT_LAMP_MODEL_PATH = "/assets/models/SpiritLamp.glb";
@@ -71,18 +78,28 @@ function Flame({ strength }: { readonly strength: React.MutableRefObject<number>
 }
 
 /**
- * Rendered as a child of whatever group the stand itself is in, so it
- * inherits the stand's own placement; `position` is stand-local.
+ * The lamp standing in its own place (VL-020) — on the table or in the hood,
+ * never tied to the stand: `position` is local to whatever group its owner
+ * puts it in. It publishes its flame (`LAMP_FLAME`) for whatever is heated
+ * over it.
  *
- * One click advances the lamp: take the cap off, light it, put the cap back on.
+ * LMB heats (`standTableActions`): the cap comes off, the lamp lights and the
+ * mini-game starts; the lamp goes out by itself after. There is no cap-only
+ * click. RMB on the capped lamp puts it on the tray (a burning lamp is not carried).
  */
+/** The lamp's id for its hover caption (`standTargetEvents`). */
+const SPIRIT_BURNER_OWNER = "spirit-burner";
+
 /** `SpiritLamp.glb`: 7.6 cm across. */
 const LAMP_RADIUS = 0.038;
 
 export function SpiritBurner({
   position = [0.104, 0, 0.018],
+  place,
 }: {
   readonly position?: readonly [number, number, number];
+  /** Where the lamp stands — whose flame `LAMP_FLAME` then is. */
+  readonly place: TubeLocation;
 }) {
   const { scene } = useGLTF(MODEL_PATH);
 
@@ -101,6 +118,9 @@ export function SpiritBurner({
   // In the way of whatever is carried over the worktop (VL-018) — the 7.6 cm lamp.
   const bodyRef = useRef<THREE.Group>(null);
   useCircleObstacle("spirit-burner", bodyRef, LAMP_RADIUS);
+  // Hovered (its caption up, `standTargetEvents`): the silhouette outline.
+  const hovered = useStandHintStore((state) => state.owner === SPIRIT_BURNER_OWNER);
+  useNormalHoverOutline({ root: instance, active: hovered });
 
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 0.1);
@@ -144,12 +164,43 @@ export function SpiritBurner({
       ref={bodyRef}
       position={position as unknown as [number, number, number]}
       // Click and caption both come from `standTableActions` (VL-014).
-      {...standTargetEvents("spirit-burner", { kind: "burner" })}
+      {...standTargetEvents(SPIRIT_BURNER_OWNER, { kind: "burner" })}
+      // On the table it is carried in the hand with a drag (`equipmentCarry`); a click still heats.
+      onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+        if (place !== "workbench" || event.button !== 0) return;
+        pressToTake(event.nativeEvent, () => takeEquipment("lamp"), { dragOnly: true });
+      }}
+      onContextMenu={(event: ThreeEvent<MouseEvent>) => {
+        event.stopPropagation();
+        if (useBurnerStore.getState().phase === "capped") lampToTray(place);
+      }}
     >
       <primitive object={instance} />
+      <FlameAnchor place={place} />
       <Flame strength={flameStrength} />
     </group>
   );
+}
+
+/** Publishes the flame's hot spot — see `LAMP_FLAME`. Near the top of the flame, where it is hottest. */
+function FlameAnchor({ place }: { readonly place: TubeLocation }) {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    if (!ref.current) return;
+    ref.current.getWorldPosition(LAMP_FLAME.point);
+    LAMP_FLAME.valid = true;
+    LAMP_FLAME.place = place;
+  });
+  useEffect(
+    () => () => {
+      if (LAMP_FLAME.place === place) {
+        LAMP_FLAME.valid = false;
+        LAMP_FLAME.place = null;
+      }
+    },
+    [place],
+  );
+  return <group ref={ref} position={[0, FLAME_BASE_Y + FLAME_HEIGHT * 0.7, 0]} />;
 }
 
 useGLTF.preload(MODEL_PATH);

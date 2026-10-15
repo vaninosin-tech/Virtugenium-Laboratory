@@ -5,6 +5,7 @@ import {
   isNativeTypingTarget,
   readCapsLockFromEvent,
 } from "../lib/physicalKeyboard";
+import { registerTypingKeyboard } from "../lib/typingKeyboards";
 import { colors, typography } from "./tabletStyles";
 import { TABLET_COMPOSER_BOARD_HEIGHT, TABLET_SPEC_PAD_WIDTH } from "./tabletComposerLayout";
 
@@ -329,7 +330,10 @@ export function ChemicalKeyboard({
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
+    // Letters typed here must not also trigger E (open/close the tablet).
+    const unregisterTyping = registerTypingKeyboard();
     return () => {
+      unregisterTyping();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);

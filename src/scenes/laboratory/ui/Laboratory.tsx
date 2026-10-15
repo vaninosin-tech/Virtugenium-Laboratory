@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
-import { EffectComposer, N8AO, Outline, Selection } from "@react-three/postprocessing";
+import { EffectComposer, N8AO, Selection } from "@react-three/postprocessing";
 import { InspectionDepthOfField } from "./InspectionDepthOfField";
-import { KernelSize, Resolution } from "postprocessing";
 import * as THREE from "three";
 
 import { Tablet } from "../../../features/tablet/ui/Tablet";
+import { LabLoadingScreen } from "../../../features/lab-boot/ui/LabLoadingScreen";
+import { SceneReadyProbe } from "../../../features/lab-boot/ui/SceneReadyProbe";
+import { OverviewPointerGate } from "./OverviewPointerGate";
+import { GloveCursorSync } from "./GloveCursorSync";
+import { useLabBootStore } from "../../../features/lab-boot/lib/useLabBootStore";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import { Cabinet } from "./Cabinet";
 import { CameraRig } from "./CameraRig";
@@ -16,7 +20,7 @@ import { HeatingControls } from "./HeatingControls";
 import { InspectionControls } from "./InspectionControls";
 import { LabAudioRuntime } from "./LabAudioRuntime";
 import { LabNoticeOverlay } from "./LabNoticeOverlay";
-import { StandActionPanel } from "./StandActionPanel";
+import { HandHeatRig, HeatingRuntime } from "./HeatingRuntime";
 import { useHeatingStore } from "../lib/useHeatingStore";
 import { useBurnerStore } from "../lib/useBurnerStore";
 import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
@@ -25,6 +29,7 @@ import { escapeTakenByHand, takeIntoHand, useHandStore } from "../lib/useHandSto
 import { useStandHintStore } from "../lib/useStandHintStore";
 import { StandActionHint } from "./StandActionHint";
 import { HandController } from "./HandController";
+import { HoverOutline } from "./HoverOutline";
 import { WorktopZoneOverlay } from "./WorktopZoneOverlay";
 import { ControlsHint, HeldItemHint } from "./HandHints";
 import { PourMotion } from "./StandMotion";
@@ -55,6 +60,7 @@ import { useReagentPickablesStore } from "../lib/useReagentPickablesStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 import { markPickablePressed, useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { computeWorkbenchReagentSlotOffsets, useWorkbenchReagentAreaStore } from "../lib/useWorkbenchReagentAreaStore";
+import { useWorkbenchReservationStore } from "../lib/workbenchLayout";
 import { useWorkbenchReagentDragStore } from "../lib/useWorkbenchReagentDragStore";
 import { RectAreaLightUniformsLib } from "three/examples/jsm/lights/RectAreaLightUniformsLib.js";
 import { useLightingStore } from "../lib/useLightingStore";
@@ -306,7 +312,12 @@ function DraggableWorkbenchReagent({
     // mount). A declarative position using the live target would reassert
     // itself on every re-render and cancel the smoothing mid-glide.
     <group ref={groupRef} scale={prewarm ? 0.0001 : 1}>
-      <PourMotion instanceId={instanceId} pourPointHeight={POUR_POINT_HEIGHT[reagent.containerType] * scale}>
+      <PourMotion
+        instanceId={instanceId}
+        pourPointHeight={POUR_POINT_HEIGHT[reagent.containerType] * scale}
+        inert={prewarm}
+        pourSource={{ reagentId: reagent.id, location: "workbench" }}
+      >
         <ReagentStaticDisplay
           reagent={reagent}
           rotationY={rotationY}
@@ -381,16 +392,22 @@ function WorkbenchReagentDisplayArea() {
     const alreadyMounted = [...items, ...trayItems].some((item) => item.instanceId === inspectedId);
     return alreadyMounted ? null : { instanceId: inspectedId, reagent: entry[1] };
   }, [inspectedId, items, trayItems]);
+  // A bottle carried in from the tray that would go into the row if let go
+  // now has its slot kept (`workbenchLayout`): the row is laid out with it
+  // already in, so the others glide aside now and the drop moves nothing.
+  const reserved = useWorkbenchReservationStore((state) => state.reserved);
+  const reservation =
+    reserved && !visibleIds.has(reserved.instanceId) && visibleItems.length < config.maxDisplaySlots ? reserved : null;
   const offsets = useMemo(
-    () => computeWorkbenchReagentSlotOffsets(config, visibleItems.length),
-    [config, visibleItems.length],
+    () => computeWorkbenchReagentSlotOffsets(config, visibleItems.length + (reservation ? 1 : 0)),
+    [config, visibleItems.length, reservation],
   );
   // Keep tray-prewarmed and visible workbench jars in one keyed array.
   // Separate nested map arrays are separate reconciliation scopes and would
   // remount every expensive reagent display during tray-to-table transfer.
   const displayItems = useMemo(() => {
     const visible = visibleItems.flatMap((item, index) => {
-      const gridOffset = offsets[index];
+      const gridOffset = offsets[reservation && index >= reservation.index ? index + 1 : index];
       return gridOffset ? [{
         item,
         reagent: REAGENTS[item.reagentId as ReagentId],
@@ -412,7 +429,10 @@ function WorkbenchReagentDisplayArea() {
     const prewarmed = prewarmItems.map((item, index) => ({
       item,
       reagent: REAGENTS[item.reagentId as ReagentId],
-      gridOffset: projectedOffsets[visibleItems.length + index] ?? ([0, 0, 0] as const),
+      // The carried one already sits in its reserved slot — where it lands.
+      gridOffset:
+        (item.instanceId === reservation?.instanceId ? offsets[reservation.index] : projectedOffsets[visibleItems.length + index]) ??
+        ([0, 0, 0] as const),
       prewarm: true as const,
     }));
     const inspected = inspectedReagent
@@ -427,7 +447,7 @@ function WorkbenchReagentDisplayArea() {
         }]
       : [];
     return [...visible, ...prewarmed, ...inspected];
-  }, [config, inspectedReagent, offsets, prewarmItems, visibleItems]);
+  }, [config, inspectedReagent, offsets, prewarmItems, visibleItems, reservation]);
 
   return (
     <>
@@ -505,13 +525,14 @@ export function Laboratory() {
   const heatingActive = useHeatingStore((state) => state.active);
   const tubeCloseUp = tubeViewing || heatingActive;
   const handHeld = useHandStore((state) => state.held !== null);
-  // RMB in the overview hides or shows the aiming dot — nothing else.
-  const [crosshairHidden, setCrosshairHidden] = useState(false);
+  // RMB in the overview hides the aiming dot and turns aiming off — no
+  // highlight, LMB goes nowhere (see `aimDisabled`); RMB again turns it back on.
+  const crosshairHidden = useSceneInteractionStore((state) => state.aimDisabled);
   useEffect(() => {
     const handleMouseDown = (event: MouseEvent) => {
       if (event.button !== 2 || !document.pointerLockElement) return;
       if (useSceneInteractionStore.getState().activeTargetId !== "overview") return;
-      setCrosshairHidden((hidden) => !hidden);
+      useSceneInteractionStore.getState().toggleAimDisabled();
     };
     document.addEventListener("mousedown", handleMouseDown);
     return () => document.removeEventListener("mousedown", handleMouseDown);
@@ -531,6 +552,12 @@ export function Laboratory() {
     } catch {
       // Pointer Lock is an enhancement; never break the actual return action.
     }
+  }, []);
+
+  // Before the first paint: the loading screen covers everything (the tablet
+  // included) until the scene is fully loaded and rendered — see `LabLoadingScreen`.
+  useLayoutEffect(() => {
+    useLabBootStore.getState().begin();
   }, []);
 
   useEffect(() => {
@@ -636,7 +663,8 @@ export function Laboratory() {
           <WorkbenchReagentDisplayArea />
           <WorkbenchReagentAreaAnchor />
           {bunsenStandOnWorkbench && <BunsenStandWorkbenchDisplay tableWorldPosition={tablePosition} />}
-          {lampOnWorkbench && !bunsenStandOnWorkbench && <LoneSpiritLampOnWorkbench tableWorldPosition={tablePosition} />}
+          {/* The lamp in its own place, stand or no stand (VL-020). */}
+          {lampOnWorkbench && <LoneSpiritLampOnWorkbench tableWorldPosition={tablePosition} />}
         <LabTrayInstance mode="table" position={TABLE_TRAY_POSITION} rotationY={TRAY_ROTATION_Y} />
         <LabTrayInstance mode="held" position={TABLE_TRAY_POSITION} rotationY={TRAY_ROTATION_Y} />
           {CABINETS.map((cabinet) => (
@@ -649,18 +677,8 @@ export function Laboratory() {
           <EffectComposer autoClear={false} multisampling={QUALITY_LEVELS[quality].multisampling}>
             {/* Subtle contact AO only — distinguishes adjacent white furniture planes without darkening the room. Higher sample counts than the library default to avoid visible dither/grain on large flat surfaces. */}
             {quality !== "LOW" && <N8AO aoRadius={0.35} intensity={2} distanceFalloff={1} color="#000000" aoSamples={quality === "ULTRA" ? 16 : 8} denoiseSamples={quality === "ULTRA" ? 8 : 4} screenSpaceRadius />}
-              {/* Cabinet outlines; reagent jars use their surface rim. */}
-            <Outline
-              visibleEdgeColor={0x1d4ed8}
-              hiddenEdgeColor={0x1d4ed8}
-              edgeStrength={4}
-              pulseSpeed={0}
-              blur
-              kernelSize={KernelSize.SMALL}
-              xRay={false}
-              width={Resolution.AUTO_SIZE}
-              height={Resolution.AUTO_SIZE}
-            />
+            {/* The hover outline — furniture (`<Select>`) and everything else (`NormalHoverOutline`). */}
+            <HoverOutline />
             {/*
               Reagent inspection background blur: a real depth-of-field pass
               focused on the inspected bottle's stage position, so the lab
@@ -675,7 +693,11 @@ export function Laboratory() {
 
         <CameraRig onResumeMouseLook={resumeMouseLook} />
         <HandController />
+        <HeatingRuntime />
+        <HandHeatRig />
         <WorktopZoneOverlay />
+        <SceneReadyProbe />
+        <OverviewPointerGate />
       </Canvas>
 
       {showCrosshair && (
@@ -695,7 +717,6 @@ export function Laboratory() {
       <DevMenuPanel />
       <PPEStatusOverlay />
       <HeatingControls />
-      <StandActionPanel />
       <StandActionHint />
       <HeldItemHint />
       <ControlsHint />
@@ -708,6 +729,8 @@ export function Laboratory() {
       {/* While something is in the hand, the hand has the mouse: no «Назад» (VL-015). */}
       {tubeCloseUp || handHeld ? null : <InspectionControls onBack={returnToOverview} />}
       <ReagentInspectionOverlay />
+      <LabLoadingScreen />
+      <GloveCursorSync />
 
     </div>
   );

@@ -4,7 +4,7 @@ import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 
 import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
-import { clampToTableWorldXZ } from "../lib/layout";
+import { TABLE } from "../lib/layout";
 import { fillTestTubeContents, resolveTubeContents, stepCopperGranuleDrop } from "../lib/testTubeContents";
 import { prepareTestTube } from "../lib/testTubeMaterials";
 import { pushOutsideTrayReturnZone } from "../lib/trayReturnZone";
@@ -14,11 +14,14 @@ import {
   useBunsenStandStorageStore,
 } from "../lib/useBunsenStandStorageStore";
 import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
+import { useHeatingStore } from "../lib/useHeatingStore";
 import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
-import { clickWorkbenchRackTube } from "../lib/standTableActions";
+import { clickWorkbenchRackTube, heatInHandAction, jarPourAction, nearFlame } from "../lib/standTableActions";
 import { useStandHintStore } from "../lib/useStandHintStore";
 import { useStandMotionStore } from "../lib/useStandMotionStore";
 import { HAND, useHandStore } from "../lib/useHandStore";
+import { TUBE_MOUTH_HEIGHT } from "../lib/pourPose";
+import { JAR_AIM } from "../lib/pourSources";
 import { overTableTray, WORKBENCH_CARRY } from "../lib/tableTray";
 import { tubeToTray } from "../lib/trayCarry";
 import { ArrivalFlight } from "./StandMotion";
@@ -27,7 +30,10 @@ import { useTestTubeHoverStore } from "../lib/useTestTubeHoverStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { disableRaycast } from "./ReagentContainerInstance";
 import { ReagentHoverRim } from "./ReagentHoverRim";
+import { TUBE_OUTLINE_PARTS, useNormalHoverOutline } from "./NormalHoverOutline";
 import { constrainOnWorktop } from "../lib/worktopBounds";
+import { WORKBENCH_TUBE_DROP } from "../lib/workbenchTubeDrop";
+import { publishGhostShape } from "../lib/handGhost";
 
 const MODEL_PATH = "/assets/models/LabTestTube.glb";
 
@@ -79,7 +85,12 @@ const NEAR_HOLDER_RADIUS = 0.2;
  * rack's own calibrated spot ever does.
  */
 const TUBE_DRAG_HALF_WIDTH = 1.15;
-const TUBE_DRAG_HALF_DEPTH = 0.4;
+// The whole table's depth from the rack (VL-018): the clamp and the lamp's
+// flame stand at its back, 0.55 m behind the rack — a tube taken out of the
+// clamp, or brought to the flame, must reach them. The worktop itself, as the
+// model has it, bounds it (`constrainOnWorktop`): `clampToTableWorldXZ`'s
+// `TABLE` ends 0.2 m short of the real countertop's back edge.
+const TUBE_DRAG_HALF_DEPTH = TABLE.depth;
 /**
  * Fixed WORLD up вЂ” the drag plane's normal, NOT derived from the rack's own
  * (`parent.getWorldQuaternion()`) rotation like an earlier version did. The
@@ -189,10 +200,14 @@ export function InspectableTestTubeSlot({
   // visual reassignment, not a removal (see `attachedTubeSlotIndex`'s doc).
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
   const isAttachedHere = attachedTubeSlotIndex === index;
+  // Heated in the hand (VL-020): drawn over the lamp by `HandHeatRig` meanwhile.
+  const heatingInHand = useHeatingStore(
+    (state) => state.active && state.target.mode === "hand" && state.target.instanceId === instanceId,
+  );
   const rackArrival = useStandMotionStore((state) =>
     state.rackArrival?.location === "workbench" && state.rackArrival.index === index ? state.rackArrival : null,
   );
-  const visuallyFilled = filled && !isAttachedHere;
+  const visuallyFilled = filled && !isAttachedHere && !heatingInHand;
   const canHover = interactive && visuallyFilled;
   const tablePosition = useFurniturePositionStore((state) => state.getOverride("table").position);
   // Derived straight from the shared store (the single source of truth for
@@ -216,6 +231,7 @@ export function InspectableTestTubeSlot({
   // (see `useTestTubeDragStore`'s `pendingPickInstanceId` doc). `filled` is
   // still required: an emptied slot has nothing to hold.
   const isHeld = useTestTubeDragStore((state) => filled && state.heldInstanceId === instanceId);
+  useNormalHoverOutline({ root: instance, active: hovered && !isHeld, parts: TUBE_OUTLINE_PARTS });
   useEffect(() => {
     if (filled) return;
     useTestTubeDragStore.getState().releaseIfHeld(instanceId);
@@ -241,7 +257,10 @@ export function InspectableTestTubeSlot({
   // whether to grab/take that exact object вЂ” see its own doc.
   useEffect(() => {
     if (!isHeld) return;
-    const handleClick = () => {
+    // Sets it down where it is — on a click, or let go at the end of a drag
+    // (`dragged`, VL-018): then anywhere but the clamp or the tray means back
+    // into its hole.
+    const commit = (dragged: boolean) => {
       // This "click empty air, drop the tube" gesture only makes sense while
       // actually resting at the table (its rack is what the tube flies back
       // into) вЂ” nothing walks the player out of the table with a tube still
@@ -256,12 +275,30 @@ export function InspectableTestTubeSlot({
         return;
       }
       if (consumePickablePressed()) return;
+      // Held up to a bottle: it pours in, and the tube stays in the hand (`jarPourAction`).
+      if (JAR_AIM.source) {
+        const heldNow = useHandStore.getState().held;
+        const pour = heldNow ? jarPourAction(heldNow, JAR_AIM.source) : null;
+        if (pour && !pour.blocked) {
+          pour.run();
+          return;
+        }
+      }
       // Close enough to the ring (see the `useFrame` proximity check above)
       // вЂ” clip in instead of dropping back into the rack. Captures this
       // exact world pose (not just the slot index) so `AttachedTube` can fly
       // in from wherever the player actually released it instead of popping
       // straight into the ring вЂ” same "hand off exactly where it visually
       // was" trick `useReagentStorageStore.requestReturn` already uses.
+      // Under the lamp's flame: heat it there, in the hand (VL-020) — when it can be.
+      if (WORKBENCH_CARRY.nearFlame) {
+        const heat = heatInHandAction("workbench", index);
+        if (heat && !heat.blocked) {
+          WORKBENCH_CARRY.nearFlame = false;
+          heat.run();
+          return;
+        }
+      }
       if (overTrayRef.current) {
         overTrayRef.current = false;
         WORKBENCH_CARRY.overTray = false;
@@ -281,11 +318,24 @@ export function InspectableTestTubeSlot({
       // In the hand (VL-015) a click on empty air does nothing — a double
       // click puts the tube back (`HandController`) — except right over the
       // rack, where it plainly means «put it back here».
-      if (useHandStore.getState().held && !useTestTubeDragStore.getState().isNearHolder) return;
+      if (!dragged && useHandStore.getState().held && !useTestTubeDragStore.getState().isNearHolder) return;
       useTestTubeDragStore.getState().releaseIfHeld(instanceId);
     };
+    const handleClick = () => {
+      if (Date.now() < WORKBENCH_TUBE_DROP.suppressClickUntil) return;
+      commit(false);
+    };
+    const drop = () => {
+      WORKBENCH_TUBE_DROP.suppressClickUntil = Date.now() + 400;
+      commit(true);
+    };
+    WORKBENCH_TUBE_DROP.drop = drop;
     window.addEventListener("click", handleClick);
-    return () => window.removeEventListener("click", handleClick);
+    return () => {
+      window.removeEventListener("click", handleClick);
+      if (WORKBENCH_TUBE_DROP.drop === drop) WORKBENCH_TUBE_DROP.drop = null;
+      WORKBENCH_TUBE_DROP.nearRing = false;
+    };
   }, [isHeld, instanceId, index]);
 
   const dragRaycasterRef = useRef(new THREE.Raycaster());
@@ -293,6 +343,7 @@ export function InspectableTestTubeSlot({
   const dragWorldTargetRef = useRef(new THREE.Vector3());
   const dragPlanePointRef = useRef(new THREE.Vector3());
   const fillCheckTubeWorldPosRef = useRef(new THREE.Vector3());
+  const mouthScaleRef = useRef(new THREE.Vector3());
   /** Live "close enough to the ring to clip in" result from the `useFrame` proximity check above вЂ” read by the click handler below, same "proximity arms it, a click commits it" split the jar-fill/jar-click-exception pair already uses. A plain ref (not state): it's read once per click, not something that should trigger a re-render every frame it changes. */
   const nearRingRef = useRef(false);
   /** Live: the carried tube is over the tray on the table (`overTableTray`). */
@@ -327,6 +378,23 @@ export function InspectableTestTubeSlot({
       // Taken: first straight up out of its hole, over the rack's bars (VL-018).
       liftingRef.current = true;
       aimAtTubeRef.current = true;
+      // Its outline stays in its hole while it is carried (VL-018).
+      const group = groupRef.current;
+      if (group && HAND.takenFromValid && group.parent) {
+        // Taken out of the clamp, not its hole: its place is still its hole —
+        // outlined there, full size — but it leaves from the clamp, already clear of the rack.
+        group.position.set(...localPosition);
+        group.scale.setScalar(1);
+        group.updateWorldMatrix(true, true);
+        publishGhostShape(group);
+        group.position.copy(group.parent.worldToLocal(HAND.takenFrom.clone()));
+        HAND.takenFromValid = false;
+        liftingRef.current = false;
+        aimAtTubeRef.current = false;
+        const ndc = HAND.takenFrom.clone().project(camera);
+        HAND.ndc.set(ndc.x, ndc.y);
+        sharedMouseNdc.set(ndc.x, ndc.y);
+      } else if (group) publishGhostShape(group);
     } else if (wasHeldRef.current) {
       wasHeldRef.current = false;
       arrivingRef.current = false;
@@ -335,7 +403,7 @@ export function InspectableTestTubeSlot({
       // empty hole (see `visuallyFilled`) instead of flying back in.
       if (!isAttachedHere) returnPhaseRef.current = "approach";
     }
-  }, [isHeld, isAttachedHere]);
+  }, [isHeld, isAttachedHere, camera, localPosition]);
 
   // The actual "placing a tube into the rack" animation: the moment this
   // hole goes from empty to filled вЂ” taken from the cabinet and handed off
@@ -355,7 +423,8 @@ export function InspectableTestTubeSlot({
   // NOT replay the drop вЂ” only an actual emptyв†’filled transition does.
   const wasVisuallyFilledRef = useRef(visuallyFilled);
   useEffect(() => {
-    if (visuallyFilled && !wasVisuallyFilledRef.current && returnPhaseRef.current === "idle") {
+    // Not when it fills by being taken out of the clamp into the hand: it is carried, not arriving.
+    if (visuallyFilled && !wasVisuallyFilledRef.current && returnPhaseRef.current === "idle" && !isHeld) {
       const group = groupRef.current;
       if (group) {
         group.position.set(localPosition[0], localPosition[1] + RETURN_APPROACH_HEIGHT, localPosition[2]);
@@ -437,9 +506,8 @@ export function InspectableTestTubeSlot({
         //    instead of going dead the instant the raw cursor ray crosses
         //    the boundary (freezing there read as a much bigger "blocked"
         //    area than the tray's own actual footprint).
-        // 3) `clampToTableWorldXZ` вЂ” the physical table edge, same bounds
-        //    every other "drag a prop across the table" mechanic respects,
-        //    kept as a last-resort backstop.
+        // 3) `constrainOnWorktop` (below) — the worktop as the model has it,
+        //    and off everything standing on it.
         let targetX = THREE.MathUtils.clamp(
           dragWorldTargetRef.current.x,
           planePoint.x - TUBE_DRAG_HALF_WIDTH,
@@ -451,7 +519,6 @@ export function InspectableTestTubeSlot({
           planePoint.z + TUBE_DRAG_HALF_DEPTH,
         );
         [targetX, targetZ] = pushOutsideTrayReturnZone(targetX, targetZ);
-        [targetX, targetZ] = clampToTableWorldXZ(targetX, targetZ, tablePosition);
         dragWorldTargetRef.current.set(targetX, dragWorldTargetRef.current.y, targetZ);
         // Off everything standing on the table (VL-018) — but not its own
         // rack, which it is carried back into.
@@ -483,6 +550,11 @@ export function InspectableTestTubeSlot({
       // Over the tray on the table: a click puts it on the tray (VL-017).
       overTrayRef.current = overTableTray(tubeWorldPos);
       WORKBENCH_CARRY.overTray = overTrayRef.current;
+      // Under the lamp's flame: a click heats it there, in the hand (VL-020).
+      WORKBENCH_CARRY.nearFlame = nearFlame("workbench", tubeWorldPos);
+      // Its mouth, for a bottle brought to pour into it (`jarPour`).
+      HAND.mouth.copy(tubeWorldPos).addScaledVector(WORLD_UP, TUBE_MOUTH_HEIGHT * group.getWorldScale(mouthScaleRef.current).y);
+      HAND.mouthValid = true;
 
       const bunsenState = useBunsenStandStorageStore.getState();
       if (bunsenState.onWorkbench) {
@@ -503,8 +575,10 @@ export function InspectableTestTubeSlot({
         // A plain ref write inside `useFrame` вЂ” see `useInspectionSlosh`'s own
         // precedent for this same false positive on mutable per-frame state.
         nearRingRef.current = Math.hypot(dx, dz) < TUBE_RING_ATTACH_RADIUS;
+        WORKBENCH_TUBE_DROP.nearRing = nearRingRef.current;
       } else {
         nearRingRef.current = false;
+        WORKBENCH_TUBE_DROP.nearRing = false;
       }
       // Already full size the whole time it's being dragged вЂ” only an
       // `arrivingRef` run (below) ever needs to grow this from empty.
@@ -572,7 +646,8 @@ export function InspectableTestTubeSlot({
       {/* Back from the clamp: seen flying home to its slot. */}
       <ArrivalFlight arrival={rackArrival}>
         <primitive object={instance} />
-        <ReagentHoverRim object={instance} active={hovered || isHeld} />
+        {/* Carried: the on-object rim; hovered: the silhouette outline (`NormalHoverOutline`, above). */}
+        <ReagentHoverRim object={instance} active={isHeld} />
       </ArrivalFlight>
       {/* The ONLY raycast target (the real glass had raycasting disabled
           above) вЂ” noticeably bigger than the tube itself, see
@@ -624,7 +699,7 @@ export function InspectableTestTubeSlot({
             : undefined
         }
       >
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        <meshBasicMaterial visible={false} />
       </mesh>
     </group>
   );

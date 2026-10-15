@@ -45,16 +45,21 @@ export function bottleToTray(place: CarryPlace, instanceId: string): boolean {
   return true;
 }
 
-/** A bottle from the tray down to a place. */
-export function bottleFromTray(instanceId: string, place: CarryPlace): boolean {
+/**
+ * A bottle from the tray down to a place.
+ *
+ * @param index where in the bench's row it goes (the others making room,
+ *   `workbenchLayout`); appended when not given
+ */
+export function bottleFromTray(instanceId: string, place: CarryPlace, index?: number): boolean {
   const state = useReagentStorageStore.getState();
   const item = state.trayItems.find((candidate) => candidate.instanceId === instanceId);
   if (!item) return false;
+  const bench = [...state.workbenchItems];
+  bench.splice(index ?? bench.length, 0, item);
   useReagentStorageStore.setState({
     trayItems: state.trayItems.filter((candidate) => candidate.instanceId !== instanceId),
-    ...(place === "workbench"
-      ? { workbenchItems: [...state.workbenchItems, item] }
-      : { fumeHoodItems: [...state.fumeHoodItems, item] }),
+    ...(place === "workbench" ? { workbenchItems: bench } : { fumeHoodItems: [...state.fumeHoodItems, item] }),
   });
   return true;
 }
@@ -103,8 +108,9 @@ export function tubeFromTray(instanceId: string, place: CarryPlace): boolean {
 /* ---------- stand and lamp ---------- */
 
 /**
- * The stand from a place onto the tray — with the lamp if it stands beside
- * it. Not with a tube in the clamp: it would ride the tray unseen.
+ * The stand from a place onto the tray. Not with a tube in the clamp: it
+ * would ride the tray unseen. The lamp is its own piece of equipment and
+ * stays where it is (VL-020) — RMB on it puts it on the tray.
  */
 export function standToTray(place: CarryPlace): boolean {
   if (standPlace() !== place) return false;
@@ -112,11 +118,10 @@ export function standToTray(place: CarryPlace): boolean {
     return refuse("Сначала выньте пробирку из лапки штатива");
   }
   useBunsenStandStorageStore.setState({ onWorkbench: false, onFumeHood: false, onTray: true });
-  if (useBurnerStore.getState().place === place) lampToTray(place);
   return true;
 }
 
-/** The stand from the tray down to a place — and the lamp with it if it rides the tray too. */
+/** The stand from the tray down to a place; the lamp comes down on its own (VL-020). */
 export function standFromTray(place: CarryPlace): boolean {
   if (!useBunsenStandStorageStore.getState().onTray) return false;
   useBunsenStandStorageStore.setState({
@@ -125,7 +130,6 @@ export function standFromTray(place: CarryPlace): boolean {
     onFumeHood: place === "fumeHood",
     attachedTubeSlotIndex: null,
   });
-  if (useBurnerStore.getState().place === "tray") lampFromTray(place);
   return true;
 }
 
@@ -146,8 +150,9 @@ export function lampFromTray(place: CarryPlace): boolean {
 export function unloadTray(place: CarryPlace): void {
   for (const item of useReagentStorageStore.getState().trayItems) bottleFromTray(item.instanceId, place);
   for (const tube of useTestTubeStorageStore.getState().trayTestTubes) tubeFromTray(tube.instanceId, place);
+  // Each on its own: the lamp no longer rides with the stand (VL-020).
   if (useBunsenStandStorageStore.getState().onTray) standFromTray(place);
-  else if (useBurnerStore.getState().place === "tray") lampFromTray(place);
+  if (useBurnerStore.getState().place === "tray") lampFromTray(place);
 }
 
 /** Whether anything rides the tray. */

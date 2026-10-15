@@ -1,0 +1,69 @@
+/*
+ * Game cursor: a drawn hand for the whole app, a blue nitrile glove once the
+ * player has put the gloves on (`html.vg-gloves`, see `GloveCursorSync`).
+ * Hotspot is the index fingertip (8, 1).
+ *
+ * The scene signals hover through `body.style.cursor = "pointer" | "auto"`
+ * from many components, and the UI through `cursor: pointer` on buttons —
+ * all of those become the hand here (`!important` beats inline styles). The
+ * cursors that MEAN something stay the system ones: grab/grabbing (dragging
+ * the stand), not-allowed (a blocked action), none (the hand
+ * holding an item under Pointer Lock). Text fields get the same hand with an
+ * orange "I" above the thumb; its hotspot is the same fingertip (11, 1 — the
+ * hand sits 3 px further right to make room for the "I").
+ *
+ * While the left button is held (`html.vg-pressing`, see `ClickFeedback`) every
+ * cursor swaps to its "pressed" frame: the index finger foreshortened, as if
+ * bent against the screen, the rest of the hand unchanged. Its hotspot is the
+ * pressed fingertip, 4 px lower in the image (8 5 / 11 5), so the fingertip
+ * stays on the click point and the hand rides up to meet it.
+ */
+:root {
+  --vg-cursor: image-set(url("/assets/cursors/hand.png") 1x, url("/assets/cursors/hand@2x.png") 2x) 8 1, auto;
+  --vg-cursor-text:
+    image-set(url("/assets/cursors/hand-text.png") 1x, url("/assets/cursors/hand-text@2x.png") 2x) 11 1, text;
+}
+
+:root.vg-pressing {
+  --vg-cursor: image-set(url("/assets/cursors/hand-pressed.png") 1x, url("/assets/cursors/hand-pressed@2x.png") 2x) 8 5, auto;
+  --vg-cursor-text:
+    image-set(url("/assets/cursors/hand-text-pressed.png") 1x, url("/assets/cursors/hand-text-pressed@2x.png") 2x) 11 5, text;
+}
+
+:root.vg-gloves {
+  --vg-cursor: image-set(url("/assets/cursors/glove.png") 1x, url("/assets/cursors/glove@2x.png") 2x) 8 1, auto;
+  --vg-cursor-text:
+    image-set(url("/assets/cursors/glove-text.png") 1x, url("/assets/cursors/glove-text@2x.png") 2x) 11 1, text;
+}
+
+:root.vg-gloves.vg-pressing {
+  --vg-cursor: image-set(url("/assets/cursors/glove-pressed.png") 1x, url("/assets/cursors/glove-pressed@2x.png") 2x) 8 5, auto;
+  --vg-cursor-text:
+    image-set(url("/assets/cursors/glove-text-pressed.png") 1x, url("/assets/cursors/glove-text-pressed@2x.png") 2x) 11 5, text;
+}
+
+html,
+body {
+  cursor: var(--vg-cursor);
+}
+
+body[style*="cursor: pointer"],
+body[style*="cursor: auto"],
+body[style*="cursor: default"],
+button:not(:disabled),
+input:is([type="checkbox"], [type="radio"], [type="range"]):not(:disabled),
+a[href],
+[role="button"],
+select,
+summary,
+[style*="cursor: pointer"],
+[style*="cursor: default"] {
+  cursor: var(--vg-cursor) !important;
+}
+
+input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], :disabled),
+textarea:not(:disabled),
+[contenteditable="true"],
+[style*="cursor: text"] {
+  cursor: var(--vg-cursor-text) !important;
+}

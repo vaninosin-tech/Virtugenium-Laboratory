@@ -16,13 +16,15 @@ export function standLocation(): TubeLocation | null {
 }
 
 /**
- * A cracked tube is thrown away: a clean empty one goes into the clamp in
- * its place, the clamp goes back onto the stand, and the glass starts cold.
- * The player fills the new tube again from the bottles at hand.
+ * A cracked tube is thrown away: a clean empty one takes its place — in the
+ * clamp, which goes back onto the stand, or in the rack when it was heated in
+ * the hand (VL-020) — and the glass starts cold. The player fills the new
+ * tube again from the bottles at hand.
  */
 export function replaceCrackedTube(): void {
-  const location = standLocation();
-  const index = useBunsenStandStorageStore.getState().attachedTubeSlotIndex;
+  const target = useHeatingStore.getState().target;
+  const location = target.mode === "hand" ? target.location : standLocation();
+  const index = target.mode === "hand" ? target.index : useBunsenStandStorageStore.getState().attachedTubeSlotIndex;
   if (location !== null && index !== null) {
     const list =
       location === "workbench"

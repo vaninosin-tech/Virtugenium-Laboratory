@@ -1,4 +1,4 @@
-import { HAND } from "./useHandStore";
+import { HAND, useHandStore } from "./useHandStore";
 
 /** How far (px) the mouse moves with the button down before a press is a drag, not a click. */
 const DRAG_SLOP_PX = 6;
@@ -11,8 +11,16 @@ const DRAG_SLOP_PX = 6;
  *
  * @param take takes it into the hand; false if it cannot be taken now
  */
-export function pressToTake(event: { readonly button: number; readonly clientX: number; readonly clientY: number }, take: () => boolean): void {
+export function pressToTake(
+  event: { readonly button: number; readonly clientX: number; readonly clientY: number },
+  take: () => boolean,
+  /** Only a drag takes it: a click is the object's own (the lamp's click heats). */
+  { dragOnly = false }: { readonly dragOnly?: boolean } = {},
+): void {
   if (event.button !== 0) return;
+  // One thing in the hand at a time: with something held, nothing else is taken
+  // (what is held still does its own thing at its target — that is the hand's, not a take).
+  if (useHandStore.getState().held) return;
   const { clientX, clientY } = event;
   const cleanup = () => {
     window.removeEventListener("pointermove", handleMove);
@@ -25,7 +33,7 @@ export function pressToTake(event: { readonly button: number; readonly clientX: 
   };
   const handleUp = () => {
     cleanup();
-    take();
+    if (!dragOnly) take();
   };
   window.addEventListener("pointermove", handleMove);
   window.addEventListener("pointerup", handleUp);

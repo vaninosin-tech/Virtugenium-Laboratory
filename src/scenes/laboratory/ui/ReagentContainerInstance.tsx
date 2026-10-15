@@ -17,7 +17,7 @@ import { nextFreeTraySlot, useReagentStorageStore } from "../lib/useReagentStora
 import { useTestTubeDragStore } from "../lib/useTestTubeDragStore";
 import { traySlotLocalPosition } from "../lib/useTrayReagentAreaStore";
 import type { ContainerType, ReagentContainerConfig } from "../../../entities/laboratory/reagents";
-import { ReagentHoverRim } from "./ReagentHoverRim";
+import { useNormalHoverOutline } from "./NormalHoverOutline";
 
 /** Exported for `ReagentStaticDisplay` (non-interactive tray/workbench copies of taken reagents) — same asset, same construction, just no click/hover/animation plumbing. */
 export const MODEL_PATH = "/assets/models/ReagentContainers.glb";
@@ -125,8 +125,11 @@ type Phase =
 
 /**
  * A single box, sized and centered to `object`'s current bounds, meant to be
- * rendered as an invisible (fully transparent, NOT `visible={false}` — R3F
- * skips non-visible objects for pointer events entirely) proxy mesh that is
+ * rendered as an invisible proxy mesh — its MATERIAL `visible={false}`, so it
+ * is never drawn (nor written into the outline pass's depth, where a
+ * transparent zero-opacity box hid the very object it wraps), while the mesh
+ * itself stays visible to raycasting; never the mesh's own `visible`, which
+ * R3F pointer events skip — that is
  * the ONLY raycast target for hover/click on a reagent container. A
  * container is several overlapping meshes (glass body, cap, label, contents)
  * each independently raycastable by default; moving the cursor across the
@@ -958,6 +961,9 @@ export function ReagentContainerInstance({
   // recreates the underlying Three.js object with `position`/`rotation`
   // straight from props), so the shelf shows original stock with no manual
   // transform reset needed here.
+  // Hover: the silhouette outline round the bottle (`NormalHoverOutline`) — its glass, and its cap while on it.
+  useNormalHoverOutline({ root: instance, active: hovered && !anyInspected, container: true });
+
   if (takenThisSession) return null;
 
   return (
@@ -978,17 +984,14 @@ export function ReagentContainerInstance({
         setHovered(false);
       }}
     >
-      {/* The surface rim provides hover feedback without a second scene
-          render for a duplicate postprocessing outline. */}
+      {/* Hover: the silhouette outline (`NormalHoverOutline`, above). */}
       <primitive object={instance} />
-      <ReagentHoverRim object={instance} active={hovered && !anyInspected} containerOnly />
       {/* The ONLY raycast target for this group (see `createHoverHitboxGeometry`'s
-          doc) — `instance`'s own meshes had raycasting disabled above. Fully
-          transparent, but NOT `visible={false}`: R3F skips non-visible
-          objects for pointer events entirely, which would make the whole
-          reagent unclickable/unhoverable. */}
+          doc) — `instance`'s own meshes had raycasting disabled above. Never
+          drawn (its material's `visible`), but the mesh itself stays visible:
+          R3F skips non-visible objects for pointer events entirely. */}
       <mesh geometry={hoverHitboxGeometry}>
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        <meshBasicMaterial visible={false} />
       </mesh>
     </group>
   );

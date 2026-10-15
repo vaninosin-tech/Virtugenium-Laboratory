@@ -1,19 +1,26 @@
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
-import type * as THREE from "three";
+import * as THREE from "three";
 
 import type { Position3 } from "./layout";
 import { judgeMix, reagentName } from "./mixingRules";
 import { tryAddToTube, tryPourBetweenTubes } from "./pourIntoTube";
 import { standLocation } from "./standStationActions";
 import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
-import { useBurnerStore, type BurnerPhase } from "./useBurnerStore";
+import { useBurnerStore } from "./useBurnerStore";
+import { applyErrorRule } from "../../../features/tablet/lib/penalties";
+import { FLAME_REACH, LAMP_FLAME } from "./lampFlame";
+import { reactionTriggerFor } from "./tubeReactions";
 import { useHeatingStore } from "./useHeatingStore";
+import { useLabNoticeStore } from "./useLabNoticeStore";
 import { useStandStationStore } from "./useStandStationStore";
-import { CAP_MS, CLAMP_TUBE_MOUTH, standBusy, useStandMotionStore } from "./useStandMotionStore";
-import { takeIntoHand, useHandStore, type HeldItem } from "./useHandStore";
+import { CLAMP_TUBE_MOUTH, standBusy, useStandMotionStore } from "./useStandMotionStore";
+import { HAND, takeIntoHand, useHandStore, type HeldItem } from "./useHandStore";
+import { equipmentHandAction } from "./equipmentCarry";
+import { JAR_AIM, type PourSource } from "./pourSources";
 import { overTableTray } from "./tableTray";
-import { bottleToTray, lampToTray } from "./trayCarry";
+import { bottleToTray, tubeToTray } from "./trayCarry";
+import { worktopZoneAt } from "./worktopBounds";
 import { toggleTubePick, useTestTubeDragStore } from "./useTestTubeDragStore";
 import { useTestTubeStorageStore, type StoredTestTube, type TubeLocation } from "./useTestTubeStorageStore";
 
@@ -45,8 +52,13 @@ export interface StandAction {
   readonly blocked: boolean;
   /** @param origin where the clicked object is in the world, when known — a tube flies from there */
   readonly run: (origin?: Position3) => void;
-  /** What a held item is brought to for this — the tray has no snap pose and no outline of its own. */
-  readonly part?: "tray";
+  /** The held item stays in the hand after it (a tube a bottle is pouring into). */
+  readonly keepHeld?: boolean;
+  /**
+   * Where a held item is set down by this, rather than used at the stand:
+   * onto a tray, or in a spot of the worktop (the stand moved on the table).
+   */
+  readonly part?: "tray" | "place";
 }
 
 const NOTHING = () => {};
@@ -73,11 +85,6 @@ const foreignIn = (adding: readonly string[]): string | null => {
 };
 const foreignLabel = (reagentId: string) => `${reagentName(reagentId)} в этом опыте не используется`;
 
-const BURNER_LABEL: Record<BurnerPhase, string> = {
-  capped: "Снять колпачок со спиртовки",
-  open: "Зажечь спиртовку",
-  lit: "Погасить спиртовку колпачком",
-};
 
 /**
  * What clicking `target` does right now. `null` means the click is not the
@@ -96,17 +103,15 @@ export function standActionFor(target: StandTarget, { fromHand = false }: { read
   const location = standLocation();
 
   if (target.kind === "burner") {
-    // Alone on the table (no stand to heat at): it is only to be carried (VL-017).
-    if (useBurnerStore.getState().place === "workbench" && !useBunsenStandStorageStore.getState().onWorkbench) {
-      return action("Поставить на поднос", () => {
-        lampToTray("workbench");
-      });
-    }
-    const phase = useBurnerStore.getState().phase;
-    return action(BURNER_LABEL[phase], () => {
-      useStandMotionStore.getState().hold(CAP_MS);
-      useBurnerStore.getState().advance();
-    });
+    // One click heats (VL-020): the cap comes off, the lamp lights, the clamp
+    // with its tube comes off the stand to the flame and the mini-game
+    // starts. There is no cap-only click; the lamp goes out by itself when
+    // the heating is over (`HeatingRuntime`).
+    const place = useBurnerStore.getState().place;
+    const clampedHere = location === place ? useBunsenStandStorageStore.getState().attachedTubeSlotIndex : null;
+    if (clampedHere === null) return blocked("Сначала закрепите пробирку в лапке штатива");
+    if (!needsHeat(tubesAt(place as TubeLocation)[clampedHere]?.contents ?? [])) return blocked(NOTHING_TO_HEAT);
+    return action("Нагреть пробирку в лапке", startClampHeating);
   }
 
   const clampedIndex = useBunsenStandStorageStore.getState().attachedTubeSlotIndex;
@@ -114,11 +119,13 @@ export function standActionFor(target: StandTarget, { fromHand = false }: { read
   if (target.kind === "clamped-tube") {
     if (location === null || clampedIndex === null) return null;
     const burner = useBurnerStore.getState();
-    // The lamp is its own item: it heats only standing here, beside the stand.
-    if (burner.lit && burner.place === location) {
-      return action("Нагреть пробирку над спиртовкой", () => useHeatingStore.getState().enter());
-    }
-    return action("Вернуть пробирку в штатив для пробирок", () => {
+    // The clamp comes off the stand to the lamp's flame, wherever the lamp
+    // stands here (VL-020) — and only for contents that react when heated.
+    const lampHere = burner.place === location;
+    const clampedContents = tubesAt(location)[clampedIndex]?.contents ?? [];
+    if (lampHere && needsHeat(clampedContents)) return action("Нагреть пробирку в лапке", startClampHeating);
+    const back = "Вернуть пробирку в штатив для пробирок";
+    return action(back, () => {
       // Seen flying back from where it hangs now.
       const mouth = CLAMP_TUBE_MOUTH.valid ? CLAMP_TUBE_MOUTH.point : null;
       if (mouth) useStandMotionStore.getState().arriveInRack(location, clampedIndex, [mouth.x, mouth.y - TUBE_LENGTH, mouth.z]);
@@ -207,7 +214,7 @@ export function clickWorkbenchRackTube(index: number, instanceId: string, origin
 const MAGNET_REACH = 0.13;
 
 /** The stand target a held item becomes when brought to the stand. */
-function heldAsTarget(held: Exclude<HeldItem, { kind: "tray" }>): StandTarget {
+function heldAsTarget(held: Exclude<HeldItem, { kind: "tray" | "equipment" | "clamp" }>): StandTarget {
   if (held.kind === "bottle") {
     return { kind: "bottle", location: held.location, reagentId: held.reagentId, instanceId: held.instanceId };
   }
@@ -222,15 +229,106 @@ function heldAsTarget(held: Exclude<HeldItem, { kind: "tray" }>): StandTarget {
 export function handActionFor(held: HeldItem, point: THREE.Vector3): StandAction | null {
   // Off the tray: set down where the player stands (`trayHandAction`, VL-017).
   if (held.kind === "tray") return null;
+  // A tube held up to a bottle: the bottle pours into it (`JAR_AIM`).
+  if (JAR_AIM.source) return jarPourAction(held, JAR_AIM.source);
+  // The stand or the lamp off the table: onto the tray, or the stand moved (`equipmentCarry`).
+  if (held.kind === "equipment") return equipmentHandAction(held, point);
+  // The clamp off the stand (`clampCarry`): at the lamp's flame it heats its tube
+  // there — the lamp's own heating, its rules and caption; elsewhere it goes back.
+  if (held.kind === "clamp") {
+    if (!nearFlame(held.location, point)) return null;
+    return standActionFor({ kind: "burner" }) ?? blocked("Подождите — нагреть сейчас нельзя");
+  }
+  // A bare tube brought to the lamp's flame (VL-020). The workbench rack's
+  // carried tube asks the same from its own carry (`InspectableTestTubeSlot`).
+  if (held.kind === "tube" && nearFlame(held.location, point)) return heatInHandAction(held.location, held.index);
   // A bottle from the bench brought over the tray on the table goes onto it (VL-017).
   if (held.kind === "bottle" && held.location === "workbench" && overTableTray(point)) {
     return { label: "Поставить на поднос", blocked: false, part: "tray", run: () => void bottleToTray("workbench", held.instanceId) };
   }
-  if (!CLAMP_TUBE_MOUTH.valid) return null;
-  const dx = point.x - CLAMP_TUBE_MOUTH.point.x;
-  const dz = point.z - CLAMP_TUBE_MOUTH.point.z;
-  if (Math.hypot(dx, dz) > MAGNET_REACH) return null;
-  return standActionFor(heldAsTarget(held), { fromHand: true });
+  // At the stand, its use there comes first; only then where it is set down.
+  if (nearClamp(point)) return standActionFor(heldAsTarget(held), { fromHand: true });
+  // A tube from the hood's rack brought over the tray there goes onto it.
+  if (held.kind === "tube" && worktopZoneAt(point) === "hood-tray") {
+    return { label: "Поставить на поднос", blocked: false, part: "tray", run: () => void tubeToTray(held.location, held.index) };
+  }
+  return null;
+}
+
+/** The tube held in the hand, as its place's list knows it; null — what is held is not a tube. */
+function heldTube(held: HeldItem): { readonly location: TubeLocation; readonly index: number } | null {
+  if (held.kind === "workbench-tube") return { location: "workbench", index: held.index };
+  if (held.kind === "tube") return { location: held.location, index: held.index };
+  return null;
+}
+
+/**
+ * A tube held up to a bottle (`JAR_AIM`): the bottle pours into it where it
+ * is held — the same pour, the same rules as a bottle brought to the clamped
+ * tube (`standActionFor`): the same reagent twice or one this experiment does
+ * not use is refused; a wrong order is the player's mistake to make. The
+ * tube stays in the hand.
+ */
+export function jarPourAction(held: HeldItem, source: PourSource): StandAction | null {
+  const tube = heldTube(held);
+  if (!tube || tube.location !== source.location) return null;
+  const contents = tubesAt(tube.location)[tube.index]?.contents;
+  if (!contents) return null;
+  const { reagentId, instanceId } = source;
+  if (useHeatingStore.getState().active || standBusy()) return blocked(`Подождите — ${formula(reagentId)} сейчас не налить`);
+  if (contents.includes(reagentId)) return blocked(`${formula(reagentId)} уже в пробирке`);
+  const foreign = foreignIn([reagentId]);
+  if (foreign) return blocked(foreignLabel(foreign));
+  const verb = reagentConfig(reagentId)?.contentsKind === "solid" ? "Насыпать" : "Налить";
+  return {
+    label: `${verb} ${formula(reagentId)} в пробирку`,
+    blocked: false,
+    keepHeld: true,
+    run: () => {
+      const pour = () => tryAddToTube(tube.location, tube.index, reagentId);
+      // In when the bottle is tipped over the tube's mouth, where it is held (`PourMotion`).
+      useStandMotionStore.getState().startPour(instanceId, pour, undefined, "hand");
+    },
+  };
+}
+
+/** Whether the hand at `point` has brought what it holds to the stand's clamp (`MAGNET_REACH`). */
+export function nearClamp(point: THREE.Vector3): boolean {
+  if (!CLAMP_TUBE_MOUTH.valid) return false;
+  return Math.hypot(point.x - CLAMP_TUBE_MOUTH.point.x, point.z - CLAMP_TUBE_MOUTH.point.z) <= MAGNET_REACH;
+}
+
+/** The hover caption over the tube in the clamp: it is taken out into the hand. */
+export const TAKE_CLAMPED_TUBE = "Взять пробирку из лапки";
+
+/**
+ * The tube in the clamp, pressed: taken out into the hand. The clamp is left
+ * empty; the tube is the same tube of its place's rack list (the clamp only
+ * ever pointed at it), now carried — from the clamp, where it was
+ * (`HAND.takenFrom`) — and put back in its rack hole if let go anywhere.
+ */
+export function takeClampedTube(): boolean {
+  if (useHandStore.getState().held || standBusy() || useHeatingStore.getState().active) return false;
+  const location = standLocation();
+  const index = useBunsenStandStorageStore.getState().attachedTubeSlotIndex;
+  if (location === null || index === null) return false;
+  const tube = tubesAt(location)[index];
+  if (!tube) return false;
+  const from = CLAMP_TUBE_MOUTH.valid ? new THREE.Vector3().setFromMatrixPosition(CLAMP_TUBE_MOUTH.root) : null;
+  useBunsenStandStorageStore.getState().detachTestTube();
+  useStandStationStore.getState().close();
+  if (location === "workbench") {
+    const instanceId = `workbench-tube-slot-${index}`;
+    takeIntoHand({ kind: "workbench-tube", index, instanceId }, [0, 0, 0]);
+    useTestTubeDragStore.setState({ heldInstanceId: instanceId, pendingPickInstanceId: null });
+  } else {
+    takeIntoHand({ kind: "tube", location, index, instanceId: tube.instanceId }, [0, 0, 0]);
+  }
+  if (from) {
+    HAND.takenFrom.copy(from);
+    HAND.takenFromValid = true;
+  }
+  return true;
 }
 
 /** The hover caption for something that can be taken into the hand. */
@@ -243,4 +341,57 @@ export function takeLabel(target: StandTarget): string | null {
     return tube.contents.length === 0 ? "Взять пустую пробирку" : `Взять пробирку (${tube.contents.map(formula).join(" + ")})`;
   }
   return null;
+}
+
+/* ---------- heating (VL-020) ---------- */
+
+/** Whether these contents are one of the implemented reactions that need heating — nothing else is heated. */
+const needsHeat = (contents: readonly string[]): boolean => reactionTriggerFor(contents) === "heat";
+
+const NOTHING_TO_HEAT = "Нагревать нечего — в пробирке нет реакции, которой нужен нагрев";
+
+/** The lamp lights by itself for the heating — cap off, wick lit — and goes out by itself after it. */
+const lightLamp = () => useBurnerStore.getState().setLit(true);
+
+function startClampHeating(): void {
+  lightLamp();
+  useHeatingStore.getState().enter();
+}
+
+/** Experiment 1: a tube heated in the bare hand rather than in the clamp. */
+const HAND_HEAT_ERROR_RULE_ID = "error-1-heat-hand";
+
+/** Whether `point` (over the worktop at `location`) is under the lamp's flame there. */
+export function nearFlame(location: TubeLocation, point: THREE.Vector3): boolean {
+  if (!LAMP_FLAME.valid || LAMP_FLAME.place !== location) return false;
+  return Math.hypot(point.x - LAMP_FLAME.point.x, point.z - LAMP_FLAME.point.z) < FLAME_REACH;
+}
+
+/**
+ * A bare tube in the hand, brought to the lamp: heat it right there (VL-020).
+ * Allowed — it is the player's mistake to make, and like every mistake it
+ * looks like any other action (see this module's doc) — but charged: the
+ * proper way is the clamp off the stand. An empty tube may be heated too:
+ * the glass heats, nothing reacts, and the heating ends as it always does
+ * (`useHeatingStore`). Contents with no reaction that needs heat are not heated.
+ */
+export function heatInHandAction(location: TubeLocation, index: number): StandAction | null {
+  if (useBurnerStore.getState().place !== location) return null;
+  const tube = tubesAt(location)[index];
+  if (!tube) return null;
+  if (tube.contents.length > 0 && !needsHeat(tube.contents)) return blocked(NOTHING_TO_HEAT);
+  const { instanceId } = tube;
+  return action("Нагреть пробирку над спиртовкой", () => {
+    // Out of the hand: the hand lets go and the tube is held in the flame instead (`HandHeatRig`).
+    if (useTestTubeDragStore.getState().heldInstanceId === instanceId) useTestTubeDragStore.getState().releaseIfHeld(instanceId);
+    useHandStore.getState().release();
+    if (typeof document !== "undefined" && document.pointerLockElement) document.exitPointerLock();
+    lightLamp();
+    useHeatingStore.getState().enter(undefined, { mode: "hand", location, index, instanceId });
+    const penalty = applyErrorRule(HAND_HEAT_ERROR_RULE_ID, "safety-violation");
+    if (penalty) {
+      const points = penalty.charged ? ` (${penalty.rule.points})` : "";
+      useLabNoticeStore.getState().show(`Ошибка: пробирку греют в руке, а не в лапке штатива${points}`, "error");
+    }
+  });
 }

@@ -239,6 +239,7 @@ export const LABORATORY_CONTENT: LaboratoryData = {
           errorScoreRules: [
             { id: "error-1-pour", points: -1, reason: "Нарушен порядок смешивания" },
             { id: "error-1-heat", points: -2, reason: "Пробирка нагрета без предварительного прогрева" },
+            { id: "error-1-heat-hand", points: -2, reason: "Пробирка нагрета в руке, а не в лапке штатива" },
           ],
         },
         {
