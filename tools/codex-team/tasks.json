@@ -2,12 +2,12 @@
   "maxHours": 6,
   "nodeModulesFrom": "D:/Claude/virtugenium-lab-transfer/virtugenium-lab-transfer/node_modules",
   "jobs": [
-    { "id": "fieldA", "prompt": "tools/codex-team/tasks/31-fieldA.md",
+    { "id": "fielda", "prompt": "tools/codex-team/tasks/31-fieldA.md",
       "owns": ["src/scenes/laboratory/lib/tubeSilverField.ts", "src/scenes/laboratory/lib/tubeSilverField.test.ts",
                "src/scenes/laboratory/lib/tubeFlowSolver.ts", "src/scenes/laboratory/lib/tubeFlowSolver.test.ts",
                "src/scenes/laboratory/lib/silverStage.ts", "src/scenes/laboratory/lib/night/stage1/",
                "tests/night/stage1/", "tests/night/wave4a/", "docs/night/wave4a/", "docs/night/stage1/"] },
-    { "id": "pourB", "prompt": "tools/codex-team/tasks/32-pourB.md",
+    { "id": "pourb", "prompt": "tools/codex-team/tasks/32-pourB.md",
       "owns": ["src/scenes/laboratory/ui/PourStream.tsx", "src/scenes/laboratory/lib/tubeReactionVisuals.ts",
                "tests/tubeReactionVisuals.test.ts", "tests/night/wave4b/", "docs/night/wave4b/"] }
   ]
