@@ -1,44 +1,38 @@
-# AgCl stage 1, iteration 3
+# AgCl stage 1, iteration 4
 
-## Design
+## Design and changes
 
-Experiment 2 defaults to `window.__silverStage === 1`. The local reaction product feeds one conserved `dense` scalar on the liquid grid. The flow solver transports dense mass and its three mass-weighted birth coordinates; conservative neighboring fluxes settle and compact the field. No fine suspension, instanced flocs, fragments, or separate sediment is visible in stage 1. The separate `PourStream` component remains mounted and unmodified. Experiments 1, 3, and 4 use their original render branches; the reaction visual test exercises all four kinds.
+Experiment 2 defaults to `window.__silverStage === 1`; set a different numeric value and recreate the tube to use the retained older silver path. Stage 1 forms all solid in the conserved `dense` liquid-grid scalar at the `precipitatePair` reaction source. `TubeFlowSolver.transport` carries dense mass and its three mass-weighted birth coordinates. Neighbor fluxes settle and compact the dense phase. Fine suspension, instanced flocs, fragments and separate sediment are inactive in this view. The existing `PourStream` remains mounted and its code was not changed. The silver volume renders at order -0.25, before the default transparent stream order.
 
-This iteration changes settling to `0.004 + 0.015*c/(c+0.3)` m/s, where `c` is local dense concentration. Compact cotton falls faster than dilute wisps. Local conservative compaction transfers at most 7.5% of a lower-density cell toward a neighbor at least 20% denser in one 0.05 s step. The source is still only `precipitatePair` consumption. Every stage-1 solid unit remains in `dense`, including material that reaches the bowl.
+The iteration 4 change increases conservative, three-axis compaction toward flow-created concentration peaks. A neighboring pair transfers up to 20% of its lower-density cell in a 0.05 s step when the higher cell is at least 8% denser. Settling remains `0.004 + 0.015*c/(c+0.3)` m/s. No additional source, random scattering or scripted position was introduced. The LOW grid is 8 x 18 x 8; no new grid or per-frame buffer was added.
 
-The ray march uses 56 fixed primary samples and at most three light samples per occupied primary step. A smooth concentration threshold is perturbed by three transported-coordinate noise octaves and three domain-warp values. Higher-frequency erosion and weaker core extinction expose folds and holes. A cylindrical liquid mask and radial fade prevent visible proxy faces. The instantaneous product-source tint is near neutral, very faint, and discarded below a concentration of 0.015; it does not use accumulated ions. The dense mesh renders before the transparent `PourStream` (default order 0) so the stream is not overpainted by this mesh. Shader objects and buffers are constructed with the tube, before reaction onset.
+The ray march uses 56 primary samples and at most three light samples per occupied primary sample. Its broad clump mask and folds use isotropic current physical coordinates with domain warp. Transported birth coordinates contribute only a bounded, low-frequency displacement of at most 0.12 tube radii per axis. Fine erosion uses current-position noise at 10 and 23 cycles per radius, so settling cannot stretch those octaves into vertical lines. A broad noise threshold makes gaps and an uneven outline even where conserved field mass remains dilute. Self-shadowing is stronger, and the white material has no emission. The shader and textures are created with the tube, before reaction onset. The cylindrical wet mask and radial fade still exclude proxy-box faces.
 
-Set `window.__silverStage = 1` before constructing a tube, or leave it unset, to select stage 1. Set another numeric value and recreate the tube for the retained older silver path. An active tube cannot switch mass representations in place.
+The product-source tint remains restricted to instantaneous nonzero reaction source above the existing 0.015 display threshold. The liquid outside dense cotton and the active mixing region has no stage-1 suspension tint. Experiments 1, 3 and 4 use their original rendering branches. The reaction visual tests cover all four kinds; no non-silver branch was edited in this iteration.
 
-## Numerical evidence
+## Numeric diagnostics
 
-The LOW grid is 8 x 18 x 8. [ASCII slices](slices.txt) show x-y and x-z midplanes before delivery and at 0.25, 1, 2.5, 5, and 8 seconds. The first dense center is at y=10.74, below the top wet row y=11. Floor mass in the lowest three rows is 0.1% after one second, 43.5% after 2.5 seconds, 86.9% after five seconds, and 94.4% after eight seconds. These measurements show upper birth followed by floor accumulation; they do not establish visual appearance or physical calibration. The above-0.04 vertical span grows from two cells at the first step to nine cells by step 50.
+[ASCII slices](slices.txt) show x-y and x-z midplanes for dense, Ag+, Cl- and product source before delivery and at 0.25, 1, 2.5, 5 and 8 seconds. With the LOW grid and a center pour, the first dense center is y=10.74, below the top wet row y=11. The vertical span above concentration 0.04 grows from two cells at the first step to nine by step 20 and twelve by step 50. Floor mass in the lowest three rows is 0% at 1 second, 48.6% at 2.5 seconds, 89.3% at 5 seconds and 95.0% at 8 seconds. These are simulation measurements, not visual observations.
 
-At every tested step, including level change, tilt, and shaking, total dense mass equals consumed reagent within 1e-8. The largest observed mass-balance error was 2.831e-15. No checked field value was negative or non-finite. At eight seconds, 323 of 323 cells above concentration 0.01 belong to the largest connected component. The final x center differs by pour location: 3.502 grid cells for a center pour and 4.423 for a wall pour. A repeated center pour produced identical arrays and diagnostics.
+At every checked step, including level change, tilt and shaking, `dense` equals consumed reagent within 1e-8; the largest recorded mass-balance error was 2.554e-15. No checked dense or ion cell was negative or non-finite. At eight seconds, the largest above-0.01 connected component contains 222 of 233 occupied cells, across three components. The dense x center is 3.557 grid cells for a center pour and 4.522 for a wall pour. Repeated center pours produced identical arrays and diagnostics.
 
 ## Verification
 
 - `node node_modules/typescript/bin/tsc --noEmit`: passed, zero errors.
-- Focused stage 1 tests: 2 files, 10 passed, 0 failed.
-- Silver field and reaction visual tests: 2 files, 33 passed, 0 failed. The later isolated rerun includes the new stream-layer assertion.
-- Full suite, one process: 45 files passed, 3 failed; 311 tests passed, 4 failed, 2 expected failures. Failures: motion test timed out at 30 s; barium circulation test timed out at 5 s; copper CPU test measured 3.20 ms against 3 ms; copper completion test timed out at 5 s.
-- Isolated rerun of those three files plus reaction visuals: 3 files passed, 1 failed; 53 tests passed, 1 failed. Only the motion test still timed out at 30 s. The motion path is outside this worker's ownership. No full-suite rerun was attempted.
-
-The render changes affect only the silver branch. The new assertion verifies the silver field's order relative to the default stream order; existing visual tests verify that non-silver kinds have no silver dense mesh and keep their resources. No non-silver path was edited.
+- Focused stage-1, silver-field and reaction-visual run: four files passed; 44 tests passed, zero failed.
+- After the final reduction of low-frequency warp amplitude, the density mapping file passed again: nine tests passed, zero failed. Typecheck also passed again. The full suite result below predates that amplitude-only adjustment and was not rerun.
+- Full suite, one Vitest process: 47 files passed, one failed; 315 tests passed, one failed, two expected failures. `tests/_g1_motion.test.ts` timed out at its 30-second limit. That barium motion test and its implementation are outside stage1 ownership. The full suite was not aborted or rerun.
+- `git diff --check` found no whitespace issue in owned files. It reports an existing trailing blank line in the out-of-ownership `vite.review.config.ts`.
 
 ## Modified files
 
-- `src/scenes/laboratory/lib/tubeSilverField.ts`: density-dependent settling and stronger conservative compaction.
-- `src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts`: local source tint, high-frequency cotton surface, and interior relief.
-- `src/scenes/laboratory/lib/night/stage1/density.ts`: pure CPU counterpart of the threshold and noise mapping.
-- `src/scenes/laboratory/lib/tubeReactionVisuals.ts`: silver-only dense mesh render order.
-- `tests/night/stage1/field.test.ts`: eight-second floor and early-arrival checks; streamlined per-cell checks to avoid test framework overhead.
-- `tests/tubeReactionVisuals.test.ts`: silver stream-layer assertion.
+- `src/scenes/laboratory/lib/tubeSilverField.ts`: stronger conservative compaction.
+- `src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts`: isotropic current-position clumps, folds and erosion; bounded birth-coordinate warp.
+- `src/scenes/laboratory/lib/night/stage1/density.ts`: CPU counterpart of the density mapping.
+- `tests/night/stage1/density.test.ts`: bounded deformation and directional-detail checks.
 - `docs/night/stage1/slices.txt`: regenerated numeric slices.
 - This report.
 
 ## Limits and integration
 
-No browser or GPU rendering was available in this worker. I inspected the supplied browser contact sheet, but cannot verify the revised silhouette, tint, stream visibility, shader compilation, or timing against browser frames. `PourStream.tsx` draws only during its existing pour window and uses the default transparent render order; stage 1 does not hide it. The provided crop starts at the tube mouth, so it cannot prove whether the free stream above the mouth was drawn. If a new browser capture still lacks the stream, its mesh and depth behavior in `src/scenes/laboratory/ui/PourStream.tsx` must be inspected by that file's owner. No change outside stage1 ownership was made.
-
-The pre-existing untracked `tests/_dbg.mjs` is outside stage1 ownership and was left untouched. Test logs in this directory are ignored by Git; the counts and failures above are recorded here so the report remains usable without those logs.
+I inspected the supplied iteration 4 and reference contact sheets, but this worker cannot render or capture browser frames. The revised silhouette, clear gaps, floor shape, GPU shader compilation and visible stream therefore remain unverified. The code keeps `PourStream` enabled for experiment 2; if a browser capture still lacks the stream, its render/depth behavior in `src/scenes/laboratory/ui/PourStream.tsx` needs review by that file's owner. The pre-existing changes to `vite.review.config.ts` and untracked `tests/_hide.mjs`, `tests/_hide5201.mjs` and `tests/_review5201.mjs` are outside stage1 ownership and were left untouched.

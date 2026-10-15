@@ -2,5 +2,6 @@
 import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()], clearScreen: false,
-  server: { host: "127.0.0.1", port: 5191, strictPort: true, fs: { allow: ["D:/Claude"] }, watch: { ignored: ["**/src-tauri/**", "**/tmp/**"] } }
+  server: { host: "127.0.0.1", port: 5201, strictPort: true, fs: { allow: ["D:/Claude"] }, watch: { ignored: ["**/src-tauri/**", "**/tmp/**"] } }
 });
+

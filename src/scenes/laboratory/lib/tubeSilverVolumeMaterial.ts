@@ -37,25 +37,33 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           mix(mix(hash3(i+vec3(0,0,1)), hash3(i+vec3(1,0,1)), f.x),
           mix(hash3(i+vec3(0,1,1)), hash3(i+vec3(1,1,1)), f.x), f.y), f.z);
       }
-      float cotton(vec4 field) {
+      float cotton(vec4 field, vec3 grid, vec3 position) {
         if (field.r <= 0.0) return 0.0;
-        vec3 p = field.gba;
-        vec3 warp = vec3(noise3(p*vec3(27.0,20.0,27.0)+vec3(3.1,7.2,1.7)),
-          noise3(p*vec3(29.0,22.0,29.0)+vec3(9.7,2.3,5.1)),
-          noise3(p*vec3(23.0,18.0,23.0)+vec3(4.8,8.4,2.7)))-0.5;
-        p += warp*0.027;
-        vec3 fibre = p*vec3(105.0,68.0,105.0);
-        float fold = noise3(fibre);
-        float shred = noise3(fibre*2.3+vec3(8.0,3.0,5.0));
-        float hair = noise3(fibre*5.1+vec3(1.0,6.0,9.0));
-        float detail = 0.48*fold+0.33*shred+0.19*hair-0.5;
+        // Current physical coordinates keep every octave isotropic. Transported
+        // birth coordinates only bend the broad clumps, with bounded stretch.
+        vec3 materialShift = clamp((field.gba-grid)*vec3(2.0,uHeight/uRadius,2.0),
+          vec3(-0.12),vec3(0.12));
+        vec3 q = vec3(position.x,position.y-uBottom,position.z)/uRadius;
+        vec3 broad = q + materialShift;
+        vec3 warp = vec3(noise3(broad*1.25+vec3(3.1,7.2,1.7)),
+          noise3(broad*1.35+vec3(9.7,2.3,5.1)),
+          noise3(broad*1.18+vec3(4.8,8.4,2.7)))-0.5;
+        broad += warp*0.32;
+        float lobe = noise3(broad*1.65);
+        float fold = noise3(broad*3.7+vec3(4.0,1.0,8.0));
+        vec3 fibre = q + warp*0.07;
+        float shred = noise3(fibre*10.0+vec3(8.0,3.0,5.0));
+        float hair = noise3(fibre*23.0+vec3(1.0,6.0,9.0));
         float concentration = field.r/(field.r+0.23);
-        float torn = smoothstep(0.12,0.25,concentration+detail*0.72);
-        float erosion = smoothstep(0.18,0.46,concentration)
-          * smoothstep(0.13,0.38,shred*0.65+hair*0.35);
-        float core = smoothstep(0.16,0.57,concentration);
-        return smoothstep(0.018,0.065,field.r)*torn
-          * (0.28+0.72*core)*(0.36+0.64*erosion);
+        // Broad gaps persist even when the field contains conserved dilute
+        // material. Folds and fine erosion never align to the grid axes.
+        float clump = smoothstep(0.43,0.57,
+          0.72*lobe+0.28*fold+0.08*concentration);
+        float torn = smoothstep(0.33,0.61,
+          0.54*fold+0.32*shred+0.14*hair);
+        float core = smoothstep(0.15,0.52,concentration);
+        return smoothstep(0.025,0.12,field.r)*clump
+          * (0.46+0.54*torn)*(0.42+0.58*core);
       }
       vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
         (p.y-uBottom)/uHeight, p.z/(2.0*uRadius)+0.5); }
@@ -86,7 +94,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           vec3 grid = uvw(p);
           vec4 field = texture(uDense,grid);
           float rim = 1.0-smoothstep(0.87,0.985,length(p.xz)/uRadius);
-          float solid = cotton(field)*rim;
+          float solid = cotton(field,grid,p)*rim;
           float source = texture(uOverlap,grid).r;
           float mixing = source > 0.015 ? smoothstep(0.015,0.08,source) : 0.0;
           float shadow = 0.0;
@@ -98,7 +106,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           }
           float localAlpha = 1.0-exp(-(solid*13.0+mixing*0.012)*stepLength/uRadius);
           vec3 color = mix(vec3(0.91,0.93,0.91),
-            vec3(1.0,0.998,0.99)*clamp(1.0-shadow*0.17,0.53,1.0),
+            vec3(1.0,0.998,0.99)*clamp(1.0-shadow*0.30,0.49,1.0),
             solid/(solid+mixing*0.10+0.00001));
           accumulated += (1.0-alpha)*localAlpha*color;
           alpha += (1.0-alpha)*localAlpha;

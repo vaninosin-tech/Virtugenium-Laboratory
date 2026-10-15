@@ -307,8 +307,10 @@ export class TubeSilverField {
         const from = this.dense[i] < this.dense[j] ? i : j;
         const to = from === i ? j : i;
         const low = this.dense[from], high = this.dense[to];
-        if (low <= 0 || high < low * 1.2) continue;
-        const fraction = 0.075 * Math.min(1, high / low - 1.2);
+        if (low <= 0 || high < low * 1.08) continue;
+        // Amplify flow-created concentration peaks in all three directions.
+        // This conservative phase separation leaves clear channels between curds.
+        const fraction = 0.20 * Math.min(1, high / low - 1.08);
         const amount = low * fraction;
         for (const coordinate of this.denseCoordinates) {
           const portion = coordinate[from] * fraction;
