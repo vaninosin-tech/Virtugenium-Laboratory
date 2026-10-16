@@ -20,7 +20,8 @@ describe("AgCl R2 field", () => {
     expect(field.extent).toBe(0);
     for (let i = 0; i < 240; i++) field.advance(0.05, up, 0.038, inlet,
       Math.min(1, (i + 1) / 26), i > 160 && i < 180 ? 0.8 : 0);
-    expect(field.extent).toBeGreaterThan(0.5);
+    // Stage 1 mixes the stream into the liquid more slowly (jet 0.03, ion diffusion lowered), so less reacts in 12 s.
+    expect(field.extent).toBeGreaterThan(0.3);
     expect(field.totalSolidMass).toBeCloseTo(field.extent, 5);
     expect(field.species["Ag+"].total + field.extent).toBeCloseTo(1.15, 5);
     expect(field.species["Cl-"].total + field.extent).toBeCloseTo(field.delivered, 5);

@@ -68,15 +68,15 @@ export const DEFAULT_FLOC_CONFIG: Omit<FlocConfig, "radius" | "bottom" | "height
   eddyDiffusivity: 6e-6,
   surfaceHold: 0.04,
   surfaceBlock: 0.85,
-  erosionRate: 0.06, erosionRef: 0.004,
+  erosionRate: 0.3, erosionRef: 0.003,
   compactionLoad: 0.05, compactionRate: 0.9, compactionSlip: 2.5,
   surfaceCapacity: 0.06,
   displacementRate: 4,
   contact: 0.75,
   linkStiffness: 0.35,
   yieldStretch: 1.25, plasticShare: 0.5,
-  breakStretch: 3.0,
-  allowBreakage: false,
+  breakStretch: 2.4,
+  allowBreakage: true,
   maxNodes: 260,
 };
 
@@ -208,8 +208,9 @@ export class FlocSystem {
     }
     this.crowdSurface(dt);
     this.compact(dt);
-    for (let sweep = 0; sweep < 3; sweep++) { this.relaxLinks(); this.separate(); this.confine(); }
+    // A link breaks from the stretch the flow has just imposed, before the constraint pulls the nodes back.
     if (c.allowBreakage) this.breakLinks();
+    for (let sweep = 0; sweep < 3; sweep++) { this.relaxLinks(); this.separate(); this.confine(); }
   }
 
   /** Position-based link constraint with plastic yield: no elastic recovery of the rest length. */
