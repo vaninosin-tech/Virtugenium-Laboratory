@@ -360,7 +360,7 @@ export class TubeSilverField {
         const fine = formed - aggregate;
         for (let k = 0; k < 3; k++) this.suspension[k][i] += fine * [0.58, 0.28, 0.14][k];
       }
-      if (this.flocMode) this.advanceFlocSystem(step);
+      if (this.flocMode) { this.advanceFlocSystem(step); this.dissolveSmoke(step); }
       if (!this.stageOne) this.advanceFlocs(step, agitation);
       // Redispersion moves an actual fraction of the bottom reservoir into liquid.
       if (agitation > 0.02) for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
@@ -716,6 +716,14 @@ export class TubeSilverField {
       m.point(x, y, z, point);
       this.flocSystem.addMass(point.x, point.y, point.z, moved);
     }
+    this.flocSystem.erode(dt, (x, y, z, mass) => {
+      const gx = Math.min(m.nx - 1, Math.max(0, Math.floor((x + m.radius) / (2 * m.radius) * m.nx)));
+      const gy = Math.min(m.ny - 1, Math.max(0, Math.floor((y - m.bottom) / m.height * m.ny)));
+      const gz = Math.min(m.nz - 1, Math.max(0, Math.floor((z + m.radius) / (2 * m.radius) * m.nz)));
+      let cell = m.index(gx, gy, gz);
+      if (!m.data[cell]) { let best = -1, d = Infinity; for (let a = 0; a < m.activeCount; a++) { const j = m.active[a]; const dx = j % m.nx - gx, dy = Math.floor(j / m.nx) % m.ny - gy, dz = Math.floor(j / (m.nx * m.ny)) - gz; const q = dx * dx + dy * dy + dz * dz; if (q < d) { d = q; best = j; } } cell = best; }
+      if (cell >= 0) this.suspension[0][cell] += mass;
+    });
     this.flocSystem.surfaceY = this.liquidLevel;
     this.flocSystem.step(dt, (x, y, z, out) => this.sampleFlow(x, y, z, out), this.velocity.gravityUp.y);
     this.flocSystem.rasterize(this.flocMass, this.flocVisual, m.nx, m.ny, m.nz, m.activeCount);

@@ -34,6 +34,10 @@ export interface FlocConfig {
   surfaceHold: number;
   /** Share of the vertical carrier flow that the free surface blocks for a node lying in it. */
   surfaceBlock: number;
+  /** Erosion of fine particles from loose parts: rate (1/s) at the reference relative speed (m/s). */
+  erosionRate: number; erosionRef: number;
+  /** Compaction: load that gives half pressure, rate (1/s), extra settling of a compacted node. */
+  compactionLoad: number; compactionRate: number; compactionSlip: number;
   /** Mass (normalised reagent units) the free surface holds before new cotton displaces it downward. */
   surfaceCapacity: number;
   /** How fast the excess is displaced (1/s). */
@@ -64,6 +68,8 @@ export const DEFAULT_FLOC_CONFIG: Omit<FlocConfig, "radius" | "bottom" | "height
   eddyDiffusivity: 6e-6,
   surfaceHold: 0.04,
   surfaceBlock: 0.85,
+  erosionRate: 0.06, erosionRef: 0.004,
+  compactionLoad: 0.05, compactionRate: 0.9, compactionSlip: 2.5,
   surfaceCapacity: 0.06,
   displacementRate: 4,
   contact: 0.75,
@@ -78,6 +84,8 @@ export interface FlocNode {
   x: number; y: number; z: number;
   vx: number; vy: number; vz: number;
   mass: number;
+  /** Carrier flow seen at the last step (for the relative velocity). */
+  ux: number; uy: number; uz: number;
   /** Set when the node rests on the floor or on other nodes. */
   resting: boolean;
 }
@@ -156,7 +164,7 @@ export class FlocSystem {
       this.nodes[near].mass += mass; return;
     }
     const index = this.nodes.length;
-    this.nodes.push({ x, y, z, vx: 0, vy: 0, vz: 0, mass, resting: false });
+    this.nodes.push({ x, y, z, vx: 0, vy: 0, vz: 0, mass, ux: 0, uy: 0, uz: 0, resting: false });
     this.adjacency.push([]);
     // Link to the nearest nodes within range so the new piece belongs to a connected structure.
     const candidates: { j: number; d: number }[] = [];
@@ -182,11 +190,12 @@ export class FlocSystem {
       const r = nodeRadius(n.mass, c);
       const inside = sample(n.x, n.y, n.z, flow);
       const ux = inside ? flow[0] : 0, uy = inside ? flow[1] : 0, uz = inside ? flow[2] : 0;
+      n.ux = ux; n.uy = uy; n.uz = uz;
       // Velocity relaxes towards fluid velocity plus the slip from gravity, buoyancy and drag.
       // A node that touches the free surface is held by surface tension (a raft): it only leaves the surface when
       // crowded out by neighbours (the separation step), not by time.
       const atSurface = n.y > this.surfaceY - 1.3 * r;
-      const slip = slipSpeed(r, c) * (upY >= 0 ? -1 : 1) * (atSurface ? c.surfaceHold : 1);
+      const slip = slipSpeed(r, c) * (1 + c.compactionSlip * this.compactionOf(this.nodes.indexOf(n))) * (upY >= 0 ? -1 : 1) * (atSurface ? c.surfaceHold : 1);
       const k = 1 - Math.exp(-dt / c.relaxation);
       // At the free surface the vertical carrier flow is blocked: a raft is only swept sideways there.
       const uyEff = atSurface ? uy * (1 - c.surfaceBlock) : uy;
@@ -198,6 +207,7 @@ export class FlocSystem {
       n.x += n.vx * dt + eddy * rnd(1); n.y += n.vy * dt + eddy * 0.5 * rnd(2); n.z += n.vz * dt + eddy * rnd(3);
     }
     this.crowdSurface(dt);
+    this.compact(dt);
     for (let sweep = 0; sweep < 3; sweep++) { this.relaxLinks(); this.separate(); this.confine(); }
     if (c.allowBreakage) this.breakLinks();
   }
@@ -291,6 +301,51 @@ export class FlocSystem {
     }
     void area;
   }
+
+  /**
+   * Compaction under load: a node carries the weight of the connected nodes above it. Under load its links shorten
+   * (rest length shrinks, permanently) and its pores close (solid fraction rises). Cause is load, never time.
+   */
+  private compact(dt: number) {
+    const c = this.config, nodes = this.nodes;
+    if (!this.compaction || this.compaction.length !== nodes.length) this.compaction = new Float64Array(nodes.length);
+    const load = new Float64Array(nodes.length);
+    for (let i = 0; i < nodes.length; i++) for (let j = 0; j < nodes.length; j++) {
+      if (i === j) continue;
+      const a = nodes[i], b = nodes[j];
+      if (b.y <= a.y) continue;
+      const dx = b.x - a.x, dz = b.z - a.z, reach = (nodeRadius(a.mass, c) + nodeRadius(b.mass, c)) * 2.2;
+      if (dx * dx + dz * dz < reach * reach && b.y - a.y < 8 * reach) load[i] += b.mass;
+    }
+    for (let i = 0; i < nodes.length; i++) {
+      const pressure = load[i] / (load[i] + c.compactionLoad);
+      this.compaction[i] = Math.min(1, this.compaction[i] + pressure * c.compactionRate * dt);
+    }
+    for (const l of this.links) {
+      const k = 0.5 * (this.compaction[l.a] + this.compaction[l.b]);
+      l.rest = Math.max(c.quantumRadius * 0.5, l.rest * (1 - 0.6 * k * dt));
+    }
+  }
+  /**
+   * Erosion: the flow strips fine particles off the loose, uncompacted parts of a floc. The rate grows with the
+   * velocity of the node relative to the surrounding liquid (shear) and with how open the structure is; dense
+   * compacted cores are left alone. The stripped mass is returned to the caller (it becomes fine suspension).
+   */
+  erode(dt: number, emit: (x: number, y: number, z: number, mass: number) => void) {
+    const c = this.config;
+    for (let i = 0; i < this.nodes.length; i++) {
+      const n = this.nodes[i];
+      const rel = Math.hypot(n.vx - n.ux, n.vy - n.uy, n.vz - n.uz);
+      const open = 1 - this.compactionOf(i);
+      const rate = c.erosionRate * open * Math.min(1, rel / c.erosionRef);
+      const moved = Math.min(n.mass * 0.5, n.mass * rate * dt);
+      if (moved <= 1e-12) continue;
+      n.mass -= moved; emit(n.x, n.y, n.z, moved);
+    }
+  }
+  /** 0 (fluffy) to 1 (fully compacted) for a node; used for solid fraction and for the look of the curd. */
+  compactionOf(i: number) { return this.compaction?.[i] ?? 0; }
+  private compaction = new Float64Array(0);
 
   private breakLinks() {
     const c = this.config;
