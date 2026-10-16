@@ -103,12 +103,14 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         float entry = max(0.0,max(max(min(a.x,b.x),min(a.y,b.y)),min(a.z,b.z)));
         float exitDistance = min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z));
         if (exitDistance <= entry) discard;
-        float stepLength = (exitDistance-entry)/56.0;
+        float stepLength = (exitDistance-entry)/88.0;
         vec3 accumulated = vec3(0.0);
         float alpha = 0.0;
-        // Fixed 56 primary taps and three light taps per occupied sample.
-        for (int step = 0; step < 56; step++) {
-          vec3 p = uCameraLocal+direction*(entry+(float(step)+0.5)*stepLength);
+        // Fixed 88 primary taps and three light taps per occupied sample.
+        for (int step = 0; step < 88; step++) {
+          // Per-pixel jitter of the sample positions removes the ray-march banding (concentric rings) on the curved floor.
+          float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453);
+          vec3 p = uCameraLocal+direction*(entry+(float(step)+jitter)*stepLength);
           if (!wet(p)) continue;
           vec3 grid = uvw(p);
           vec4 field = denseAt(grid);
