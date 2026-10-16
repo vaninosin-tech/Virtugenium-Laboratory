@@ -85,18 +85,18 @@ describe("AgCl floc mode in the silver field", () => {
     expect(a.f.flocSystem.totalMass + a.f.suspensionMass + a.f.sedimentMass).toBeCloseTo(a.f.extent, 9);
   }, 120000);
 
-  it("forms near the top, keeps a raft at the surface, and later moves cotton down", async () => {
+  it("forms in the upper liquid, is not pinned to the surface, and cotton moves down with the flow", async () => {
     const TubeSilverField = await silverField();
     const f = new TubeSilverField("HIGH", 0.007, 0, 0.034);
-    const seen: Record<number, { top: number; mid: number }> = {};
+    const level = 0.0262 + 0.0016, median: Record<number, number> = {}, pinned: number[] = [];
     pour(f, 9, t => {
-      if (![1, 3, 6, 9].includes(t)) return;
-      const level = 0.0262 + 0.0016, total = Math.max(f.flocSystem.totalMass, 1e-9);
-      seen[t] = { top: f.flocSystem.nodes.filter(n => n.y > level * 0.82).reduce((s, n) => s + n.mass, 0) / total,
-        mid: f.flocSystem.nodes.filter(n => n.y > level * 0.3 && n.y < level * 0.8).reduce((s, n) => s + n.mass, 0) / total };
+      const ys = f.flocSystem.nodes.map(n => n.y / level).sort((a, b) => a - b);
+      if ([1, 4, 9].includes(t) && ys.length) median[t] = ys[Math.floor(ys.length / 2)];
+      // No node may sit still at the meniscus: count nodes that stay within 0.6 mm of the surface with ~zero velocity.
+      if (t >= 4) pinned.push(f.flocSystem.nodes.filter(n => n.y > level - 0.0006 && Math.hypot(n.vx, n.vy, n.vz) < 1e-5).length);
     });
-    expect(seen[1].top).toBeGreaterThan(0.4);           // cotton first lies in the upper liquid
-    expect(seen[9].top).toBeLessThan(seen[1].top);      // and the raft is renewed downward as new cotton arrives
-    expect(seen[9].top).toBeGreaterThan(0.01);          // while a remnant of the raft persists
+    expect(median[1]).toBeGreaterThan(0.5);               // the cotton first appears in the upper liquid
+    expect(median[9]).toBeLessThan(median[1]);            // and is carried down afterwards
+    expect(Math.max(...pinned)).toBeLessThanOrEqual(2);   // nothing is held at the surface
   }, 180000);
 });

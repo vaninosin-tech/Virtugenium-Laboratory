@@ -103,7 +103,7 @@ export class TubeSilverField {
   private get surfaceAlpha() { const v = (globalThis as { __silverAlpha?: unknown }).__silverAlpha; return typeof v === "number" ? v : 0.2; }
   private get surfaceDelta() { const v = (globalThis as { __silverDelta?: unknown }).__silverDelta; return typeof v === "number" ? v : 0.0015; }
   /** Buoyancy of the incoming solution in loadWeight units: g*(drho/rho)*(pour/liquid volume)/loadStrength (0 disables). */
-  private get buoyancy() { const v = (globalThis as { __silverBuoy?: unknown }).__silverBuoy; return typeof v === "number" ? v : 4.4; }
+  private get buoyancy() { const v = (globalThis as { __silverBuoy?: unknown }).__silverBuoy; return typeof v === "number" ? v : 0.3; }
   private get ionDiffusivity() {
     const override = (globalThis as { __silverMix?: unknown }).__silverMix;
     return typeof override === "number" ? override : 0.0000004;
@@ -116,7 +116,7 @@ export class TubeSilverField {
   private get jetScale() {
     if (!this.stageOne) return 1;
     const override = (globalThis as { __silverJet?: unknown }).__silverJet;
-    return typeof override === "number" ? override : 0.03;
+    return typeof override === "number" ? override : 0.6;
   }
   private loadWeight = new Float64Array(0);
   private topCell = new Int32Array(0);

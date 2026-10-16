@@ -28,6 +28,9 @@ let speed = 1, paused = params.get("t") !== null;
 let videoOffset = Number(params.get("voff") ?? 0), videoRate = 1;
 const RATES = [1, 0.5, 2, 5];
 
+// Diagnostic views (?view=): material (default), tracer (fluid + passive tracer + velocity vectors), source (where AgCl forms),
+// nodes (aggregate nodes, links and component counts). The debug layers are drawn on a 2D canvas over the left pane.
+const VIEW = params.get("view") ?? "material";
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("view"), hud = $<HTMLDivElement>("hud");
 const video = $<HTMLVideoElement>("ref"), scrub = $<HTMLInputElement>("scrub"), clock = $<HTMLSpanElement>("clock");
@@ -98,6 +101,57 @@ function stepSim(dt: number) {
   simTime += dt; poured = delivery;
 }
 
+const dbg = document.getElementById("dbg") as HTMLCanvasElement;
+const project = (x: number, y: number, v = new THREE.Vector3()) => { v.set(x, y, 0).project(camera); return [(v.x * 0.5 + 0.5) * dbg.width, (1 - (v.y * 0.5 + 0.5)) * dbg.height] as const; };
+function drawDiagnostics() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (dbg.width !== w || dbg.height !== h) { dbg.width = w; dbg.height = h; }
+  const g = dbg.getContext("2d")!; g.clearRect(0, 0, w, h);
+  if (VIEW === "material") return;
+  const m = field.mask, R = RADIUS;
+  const cell = (x: number, y: number, z: number) => m.index(x, y, z);
+  const colour = (t: number) => { const c = Math.max(0, Math.min(1, t)); return `rgb(${Math.round(255 * Math.min(1, c * 2))},${Math.round(255 * Math.max(0, Math.min(1, c * 2 - 0.5)))},${Math.round(255 * (1 - c) * 0.8)})`; };
+  if (VIEW === "tracer" || VIEW === "source") {
+    const values = VIEW === "tracer" ? field.tracer : field.productSource;
+    let max = 1e-12; const col = new Float64Array(m.nx * m.ny);
+    for (let y = 0; y < m.ny; y++) for (let x = 0; x < m.nx; x++) { let sum = 0; for (let z = 0; z < m.nz; z++) { const i = cell(x, y, z); if (m.data[i]) sum += values[i]; } col[y * m.nx + x] = sum; max = Math.max(max, sum); }
+    for (let y = 0; y < m.ny; y++) for (let x = 0; x < m.nx; x++) {
+      const v = col[y * m.nx + x] / max; if (v <= 0.01) continue;
+      const [x0, y0] = project((x / m.nx * 2 - 1) * R, y / m.ny * m.height), [x1, y1] = project(((x + 1) / m.nx * 2 - 1) * R, (y + 1) / m.ny * m.height);
+      g.fillStyle = colour(v); g.globalAlpha = 0.85; g.fillRect(x0, y1, x1 - x0 + 0.5, y0 - y1 + 0.5);
+    }
+    g.globalAlpha = 1;
+    if (VIEW === "tracer") {
+      g.strokeStyle = "#00ffd0"; g.fillStyle = "#00ffd0"; g.lineWidth = 1.2;
+      for (let y = 1; y < m.ny; y += 2) for (let x = 1; x < m.nx; x += 2) {
+        let ux = 0, uy = 0, n = 0;
+        for (let z = 0; z < m.nz; z++) { const i = cell(x, y, z); if (!m.data[i]) continue; ux += field.solver.flow[i * 3]; uy += field.solver.flow[i * 3 + 1]; n++; }
+        if (!n) continue; ux /= n; uy /= n;
+        const [px, py] = project(((x + 0.5) / m.nx * 2 - 1) * R, (y + 0.5) / m.ny * m.height);
+        const scale = 9000; g.beginPath(); g.moveTo(px, py); g.lineTo(px + ux * scale, py - uy * scale); g.stroke();
+        g.fillRect(px - 1, py - 1, 2.4, 2.4);
+      }
+    }
+    g.fillStyle = "#fff"; g.font = "13px system-ui";
+    g.fillText(VIEW === "tracer" ? "Диагностика 1: пассивный трассер (z-сумма) и векторы скорости (z-среднее)" : "Диагностика 2: где образуется AgCl (z-сумма источника)", 10, h - 12);
+  }
+  if (VIEW === "nodes" || VIEW === "nodes-over") {
+    const sys = field.flocSystem; if (!sys) return;
+    const comps = new Map<number, number>(); const parent = sys.nodes.map((_, i) => i);
+    const find = (a: number): number => parent[a] === a ? a : (parent[a] = find(parent[a]));
+    for (const l of sys.links) parent[find(l.a)] = find(l.b);
+    for (let i = 0; i < parent.length; i++) comps.set(find(i), (comps.get(find(i)) ?? 0) + 1);
+    const ids = [...comps.keys()]; const hue = (r: number) => `hsl(${(ids.indexOf(r) * 67) % 360},85%,60%)`;
+    g.lineWidth = 1.4;
+    for (const l of sys.links) { const a = sys.nodes[l.a], b = sys.nodes[l.b]; const [ax, ay] = project(a.x, a.y), [bx, by] = project(b.x, b.y); const stretch = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) / l.rest; g.strokeStyle = stretch > 1.3 ? "#ff5050" : "#ffffff88"; g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke(); }
+    for (let i = 0; i < sys.nodes.length; i++) { const n = sys.nodes[i]; const [px, py] = project(n.x, n.y); const r = Math.max(2, 1500 * Math.cbrt(n.mass) * 0.12); g.fillStyle = hue(find(i)); g.globalAlpha = 0.7; g.beginPath(); g.arc(px, py, r, 0, 7); g.fill(); }
+    g.globalAlpha = 1; g.fillStyle = "#fff"; g.font = "13px system-ui";
+    const sizes = [...comps.values()].sort((a, b) => b - a);
+    let stretched = 0; for (const l of sys.links) { const a = sys.nodes[l.a], b = sys.nodes[l.b]; if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) / l.rest > 1.3) stretched++; }
+    g.fillText(`Диагностика 3: узлы ${sys.nodes.length}, связи ${sys.links.length} (растянуты >1.3: ${stretched}), компонентов ${comps.size}, крупнейшие ${sizes.slice(0, 5).join(",")}`, 10, h - 12);
+  }
+}
+
 /** The tube fills the pane's height in both halves; the video is cropped so the tube sits in the middle. */
 function layoutVideo() {
   const box = video.parentElement as HTMLElement;
@@ -138,7 +192,9 @@ function draw() {
   if (canvas.width !== Math.round(w * ratio) || canvas.height !== Math.round(h * ratio)) {
     renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); layoutVideo();
   }
+  volume.visible = VIEW === "material" || VIEW === "nodes-over";
   renderer.render(scene, camera);
+  drawDiagnostics();
   hud.textContent = `налив ${(poured * 100).toFixed(0)}%   осадок ${(field.extent * 100).toFixed(0)}%`;
   clock.textContent = `t = ${simTime.toFixed(1)} с   |   видео ${videoTarget().toFixed(1)} с (сдвиг ${videoOffset >= 0 ? "+" : ""}${videoOffset.toFixed(1)}, x${videoRate})`;
   if (!dragging) scrub.value = String(Math.min(MAX_TIME, simTime));

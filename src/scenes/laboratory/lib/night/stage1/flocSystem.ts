@@ -30,18 +30,10 @@ export interface FlocConfig {
   linkRange: number;
   maxLinksPerNode: number;
   eddyDiffusivity: number;
-  /** Fraction of the settling slip that remains for a node held at the surface. */
-  surfaceHold: number;
-  /** Share of the vertical carrier flow that the free surface blocks for a node lying in it. */
-  surfaceBlock: number;
   /** Erosion of fine particles from loose parts: rate (1/s) at the reference relative speed (m/s). */
   erosionRate: number; erosionRef: number;
   /** Compaction: load that gives half pressure, rate (1/s), extra settling of a compacted node. */
   compactionLoad: number; compactionRate: number; compactionSlip: number;
-  /** Mass (normalised reagent units) the free surface holds before new cotton displaces it downward. */
-  surfaceCapacity: number;
-  /** How fast the excess is displaced (1/s). */
-  displacementRate: number;
   /** Minimum centre distance as a share of the sum of radii (soft contact; <1 means wool-like overlap). */
   contact: number;
   /** Fraction of the stretch removed per relaxation sweep (position based, not a spring). */
@@ -66,12 +58,8 @@ export const DEFAULT_FLOC_CONFIG: Omit<FlocConfig, "radius" | "bottom" | "height
   maxLinksPerNode: 3,
   /** Turbulent dispersion of a node (m^2/s): eddies of the stream scatter the pieces sideways. */
   eddyDiffusivity: 6e-6,
-  surfaceHold: 0.04,
-  surfaceBlock: 0.85,
   erosionRate: 0.3, erosionRef: 0.003,
   compactionLoad: 0.05, compactionRate: 0.9, compactionSlip: 2.5,
-  surfaceCapacity: 0.06,
-  displacementRate: 4,
   contact: 0.75,
   linkStiffness: 0.35,
   yieldStretch: 1.25, plasticShare: 0.5,
@@ -131,7 +119,9 @@ export class FlocSystem {
 
   constructor(config: FlocConfig) { this.config = config; }
 
-  get totalMass() { let sum = 0; for (const n of this.nodes) sum += n.mass; return sum; }
+  get totalMass() { let sum = 0; for (const n of this.nodes) sum += n.mass; for (const q of this.pending) sum += q.mass; return sum; }
+  /** Mass waiting for a free node slot (it still counts as floc mass; no mass is lost or piled on one node). */
+  private readonly pending: { x: number; y: number; z: number; mass: number }[] = [];
 
   /** Bowl height of the floor at radial distance r from the axis. */
   floorHeight(r: number) {
@@ -155,13 +145,10 @@ export class FlocSystem {
     }
     if (best >= 0 && this.nodes[best].mass < c.quantum * 3) { this.nodes[best].mass += mass; return; }
     if (this.nodes.length >= c.maxNodes) {
-      // Too many nodes: add to the nearest one instead of creating more.
-      let near = 0, nd = Infinity;
-      for (let i = 0; i < this.nodes.length; i++) {
-        const n = this.nodes[i], d = Math.hypot(n.x - x, n.y - y, n.z - z);
-        if (d < nd) { nd = d; near = i; }
-      }
-      this.nodes[near].mass += mass; return;
+      // Node budget exhausted: keep the mass in the pending list (merged into a nearby node only if it stays small),
+      // and let step() free a slot by merging the two lightest neighbouring nodes. A node never grows without bound.
+      this.pending.push({ x, y, z, mass });
+      return;
     }
     const index = this.nodes.length;
     this.nodes.push({ x, y, z, vx: 0, vy: 0, vz: 0, mass, ux: 0, uy: 0, uz: 0, resting: false });
@@ -186,6 +173,7 @@ export class FlocSystem {
   step(dt: number, sample: FlowSampler, upY = 1) {
     const c = this.config, flow = this.flow;
     this.tick++;
+    this.mergeAndFlush();
     for (const n of this.nodes) {
       const r = nodeRadius(n.mass, c);
       const inside = sample(n.x, n.y, n.z, flow);
@@ -194,23 +182,62 @@ export class FlocSystem {
       // Velocity relaxes towards fluid velocity plus the slip from gravity, buoyancy and drag.
       // A node that touches the free surface is held by surface tension (a raft): it only leaves the surface when
       // crowded out by neighbours (the separation step), not by time.
-      const atSurface = n.y > this.surfaceY - 1.3 * r;
-      const slip = slipSpeed(r, c) * (1 + c.compactionSlip * this.compactionOf(this.nodes.indexOf(n))) * (upY >= 0 ? -1 : 1) * (atSurface ? c.surfaceHold : 1);
+      const slip = slipSpeed(r, c) * (1 + c.compactionSlip * this.compactionOf(this.nodes.indexOf(n))) * (upY >= 0 ? -1 : 1);
       const k = 1 - Math.exp(-dt / c.relaxation);
       // At the free surface the vertical carrier flow is blocked: a raft is only swept sideways there.
-      const uyEff = atSurface ? uy * (1 - c.surfaceBlock) : uy;
-      n.vx += (ux - n.vx) * k; n.vy += (uyEff + slip - n.vy) * k; n.vz += (uz - n.vz) * k;
+      n.vx += (ux - n.vx) * k; n.vy += (uy + slip - n.vy) * k; n.vz += (uz - n.vz) * k;
       // Eddy dispersion grows with the local flow speed; the draw is a deterministic hash of node and step.
       const flowSpeed = Math.hypot(ux, uy, uz), eddy = Math.sqrt(2 * c.eddyDiffusivity * dt) * (0.3 + Math.min(1, flowSpeed / 0.01));
       const hid = this.nodes.indexOf(n) * 12.9898 + this.tick * 78.233;
       const rnd = (o: number) => { const v = Math.sin(hid + o * 37.719) * 43758.5453; return (v - Math.floor(v)) * 2 - 1; };
       n.x += n.vx * dt + eddy * rnd(1); n.y += n.vy * dt + eddy * 0.5 * rnd(2); n.z += n.vz * dt + eddy * rnd(3);
     }
-    this.crowdSurface(dt);
     this.compact(dt);
     // A link breaks from the stretch the flow has just imposed, before the constraint pulls the nodes back.
     if (c.allowBreakage) this.breakLinks();
     for (let sweep = 0; sweep < 3; sweep++) { this.relaxLinks(); this.separate(); this.confine(); }
+  }
+
+  /** Free node slots by merging the lightest close pair, then place pending mass in the freed slots. */
+  private mergeAndFlush() {
+    const c = this.config, nodes = this.nodes;
+    let guard = 0;
+    while (this.pending.length && guard++ < 8) {
+      if (nodes.length >= c.maxNodes) {
+        let bi = -1, bj = -1, best = Infinity;
+        for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+          const d = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y, nodes[i].z - nodes[j].z);
+          if (d > c.linkRange * 1.3) continue;
+          const cost = nodes[i].mass + nodes[j].mass + d * 10;
+          if (cost < best) { best = cost; bi = i; bj = j; }
+        }
+        if (bi < 0) break;
+        this.mergeNodes(bi, bj);
+      }
+      const q = this.pending.shift()!;
+      this.addMass(q.x, q.y, q.z, q.mass);
+    }
+  }
+
+  private mergeNodes(i: number, j: number) {
+    const a = this.nodes[i], b = this.nodes[j], m = a.mass + b.mass;
+    a.x = (a.x * a.mass + b.x * b.mass) / m; a.y = (a.y * a.mass + b.y * b.mass) / m; a.z = (a.z * a.mass + b.z * b.mass) / m;
+    a.vx = (a.vx * a.mass + b.vx * b.mass) / m; a.vy = (a.vy * a.mass + b.vy * b.mass) / m; a.vz = (a.vz * a.mass + b.vz * b.mass) / m;
+    a.mass = m;
+    // re-point b's links to a (drop self links and duplicates), then remove node j by swapping the last node in.
+    const last = this.nodes.length - 1;
+    for (const l of this.links) { if (l.a === j) l.a = i; if (l.b === j) l.b = i; }
+    for (let k = this.links.length - 1; k >= 0; k--) if (this.links[k].a === this.links[k].b) this.links.splice(k, 1);
+    if (j !== last) {
+      for (const l of this.links) { if (l.a === last) l.a = j; if (l.b === last) l.b = j; }
+      this.nodes[j] = this.nodes[last];
+      if (this.compaction.length > j) this.compaction[j] = last < this.compaction.length ? this.compaction[last] : 0;
+    }
+    this.nodes.pop();
+    this.adjacency.length = 0;
+    for (let k = 0; k < this.nodes.length; k++) this.adjacency.push([]);
+    for (const l of this.links) { this.adjacency[l.a].push(l.b); this.adjacency[l.b].push(l.a); }
+    if (this.compaction.length > this.nodes.length) this.compaction = this.compaction.slice(0, this.nodes.length);
   }
 
   /** Position-based link constraint with plastic yield: no elastic recovery of the rest length. */
@@ -226,14 +253,8 @@ export class FlocSystem {
         const excess = (d - l.rest) * c.linkStiffness;
         const wa = b.mass / (a.mass + b.mass), wb = a.mass / (a.mass + b.mass);
         const nx = dx / d, ny = dy / d, nz = dz / d;
-        // A node held in the free surface is not dragged down by its links; the lower node is pulled up instead.
-        const heldA = a.y > this.surfaceY - 1.3 * nodeRadius(a.mass, c), heldB = b.y > this.surfaceY - 1.3 * nodeRadius(b.mass, c);
-        const lift = (heldA && !heldB) ? 1 : (heldB && !heldA) ? -1 : 0;
-        a.x += nx * excess * wa; a.z += nz * excess * wa;
-        b.x -= nx * excess * wb; b.z -= nz * excess * wb;
-        if (lift === 0) { a.y += ny * excess * wa; b.y -= ny * excess * wb; }
-        else if (lift === 1) { b.y -= ny * excess; }
-        else { a.y += ny * excess; }
+        a.x += nx * excess * wa; a.y += ny * excess * wa; a.z += nz * excess * wa;
+        b.x -= nx * excess * wb; b.y -= ny * excess * wb; b.z -= nz * excess * wb;
         if (stretch > c.yieldStretch) l.rest += (d - l.rest) * c.plasticShare * 0.1;
       }
     }
@@ -265,42 +286,10 @@ export class FlocSystem {
       const floor = this.floorHeight(Math.hypot(n.x, n.z)) + r;
       if (n.y < floor) { n.y = floor; n.vy = Math.max(0, n.vy); n.vx *= 0.2; n.vz *= 0.2; n.resting = true; } else n.resting = false;
       // The free surface holds a node: it cannot leave the liquid, it floats half in.
-      // The meniscus is not flat for cotton: each lump floats at its own height (it may poke slightly above).
-      const own = Math.sin(this.nodes.indexOf(n) * 7.31) * 0.5 + 0.5;
-      const ceiling = this.surfaceY + (own - 0.45) * 3.2 * r;
+      // The liquid boundary only: a node is carried with the liquid and cannot leave it (no pinning, no hold height).
+      const ceiling = this.surfaceY + 0.5 * r;
       if (n.y > ceiling) { n.y = ceiling; n.vy = Math.min(0, n.vy); }
     }
-  }
-
-  /**
-   * The free surface can hold a limited mass per unit area (surface tension against the weight of wet cotton).
-   * New cotton arriving at the surface crowds it: the most crowded surface nodes are pushed below and released
-   * (they lose the surface hold), so the raft is renewed from above and drains downward. No timer is involved.
-   */
-  private crowdSurface(dt: number) {
-    const c = this.config, held: number[] = [];
-    for (let i = 0; i < this.nodes.length; i++) {
-      const n = this.nodes[i];
-      if (n.y > this.surfaceY - 1.3 * nodeRadius(n.mass, c)) held.push(i);
-    }
-    if (!held.length) return;
-    const area = Math.PI * c.radius * c.radius;
-    let mass = 0; for (const i of held) mass += this.nodes[i].mass;
-    const capacity = c.surfaceCapacity;
-    if (mass <= capacity) return;
-    // Push down the nodes with the largest local overlap first; a node is displaced by the excess share per second.
-    const share = Math.min(1, (mass - capacity) / mass * c.displacementRate * dt);
-    const order = held.map(i => {
-      let crowd = 0;
-      for (const j of held) if (j !== i) { const a = this.nodes[i], b = this.nodes[j]; const d = Math.hypot(a.x - b.x, a.z - b.z); if (d < 2.2 * c.quantumRadius) crowd++; }
-      return { i, crowd };
-    }).sort((p, q) => q.crowd - p.crowd);
-    const count = Math.max(1, Math.round(held.length * share));
-    for (let k = 0; k < count && k < order.length; k++) {
-      const n = this.nodes[order[k].i], r = nodeRadius(n.mass, c);
-      n.y = this.surfaceY - 1.5 * r; n.vy = Math.min(n.vy, -slipSpeed(r, c));
-    }
-    void area;
   }
 
   /**
