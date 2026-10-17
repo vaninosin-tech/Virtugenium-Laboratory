@@ -8,7 +8,6 @@ import { BariumSedimentField, BariumSedimentGeometry } from "./tubeBariumSedimen
 import { SilverSedimentField, SilverSedimentGeometry } from "./tubeSilverSediment";
 import { makeSilverVolumeMaterial, makeLegacySilverVolumeMaterial } from "./tubeSilverVolumeMaterial";
 import { silverStage, silverDiagnostic } from "./silverStage";
-import { deliveryEvents } from "./tubeDelivery";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
@@ -338,6 +337,31 @@ void main() {
 
 /** Fixed pools survive progress updates, including seeking backwards in F8. */
 const bariumWarmups = new WeakMap<THREE.WebGLRenderer, Map<string, Promise<void>>>();
+const scheduledSilverWarmups = new WeakSet<THREE.WebGLRenderer>();
+
+/** The registry can be asserted without a WebGL context. */
+export function silverShaderWarmupStatus(renderer: THREE.WebGLRenderer): "idle" | "scheduled" | "started" {
+  return bariumWarmups.get(renderer)?.has("silver-chloride") ? "started"
+    : scheduledSilverWarmups.has(renderer) ? "scheduled" : "idle";
+}
+
+export function warmSilverShaderForStand(): void {
+  if (typeof window === "undefined" || silverStage() !== 3) return;
+  const three = (window as Window & { __three?: { gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera } }).__three;
+  if (!three) return;
+  if (scheduledSilverWarmups.has(three.gl)) return;
+  scheduledSilverWarmups.add(three.gl);
+  window.setTimeout(() => {
+    void prewarmBariumLiquidShader(three.gl, three.scene, three.camera, "silver-chloride")
+      .catch(error => { if (import.meta.env.DEV) console.warn("Silver shader warmup failed", error); });
+  }, 0);
+}
+
+function runtimeSilverField(tubeId: string): TubeSilverField | null {
+  if (typeof window === "undefined") return null;
+  const runtime = (window as Window & { __silverRuntime?: { field(id: string): TubeSilverField | null | undefined } }).__silverRuntime;
+  return runtime?.field(tubeId) ?? null;
+}
 
 /** Compile every reaction mesh before the final reagent is poured. */
 export function prewarmBariumLiquidShader(renderer: THREE.WebGLRenderer, scene: THREE.Scene,
@@ -448,6 +472,7 @@ export function prewarmBariumLiquidShader(renderer: THREE.WebGLRenderer, scene: 
     }
   })();
   cache.set(kind, task);
+  void task.catch(() => { if (cache.get(kind) === task) cache.delete(kind); });
   return task;
 }
 
@@ -1069,26 +1094,28 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
   const bariumInlet = new THREE.Vector3();
   let bariumImpactSerial = -1;
   let bariumImpactMl = 0;
-  const silverField = kind === "silver-chloride" && hasLiquid
+  const runtimeSilver = kind === "silver-chloride" && silverStage() === 3;
+  let silverField = kind === "silver-chloride" && hasLiquid && !runtimeSilver
     ? new TubeSilverField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, fieldHeight) : null;
-  const stageOneSilver = !!silverField && stageSilverVolume;
+  const stageOneSilver = stageSilverVolume && (runtimeSilver || !!silverField);
   const silverDenseGeometry = stageOneSilver
     ? new THREE.BoxGeometry(2.4 * radius, fieldHeight + 0.75 * radius, 2.4 * radius) : null;
   const silverDenseMesh = silverDenseGeometry
     ? new THREE.Mesh(silverDenseGeometry, silverVolume.material) : null;
-  if (silverDenseMesh && silverField) {
+  if (silverDenseMesh) {
+    silverDenseMesh.visible = !!silverField;
     silverDenseMesh.position.y = box.min.y + fieldHeight * 0.5;
     // Composite the liquid field before the separate transparent PourStream.
     silverDenseMesh.renderOrder = -0.25;
     silverDenseMesh.name = "TubeSilverDenseField";
     silverDenseMesh.onBeforeRender = updateSilverVolumeCamera;
-    silverVolume.material.uniforms.uDense.value = silverField.denseTexture;
-    silverVolume.material.uniforms.uOverlap.value = silverField.overlapTexture;
+    silverVolume.material.uniforms.uDense.value = silverField?.denseTexture ?? null;
+    silverVolume.material.uniforms.uOverlap.value = silverField?.overlapTexture ?? null;
     silverVolume.material.uniforms.uDiag.value = silverDiagnostic() === "tracer" ? 1 : 0;
-    silverVolume.material.uniforms.uHaze.value = silverField.texture;
-    silverVolume.material.uniforms.uTint.value = silverField.tintTexture;
-    silverVolume.material.uniforms.uChip.value = silverField.chipTexture;
+    silverVolume.material.uniforms.uHaze.value = silverField?.texture ?? null;
+    silverVolume.material.uniforms.uTint.value = silverField?.tintTexture ?? null;
+    silverVolume.material.uniforms.uChip.value = silverField?.chipTexture ?? null;
     group.add(silverDenseMesh);
   }
   const silverInlet = new THREE.Vector3();
@@ -1123,6 +1150,18 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       const tubesNow = useTestTubeStorageStore.getState();
       const attachedNow = standNow.attachedTubeSlotIndex === null ? undefined
         : (standNow.onFumeHood ? tubesNow.fumeHoodTestTubes : tubesNow.workbenchTestTubes)[standNow.attachedTubeSlotIndex];
+      if (attachedNow?.contents.includes("agno3") && options.activeSurface) warmSilverShaderForStand();
+      if (runtimeSilver) {
+        silverField = attachedNow ? runtimeSilverField(attachedNow.instanceId) : null;
+        if (silverDenseMesh) {
+          silverDenseMesh.visible = !!silverField;
+          silverVolume.material.uniforms.uDense.value = silverField?.denseTexture ?? null;
+          silverVolume.material.uniforms.uOverlap.value = silverField?.overlapTexture ?? null;
+          silverVolume.material.uniforms.uHaze.value = silverField?.texture ?? null;
+          silverVolume.material.uniforms.uTint.value = silverField?.tintTexture ?? null;
+          silverVolume.material.uniforms.uChip.value = silverField?.chipTexture ?? null;
+        }
+      }
       const impact = options.activeSurface && attachedNow ? tubePourImpact(attachedNow.instanceId) : undefined;
       const fill = attachedNow && tubeAmount(attachedNow.instanceId).volumeMl > 0
         ? tubeLiquidFill(tubeAmount(attachedNow.instanceId).volumeMl, effectiveRadius, size.y)
@@ -1407,52 +1446,26 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         const agitation = Math.max(motion,
           Math.min(1, Math.hypot(slope.x - previousSlopeX, slope.y - previousSlopeZ) * 15));
         const silverDelta = Math.min(elapsed, 0.05);
-        // Stage 3: chemistry follows the authoritative delivery ledger and replays it on its own clock, so a field
-        // created after the stream has started (the contents commit mounts it late) sees every step at its
-        // original time and place instead of one cumulative jump.
-        const ledger3 = silverStage() === 3 && attachedNow
-          ? deliveryEvents(attachedNow.instanceId).filter(e => e.valid && e.reagentId === "nacl") : null;
-        if (ledger3 && ledger3.length) {
-          const firstWall = ledger3[0].serial + ledger3[0].atMs;
-          const wanted = Math.max(0, (Date.now() - firstWall) / 1000);
-          let guard = 0;
-          while (silverField.ageSeconds + 0.05 <= wanted + 1e-9 && guard++ < 60) {
-            const t = firstWall + (silverField.ageSeconds + 0.05) * 1000;
-            let cumulative = 0, last = ledger3[0], recent = 0;
-            for (const e of ledger3) {
-              if (e.serial + e.atMs > t) break;
-              cumulative += e.ml; last = e;
-              if (t - (e.serial + e.atMs) <= 200) recent += e.ml;
-            }
-            silverInlet.copy(volume.worldToLocal(impactPoint.set(last.point.x, last.point.y, last.point.z)));
-            const radial3 = Math.hypot(silverInlet.x, silverInlet.z);
-            if (radial3 > radius * 0.82) { silverInlet.x *= radius * 0.82 / radial3; silverInlet.z *= radius * 0.82 / radial3; }
-            silverInlet.y = (level.value - up.value.x * silverInlet.x - up.value.z * silverInlet.z) / Math.max(0.2, up.value.y);
-            silverField.advance(0.05, up.value, level.value, silverInlet, cumulative, agitation, Math.max(0.05, recent / 0.2), undefined);
-          }
-        } else
-        silverField.advance(silverDelta, up.value, level.value, silverInlet,
+        if (!runtimeSilver) silverField.advance(silverDelta, up.value, level.value, silverInlet,
           attachedNow ? (impact?.reagentId === "nacl" ? impact.deliveredMl : 0)
-            // Surface-first rule: in stage 3 no reagent enters the liquid except through a real stream impact
-            // (never from a timer, never when the container is merely picked up or tilted).
-            : silverStage() === 3 ? 0
-              : THREE.MathUtils.smoothstep(silverField.ageSeconds + silverDelta, 0, 1.3), agitation,
+            : THREE.MathUtils.smoothstep(silverField.ageSeconds + silverDelta, 0, 1.3), agitation,
           impact?.reagentId === "nacl" ? impact.flowMlPerSecond : attachedNow ? 0 : 1,
           impact?.reagentId === "nacl" ? impactDirection.copy(impact.direction)
             .applyQuaternion(volume.getWorldQuaternion(impactQuaternion).invert()) : undefined);
-        updateTubeFlowDebug("AgCl", silverField.solver, silverField.tracer,
+        const activeSilverField = silverField;
+        if (!runtimeSilver) updateTubeFlowDebug("AgCl", activeSilverField.solver, activeSilverField.tracer,
           silverField.species["Cl-"].values, silverField.pixels, silverField.sedimentMass,
-          () => ({ suspensionMass: silverField.suspensionMass, formed: silverField.extent,
-            ageSeconds: silverField.ageSeconds,
-            aggregateMass: silverField.coarseMass, massBalanceError: silverField.massBalanceError,
-            silverRemaining: silverField.species["Ag+"].total,
-            chlorideRemaining: silverField.species["Cl-"].total }),
+          () => ({ suspensionMass: activeSilverField.suspensionMass, formed: activeSilverField.extent,
+            ageSeconds: activeSilverField.ageSeconds,
+            aggregateMass: activeSilverField.coarseMass, massBalanceError: activeSilverField.massBalanceError,
+            silverRemaining: activeSilverField.species["Ag+"].total,
+            chlorideRemaining: activeSilverField.species["Cl-"].total }),
           { "Ag+": silverField.species["Ag+"].values,
             "Cl-": silverField.species["Cl-"].values,
             "product source": silverField.productSource,
             suspension: silverField.suspension[0], aggregates: silverField.coarse });
-        if (attachedNow) syncSilverExtent(attachedNow.instanceId, silverField.extent);
-        if (options.activeSurface) {
+        if (attachedNow && !runtimeSilver) syncSilverExtent(attachedNow.instanceId, silverField.extent);
+        if (options.activeSurface && !runtimeSilver) {
           const stand = useBunsenStandStorageStore.getState();
           const tubes = useTestTubeStorageStore.getState();
           const index = stand.attachedTubeSlotIndex;
@@ -1487,7 +1500,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       silverVolume.material.uniforms.uLevel.value = level.value;
       if (stageOneSilver) {
         silverVolume.material.uniforms.uUp.value.copy(up.value);
-        silverVolume.material.uniforms.uTime.value = silverField!.ageSeconds;
+        silverVolume.material.uniforms.uTime.value = silverField?.ageSeconds ?? 0;
       }
       if (absorption && absorptionWall && absorptionCap) {
         absorption.uniforms.uUp.value.copy(up.value);
@@ -2054,7 +2067,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       copperField?.dispose();
       permanganateField?.dispose();
       bariumField?.dispose();
-      silverField?.dispose();
+      if (!runtimeSilver) silverField?.dispose();
       group.removeFromParent();
       deferDispose(group, () => {
         geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();

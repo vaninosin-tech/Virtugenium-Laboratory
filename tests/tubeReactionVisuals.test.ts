@@ -1,9 +1,13 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { REAGENTS } from "../src/entities/laboratory/reagents";
-import { createTubeReactionVisuals } from "../src/scenes/laboratory/lib/tubeReactionVisuals";
+import { createTubeReactionVisuals, silverShaderWarmupStatus,
+  warmSilverShaderForStand } from "../src/scenes/laboratory/lib/tubeReactionVisuals";
 import { createTubeCopperGranules } from "../src/scenes/laboratory/lib/testTubeContents";
 import { TubeLiquidMaterial } from "../src/scenes/laboratory/lib/tubeLiquidMaterial";
+import { TubeSilverField } from "../src/scenes/laboratory/lib/tubeSilverField";
+import { useBunsenStandStorageStore } from "../src/scenes/laboratory/lib/useBunsenStandStorageStore";
+import { useTestTubeStorageStore } from "../src/scenes/laboratory/lib/useTestTubeStorageStore";
 import type { ReactionKind, TubeChemistry } from "../src/scenes/laboratory/lib/tubeReactions";
 import type { RuntimeQuality } from "../src/scenes/laboratory/lib/useRuntimeQualityStore";
 
@@ -533,22 +537,69 @@ describe("tube reaction rendering contract", () => {
     expect(unaffected.map(snapshot)).toEqual(original);
   });
 
-  it("binds all five field textures and advances stage-3 volume time", () => {
+  it("does not create or advance a stage-3 field before runtime delivery", () => {
     vi.stubGlobal("window", { __silverStage: 3, location: { search: "" }, setTimeout, clearTimeout });
     const f = fixture("silver-chloride");
     const mesh = f.get("TubeSilverDenseField");
     expect(mesh).toBeDefined();
+    expect(mesh.visible).toBe(false);
     const material = mesh.material as THREE.ShaderMaterial;
-    const names = ["uDense", "uOverlap", "uHaze", "uTint", "uChip"];
-    const textures = names.map(name => material.uniforms[name].value as THREE.Data3DTexture);
-    expect(textures.every(texture => texture instanceof THREE.Data3DTexture
-      && texture.image.width > 1 && texture.image.height > 1)).toBe(true);
-    expect(new Set(textures).size).toBe(5);
+    expect(material.uniforms.uDense.value).toBeNull();
     expect((mesh.geometry as THREE.BoxGeometry).parameters.height).toBeCloseTo(
       material.uniforms.uHeight.value + 0.75 * material.uniforms.uRadius.value);
     expect(mesh.renderOrder).toBe(-0.25);
     expect(material.uniforms.uTime.value).toBe(0);
     f.advance(0.2, chemistry(0));
-    expect(material.uniforms.uTime.value).toBeGreaterThan(0);
+    expect(mesh.visible).toBe(false);
+    expect(material.uniforms.uTime.value).toBe(0);
+  });
+
+  it("binds and reuses the runtime field on stage-3 visual remount", () => {
+    const stand = useBunsenStandStorageStore.getState();
+    const tubes = useTestTubeStorageStore.getState();
+    useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0, onFumeHood: true });
+    useTestTubeStorageStore.setState({ fumeHoodTestTubes: [{ instanceId: "runtime-tube", contents: ["agno3"] }] });
+    const field = new TubeSilverField("HIGH", 0.007, 0, 0.055);
+    const advance = vi.spyOn(field, "advance");
+    const lookup = vi.fn(() => field);
+    vi.stubGlobal("window", { __silverStage: 3, __silverRuntime: { field: lookup },
+      location: { search: "" }, setTimeout, clearTimeout });
+    try {
+      const first = fixture("silver-chloride");
+      first.update(chemistry(0));
+      const mesh = first.get("TubeSilverDenseField");
+      const material = mesh.material as THREE.ShaderMaterial;
+      expect(mesh.visible).toBe(true);
+      expect(material.uniforms.uDense.value).toBe(field.denseTexture);
+      expect(material.uniforms.uOverlap.value).toBe(field.overlapTexture);
+      expect(material.uniforms.uHaze.value).toBe(field.texture);
+      expect(material.uniforms.uTint.value).toBe(field.tintTexture);
+      expect(material.uniforms.uChip.value).toBe(field.chipTexture);
+      first.advance(0.1, chemistry(0));
+      first.visuals.dispose();
+      const second = fixture("silver-chloride");
+      second.update(chemistry(0));
+      expect((second.get("TubeSilverDenseField").material as THREE.ShaderMaterial).uniforms.uDense.value)
+        .toBe(field.denseTexture);
+      expect(lookup).toHaveBeenCalledWith("runtime-tube");
+      expect(advance).not.toHaveBeenCalled();
+    } finally {
+      field.dispose();
+      useBunsenStandStorageStore.setState(stand);
+      useTestTubeStorageStore.setState(tubes);
+    }
+  });
+
+  it("schedules silver shader warmup once without blocking the caller", () => {
+    const renderer = {} as THREE.WebGLRenderer;
+    const schedule = vi.fn();
+    vi.stubGlobal("window", { __silverStage: 3, __three: { gl: renderer,
+      scene: new THREE.Scene(), camera: new THREE.PerspectiveCamera() },
+      location: { search: "" }, setTimeout: schedule, clearTimeout });
+    expect(silverShaderWarmupStatus(renderer)).toBe("idle");
+    warmSilverShaderForStand();
+    warmSilverShaderForStand();
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(silverShaderWarmupStatus(renderer)).toBe("scheduled");
   });
 });
