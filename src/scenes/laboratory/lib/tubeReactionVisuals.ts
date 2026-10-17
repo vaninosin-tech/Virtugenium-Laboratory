@@ -555,8 +555,12 @@ outgoingLight *= mix(1.0, 0.80, dyeWindow);`);
     const tubes = useTestTubeStorageStore.getState();
     const attached = stand.attachedTubeSlotIndex === null ? undefined
       : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[stand.attachedTubeSlotIndex];
-    if (attached) seedTubeAmounts(attached.instanceId,
-      options.pour ? attached.contents.slice(0, -1) : attached.contents);
+    if (attached) {
+      // Stage 3: NaCl is never seeded from the contents; it enters only through a real stream impact (surface-first rule).
+      const seedContents = options.pour ? attached.contents.slice(0, -1) : attached.contents;
+      seedTubeAmounts(attached.instanceId, silverStage() === 3 && attached.contents.includes("agno3")
+        ? seedContents.filter(id => id !== "nacl") : seedContents);
+    }
   }
   // Stand tubes have a measured amount below. Detached preview meshes retain
   // their authored fill because they have no volume identity to invert.

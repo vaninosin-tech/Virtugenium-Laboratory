@@ -266,6 +266,8 @@ export class TubeSilverField {
         this.initialized = true;
       }
       const amount = Math.max(0, Math.min(1, delivery) - this.delivered);
+      // The first parcel is not advected in the step it enters: it must be seen where the stream touched the surface.
+      const firstDeliveryStep = this.flocMode && amount > 0 && this.delivered === 0;
       this.inject(inlet, amount, jetStrength);
       if (this.flocMode) {
         // Heavy flocs load the liquid; the poured (lighter) NaCl solution is buoyant: weight is negative where the
@@ -301,8 +303,10 @@ export class TubeSilverField {
       // The stream stirs the added solution into the Ag+ liquid within about a second.
       const ionMixing = (this.stageOne ? this.ionDiffusivity : 0.00012) + agitation * 0.000003;
       const ionEddy = this.stageOne ? this.ionEddy : undefined;
-      for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing, ionEddy);
-      this.solver.transport(this.tracer, step, ionMixing, ionEddy);
+      if (!firstDeliveryStep) {
+        for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing, ionEddy);
+        this.solver.transport(this.tracer, step, ionMixing, ionEddy);
+      }
       if (this.stageOne && !this.flocMode) {
         this.holdFilm();
         this.solver.transport(this.dense, step, 0);
@@ -1084,7 +1088,10 @@ export class TubeSilverField {
       // Stage 1: the solution is poured ONTO the liquid, so it first lies as a thin layer at the surface and
       // is mixed downward by the stream momentum and by its own weight, not injected into the bulk.
       const vertical = m.radius * (this.stageOne ? 0.14 : 0.36 + 0.12 * Math.min(3, jetStrength));
-      weights[i] = p.y <= inlet.y && depth < vertical * 2
+      // Stage 3: the incoming solution enters only through the contact patch of the stream, in the top two wet rows.
+      const topWetRow = Math.floor((inlet.y - m.bottom) * m.ny / m.height - 0.5);
+      const inPatch = !this.flocMode || (y >= topWetRow - 1 && Math.hypot(dx, dz) <= 0.003);
+      weights[i] = p.y <= inlet.y && depth < vertical * 2 && inPatch
         ? Math.exp(-(dx * dx + dz * dz) / (width * width) - depth * depth / (vertical * vertical)) : 0;
       sum += weights[i];
     }

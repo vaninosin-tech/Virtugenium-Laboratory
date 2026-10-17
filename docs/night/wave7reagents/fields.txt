@@ -1,6 +1,6 @@
-t=0.25s overlap mass=2.35710e-4 depth=1.4313mm spread=1.5901mm extent=0.02494142
+t=0.25s overlap mass=2.09462e-4 depth=1.4687mm spread=1.4630mm extent=0.02361796
 
-Ag+ (z=8, max=2.62110e-4; y top to bottom; x left to right)
+Ag+ (z=8, max=2.60355e-4; y top to bottom; x left to right)
                 
                 
                 
@@ -8,10 +8,10 @@ Ag+ (z=8, max=2.62110e-4; y top to bottom; x left to right)
                 
                 
                 
-%%%%%%%%#=      
-%%%%%%%%#*.     
+%%%%%%%%#+      
+%%%%%%%%#*:     
 %%%%%%%%%#*.    
-%%%%%%%%%%%#+--+
+%%%%%%%%%%%#+==+
 %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%
@@ -34,7 +34,7 @@ Ag+ (z=8, max=2.62110e-4; y top to bottom; x left to right)
    %%%%%%%%%%   
      %%%%%%     
 
-Cl- (z=8, max=2.97139e-3; y top to bottom; x left to right)
+Cl- (z=8, max=3.11370e-3; y top to bottom; x left to right)
                 
                 
                 
@@ -42,8 +42,8 @@ Cl- (z=8, max=2.97139e-3; y top to bottom; x left to right)
                 
                 
                 
-           :+%%+
-           .-++:
+           .+%%+
+           .-+=:
              .. 
                 
                 
@@ -68,7 +68,7 @@ Cl- (z=8, max=2.97139e-3; y top to bottom; x left to right)
                 
                 
 
-overlap (z=8, max=7.13025e-6; y top to bottom; x left to right)
+overlap (z=8, max=5.94538e-6; y top to bottom; x left to right)
                 
                 
                 
@@ -76,9 +76,9 @@ overlap (z=8, max=7.13025e-6; y top to bottom; x left to right)
                 
                 
                 
-         .-     
-          =.    
-           =-..:
+         .=     
+          =:    
+           +-.:=
             .-: 
                 
                 
@@ -102,7 +102,7 @@ overlap (z=8, max=7.13025e-6; y top to bottom; x left to right)
                 
                 
 
-productSource (z=8, max=7.83028e-5; y top to bottom; x left to right)
+productSource (z=8, max=7.68754e-5; y top to bottom; x left to right)
                 
                 
                 
@@ -110,10 +110,10 @@ productSource (z=8, max=7.83028e-5; y top to bottom; x left to right)
                 
                 
                 
-         .+     
+         .*     
           +-    
-           +=::=
-            .== 
+           #+:-+
+            .=- 
                 
                 
                 
@@ -136,9 +136,9 @@ productSource (z=8, max=7.83028e-5; y top to bottom; x left to right)
                 
                 
 
-t=0.5s overlap mass=2.70090e-4 depth=2.2980mm spread=1.6837mm extent=0.04045999
+t=0.5s overlap mass=2.52770e-4 depth=2.4381mm spread=1.5405mm extent=0.03924059
 
-Ag+ (z=8, max=2.69302e-4; y top to bottom; x left to right)
+Ag+ (z=8, max=2.67086e-4; y top to bottom; x left to right)
                 
                 
                 
@@ -149,9 +149,9 @@ Ag+ (z=8, max=2.69302e-4; y top to bottom; x left to right)
 %%%%%%##+.      
 %%%%%%##*-      
 %%%%%%%##+.     
-%%%%%%%%##+.    
-%%%%%%%%%%#*=.  
-%%%%%%%%%%%%##**
+%%%%%%%%##+     
+%%%%%%%%%%#*-...
+%%%%%%%%%%%%####
 %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%
@@ -172,7 +172,7 @@ Ag+ (z=8, max=2.69302e-4; y top to bottom; x left to right)
    %%%%%%%%%%   
      %%%%%%     
 
-Cl- (z=8, max=4.13516e-3; y top to bottom; x left to right)
+Cl- (z=8, max=4.22493e-3; y top to bottom; x left to right)
                 
                 
                 
@@ -181,9 +181,9 @@ Cl- (z=8, max=4.13516e-3; y top to bottom; x left to right)
                 
                 
            :+%%#
-           .-**+
-            .:-:
-              . 
+           .-**=
+            .--:
+             .  
                 
                 
                 
@@ -206,7 +206,7 @@ Cl- (z=8, max=4.13516e-3; y top to bottom; x left to right)
                 
                 
 
-overlap (z=8, max=6.78471e-6; y top to bottom; x left to right)
+overlap (z=8, max=8.12780e-6; y top to bottom; x left to right)
                 
                 
                 
@@ -214,11 +214,11 @@ overlap (z=8, max=6.78471e-6; y top to bottom; x left to right)
                 
                 
                 
-         -      
+         :      
          ..     
           -.    
-           =:.  
-            .-@#
+           =.   
+            :==:
                 
                 
                 
@@ -240,7 +240,7 @@ overlap (z=8, max=6.78471e-6; y top to bottom; x left to right)
                 
                 
 
-productSource (z=8, max=6.97852e-5; y top to bottom; x left to right)
+productSource (z=8, max=7.58934e-5; y top to bottom; x left to right)
                 
                 
                 
@@ -248,11 +248,11 @@ productSource (z=8, max=6.97852e-5; y top to bottom; x left to right)
                 
                 
                 
-         +.     
-         :-     
-          +:    
-           +-...
-            :*%#
+         =.     
+         .-     
+          =.    
+           *:...
+            -#*=
                 
                 
                 
@@ -274,9 +274,9 @@ productSource (z=8, max=6.97852e-5; y top to bottom; x left to right)
                 
                 
 
-t=1s overlap mass=3.52520e-4 depth=3.6157mm spread=1.8325mm extent=0.07339514
+t=1s overlap mass=3.38822e-4 depth=3.6056mm spread=1.6708mm extent=0.07260596
 
-Ag+ (z=8, max=2.70008e-4; y top to bottom; x left to right)
+Ag+ (z=8, max=2.69000e-4; y top to bottom; x left to right)
                 
                 
                 
@@ -284,15 +284,15 @@ Ag+ (z=8, max=2.70008e-4; y top to bottom; x left to right)
                 
                 
                 
-%%%%%#*+:       
+%%%%%##+:       
 %%%%%##*-       
-%%%%%##*+.      
-%%%%%%##*-      
+%%%%%%#*+.      
+%%%%%%##*=      
 %%%%%%%##*:     
-%%%%%%%%%#+:    
-%%%%%%%%%%#*-   
-%%%%%%%%%%%%#+: 
-%%%%%%%%%%%%%%#*
+%%%%%%%%%#+.    
+%%%%%%%%%%#=    
+%%%%%%%%%%%#+===
+%%%%%%%%%%%%%%%#
 %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%
@@ -310,7 +310,7 @@ Ag+ (z=8, max=2.70008e-4; y top to bottom; x left to right)
    %%%%%%%%%%   
      %%%%%%     
 
-Cl- (z=8, max=5.24861e-3; y top to bottom; x left to right)
+Cl- (z=8, max=5.30970e-3; y top to bottom; x left to right)
                 
                 
                 
@@ -322,8 +322,8 @@ Cl- (z=8, max=5.24861e-3; y top to bottom; x left to right)
            .-***
            .:===
             .:--
-             ..:
-               .
+            ....
+                
                 
                 
                 
@@ -344,7 +344,7 @@ Cl- (z=8, max=5.24861e-3; y top to bottom; x left to right)
                 
                 
 
-overlap (z=8, max=7.69514e-6; y top to bottom; x left to right)
+overlap (z=8, max=7.65269e-6; y top to bottom; x left to right)
                 
                 
                 
@@ -352,14 +352,14 @@ overlap (z=8, max=7.69514e-6; y top to bottom; x left to right)
                 
                 
                 
-        .       
+        ..      
          :      
          :      
           :     
           ..    
-           .:   
-             +. 
-              .-
+           -.   
+            *:::
+                
                 
                 
                 
@@ -378,7 +378,7 @@ overlap (z=8, max=7.69514e-6; y top to bottom; x left to right)
                 
                 
 
-productSource (z=8, max=5.51212e-5; y top to bottom; x left to right)
+productSource (z=8, max=5.49637e-5; y top to bottom; x left to right)
                 
                 
                 
@@ -386,14 +386,14 @@ productSource (z=8, max=5.51212e-5; y top to bottom; x left to right)
                 
                 
                 
-        :.      
-         -      
-         =.     
+        ..      
+         =      
+         -.     
           +     
           :-    
-           -+.  
-            .#=.
-              :*
+           *:   
+            #+=+
+             .  
                 
                 
                 
@@ -412,9 +412,9 @@ productSource (z=8, max=5.51212e-5; y top to bottom; x left to right)
                 
                 
 
-t=2s overlap mass=5.89880e-4 depth=5.7157mm spread=1.9632mm extent=0.14985216
+t=2s overlap mass=5.80256e-4 depth=5.8108mm spread=1.8906mm extent=0.15015889
 
-Ag+ (z=8, max=2.78300e-4; y top to bottom; x left to right)
+Ag+ (z=8, max=2.78227e-4; y top to bottom; x left to right)
                 
                 
                 
@@ -422,20 +422,20 @@ Ag+ (z=8, max=2.78300e-4; y top to bottom; x left to right)
                 
                 
                 
-%%%##*=.        
-%%%##*+:        
-%%%%#*+-        
-%%%%##*=:       
+%%%##*=:        
+%%%##*+-        
+%%%%##+=        
+%%%%##*+:       
 %%%%%##+-       
-%%%%%##*=.      
-%%%%%%##+-      
-%%%%%%%#*=      
-%%%%%%%##+.     
+%%%%%##*=       
+%%%%%%##+:      
+%%%%%%##*=      
+%%%%%%%#*=.     
+%%%%%%%%#+:     
 %%%%%%%%#*-     
-%%%%%%%%%#+:    
-%%%%%%%%%%#+:  .
-%%%%%%%%%%%#+::=
-%%%%%%%%%%%%#*+*
+%%%%%%%%%#+:. :=
+%%%%%%%%%%#+==+*
+%%%%%%%%%%%%###%
 %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%
@@ -448,7 +448,7 @@ Ag+ (z=8, max=2.78300e-4; y top to bottom; x left to right)
    ##########   
      ######     
 
-Cl- (z=8, max=6.15669e-3; y top to bottom; x left to right)
+Cl- (z=8, max=6.30174e-3; y top to bottom; x left to right)
                 
                 
                 
@@ -457,152 +457,12 @@ Cl- (z=8, max=6.15669e-3; y top to bottom; x left to right)
                 
                 
           .:=#%%
-           :=*##
+           :=*#*
            .-=++
            .:-==
            ..:--
-            .:::
+            ..::
             ....
-             ...
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-
-overlap (z=8, max=7.05627e-6; y top to bottom; x left to right)
-                
-                
-                
-                
-                
-                
-                
-       ..       
-        :       
-        -       
-        ..      
-         -      
-         :      
-          .     
-          +     
-          ..    
-           =    
-            -  .
-             =-:
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-
-productSource (z=8, max=3.97522e-5; y top to bottom; x left to right)
-                
-                
-                
-                
-                
-                
-                
-       ..       
-        -       
-        =       
-        ::      
-         +      
-         =.     
-         .=     
-          #     
-          ::    
-           #    
-            #. :
-             #*-
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-
-t=4s overlap mass=1.12831e-3 depth=9.4820mm spread=2.3564mm extent=0.32381007
-
-Ag+ (z=8, max=5.35815e-4; y top to bottom; x left to right)
-                
-                
-                
-                
-                
-                
-                
-=---:.          
-=---:.          
-==--::          
-==---:.         
-===--:.         
-===---:.        
-====--:.        
-====---:.       
-====---:.       
-=====---:.      
-=====---:.      
-======--:.      
-======--::      
-======---:      
-=======--:.     
-=======--:.     
-=======--:.     
-=======--:    .:
-=======--.: ..:-
-===+++==:- : :-=
-==+++++== = --==
- +++++++:* =:== 
-  ++++*+*.#:+=  
-   ++***+#:*+   
-     ***#**     
-
-Cl- (z=8, max=3.85741e-3; y top to bottom; x left to right)
-                
-                
-                
-                
-                
-                
-                
-         .:=*#%%
-         .:-+*##
-         .:-=+**
-          .:-==+
-          .::--=
-           .::--
-           ..:::
-            ....
-             ...
               ..
                 
                 
@@ -619,8 +479,10 @@ Cl- (z=8, max=3.85741e-3; y top to bottom; x left to right)
                 
                 
                 
+                
+                
 
-overlap (z=8, max=6.21240e-6; y top to bottom; x left to right)
+overlap (z=8, max=6.41941e-6; y top to bottom; x left to right)
                 
                 
                 
@@ -628,33 +490,137 @@ overlap (z=8, max=6.21240e-6; y top to bottom; x left to right)
                 
                 
                 
-      *         
-      :         
-      ..        
-       -        
-       :        
-       .:       
-        -       
-        .:      
+       ..       
+        =       
+        :       
+        ..      
+         :      
          -      
-         .:     
-          @     
-          :.    
-          ..    
+         ..     
+          =     
+          :     
           .:    
-          .-    
-          .#  .*
-           -:.=.
-          . ::  
+           -:.--
+            :-. 
                 
-            .   
-         . -    
-          -     
+                
+                
+                
+                
+                
+                
+                
+                
+                
                 
                 
                 
 
-productSource (z=8, max=2.43861e-5; y top to bottom; x left to right)
+productSource (z=8, max=3.87789e-5; y top to bottom; x left to right)
+                
+                
+                
+                
+                
+                
+                
+       .:       
+        =       
+        =       
+        ::      
+         +      
+         +.     
+         :-     
+          *     
+          =.    
+          .=   .
+           ==-*+
+            :+  
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+
+t=4s overlap mass=1.12513e-3 depth=9.4578mm spread=2.3451mm extent=0.31746564
+
+Ag+ (z=8, max=4.88719e-4; y top to bottom; x left to right)
+                
+                
+                
+                
+                
+                
+                
+===-:.          
+===--:          
+===--:          
+====-:.         
+====--:         
+====--:.        
+=====--.        
+=====--:.       
+======--.       
+======--:.      
+=======-:.      
+=======--:      
+=======--:.     
+=======--:.     
+========-:.     
+========-:.    .
+++++====-:    ..
++++++==--.: ...:
+++++++==:= :.::-
++++++++-+ =:---=
+++++++++ #.====+
+ +++++*-# *=+++ 
+  +***+#:%-***  
+   ***#+%=#**   
+     ###*#*     
+
+Cl- (z=8, max=3.96924e-3; y top to bottom; x left to right)
+                
+                
+                
+                
+                
+                
+                
+         .:=*#%%
+         .:-+*##
+         .:-=++*
+          .:-==+
+          ..:---
+           ..::-
+           ...::
+            ....
+             ...
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+
+overlap (z=8, max=6.18581e-6; y top to bottom; x left to right)
                 
                 
                 
@@ -663,34 +629,68 @@ productSource (z=8, max=2.43861e-5; y top to bottom; x left to right)
                 
                 
       +         
-      =.        
+      -         
+      ..        
+       -        
+       -        
+       ..       
+        =       
+        .:      
+         -.     
+         .:     
+          =     
+          ..    
+          .:    
+           =  ..
+           *..--
+           ===: 
+          ..=:  
+           .    
+          .     
+         .      
+                
+                
+                
+                
+                
+
+productSource (z=8, max=2.39623e-5; y top to bottom; x left to right)
+                
+                
+                
+                
+                
+                
+                
+      +         
+      +.        
       ::        
        +        
-       =.       
+       +.       
        .=       
         *.      
-        .=      
-         *.     
-         .=     
-          #     
-          -.    
-          .-    
+        .+      
+         +.     
+         .+     
+          *     
+          ::    
           .=    
-           =    
-           =   -
-           ::.= 
-          . :-  
+           =   .
+           =. -.
+           .--. 
+            .   
                 
                 
-           .    
+                
+                
                 
                 
                 
                 
 
-t=8s overlap mass=1.72405e-3 depth=9.1775mm spread=3.7278mm extent=0.55664988
+t=8s overlap mass=1.74112e-3 depth=9.2325mm spread=3.7077mm extent=0.54548960
 
-Ag+ (z=8, max=5.14171e-4; y top to bottom; x left to right)
+Ag+ (z=8, max=6.25125e-4; y top to bottom; x left to right)
                 
                 
                 
@@ -701,30 +701,30 @@ Ag+ (z=8, max=5.14171e-4; y top to bottom; x left to right)
                 
                 
                 
+.               
 ..              
-:.              
-::.             
--::..           
----:..          
-----:..         
------::..       
-==----::..      
-====---::..     
-=====--::...    
-======--::...   
-======---:....  
-++=====--::.... 
-+++====--:::....
-++++====--::....
-+++++===--:::...
-+++++===--:::...
-++++++==--:::::.
- ****++=---:::: 
-  *##**+=----:  
-   %%%#*+==--   
-     @%#*++     
+:..             
+:::..           
+::::..          
+-::::..         
+---:::..        
+----:::..       
+-----:::..      
+------:::..     
+-------::..     
+==-----::...    
+====----::....  
+=====---::......
+=====---::......
+======--:::.....
+++++==--:::.....
++++++==-::::::..
+ +***+=--:::::: 
+  *##*+=-----:  
+   %%##*+==--   
+     @%#*+=     
 
-Cl- (z=8, max=8.08212e-4; y top to bottom; x left to right)
+Cl- (z=8, max=8.10168e-4; y top to bottom; x left to right)
                 
                 
                 
@@ -733,11 +733,11 @@ Cl- (z=8, max=8.08212e-4; y top to bottom; x left to right)
                 
                 
   :-+*##%%%%%%%%
-  .-=+**########
-   .-==+++++++++
-    .:--=======-
-     .::::--::::
-      ....:::::.
+  .-=+**#######*
+   :-==+++++++++
+    .:--======--
+     ..:::--::::
+       ...::::..
          .......
                 
                 
@@ -758,7 +758,7 @@ Cl- (z=8, max=8.08212e-4; y top to bottom; x left to right)
                 
                 
 
-overlap (z=8, max=5.99961e-6; y top to bottom; x left to right)
+overlap (z=8, max=6.00584e-6; y top to bottom; x left to right)
                 
                 
                 
@@ -766,19 +766,19 @@ overlap (z=8, max=5.99961e-6; y top to bottom; x left to right)
                 
                 
                 
-+.              
-::              
- -.             
- .%             
-  .*            
-   .#.          
-    .--.        
-      .=:.      
-       .:%:..   
-         .=+:...
-          .:**-:
-           ..-+%
-            ..::
+*               
+-.              
+.+              
+ .+             
+  .+.           
+   .=:          
+     :=.        
+      .+:.      
+       .:*:.    
+         .+=:...
+          .-#*+=
+           .:--=
+            ....
               ..
                 
                 
@@ -792,7 +792,7 @@ overlap (z=8, max=5.99961e-6; y top to bottom; x left to right)
                 
                 
 
-productSource (z=8, max=1.44403e-5; y top to bottom; x left to right)
+productSource (z=8, max=1.37911e-5; y top to bottom; x left to right)
                 
                 
                 
@@ -800,16 +800,16 @@ productSource (z=8, max=1.44403e-5; y top to bottom; x left to right)
                 
                 
                 
--.              
-.-              
- +:             
+:               
+::              
+ #.             
   %             
-   %.           
-    %:          
-     +=.        
-      .=:       
-        .-.     
-          ..    
+   @.           
+    #=          
+     -*         
+      .+:       
+        :-      
+          :.    
             .   
                 
                 
@@ -826,4 +826,4 @@ productSource (z=8, max=1.44403e-5; y top to bottom; x left to right)
                 
                 
 
-formed 8-12s=0.09055430
+formed 8-12s=0.08893106

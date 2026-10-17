@@ -115,6 +115,26 @@ function drawDiagnostics() {
   const m = field.mask, R = RADIUS;
   const cell = (x: number, y: number, z: number) => m.index(x, y, z);
   const colour = (t: number) => { const c = Math.max(0, Math.min(1, t)); return `rgb(${Math.round(255 * Math.min(1, c * 2))},${Math.round(255 * Math.max(0, Math.min(1, c * 2 - 0.5)))},${Math.round(255 * (1 - c) * 0.8)})`; };
+  if (VIEW === "fields") {
+    // Diagnostic B: dissolved Ag+, dissolved Cl- and their local overlap, summed along the line of sight.
+    const ag = field.species["Ag+"].values, cl = field.species["Cl-"].values;
+    const panels: [string, (i: number) => number][] = [["Ag+", i => ag[i]], ["Cl-", i => cl[i]], ["перекрытие Ag+ x Cl-", i => Math.min(ag[i], cl[i])]];
+    const pw = w / 3, cw = pw * 0.7 / m.nx, ch = Math.min(h * 0.8 / m.ny, cw * 2.2);
+    panels.forEach(([name, value], k) => {
+      const col = new Float64Array(m.nx * m.ny); let max = 1e-12;
+      for (let y = 0; y < m.ny; y++) for (let x = 0; x < m.nx; x++) { let sum = 0; for (let z = 0; z < m.nz; z++) { const i = cell(x, y, z); if (m.data[i]) sum += value(i); } col[y * m.nx + x] = sum; max = Math.max(max, sum); }
+      const x0 = k * pw + pw * 0.15, y0 = h * 0.9;
+      for (let y = 0; y < m.ny; y++) for (let x = 0; x < m.nx; x++) {
+        const wet = m.data[cell(x, y, Math.floor(m.nz / 2))]; if (!wet) continue;
+        const v = col[y * m.nx + x] / (k === 0 ? Math.max(max, 1e-12) : max);
+        g.fillStyle = k === 0 ? `rgb(${Math.round(40 + 160 * v)},${Math.round(60 + 120 * v)},${Math.round(90 + 60 * v)})` : colour(v);
+        g.fillRect(x0 + x * cw, y0 - (y + 1) * ch, cw + 0.5, ch + 0.5);
+      }
+      g.fillStyle = "#fff"; g.font = "13px system-ui"; g.fillText(name, x0, y0 - m.ny * ch - 8);
+      const levelY = y0 - (m.ny - 5) * ch; void levelY;
+    });
+    g.fillText("Диагностика B: растворённые поля (сумма по глубине), первое Cl- у точки удара", 10, h - 8);
+  }
   if (VIEW === "tracer" || VIEW === "source" || VIEW === "dense") {
     const values = VIEW === "tracer" ? field.tracer : VIEW === "dense" ? Float32Array.from({ length: m.data.length }, (_, i) => field.densePixels[i * 4]) : field.productSource;
     let max = 1e-12; const col = new Float64Array(m.nx * m.ny);
@@ -197,7 +217,7 @@ function draw() {
   if (canvas.width !== Math.round(w * ratio) || canvas.height !== Math.round(h * ratio)) {
     renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); layoutVideo();
   }
-  volume.visible = VIEW === "material" || VIEW === "cloud" || VIEW === "nodes-over";
+  volume.visible = VIEW === "material" || VIEW === "fields" && false || VIEW === "cloud" || VIEW === "nodes-over";
   renderer.render(scene, camera);
   drawDiagnostics();
   hud.textContent = `налив ${(poured * 100).toFixed(0)}%   осадок ${(field.extent * 100).toFixed(0)}%`;
