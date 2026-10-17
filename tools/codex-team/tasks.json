@@ -3,34 +3,28 @@
   "nodeModulesFrom": "D:/Claude/virtugenium-lab-transfer/virtugenium-lab-transfer/node_modules",
   "jobs": [
     {
-      "id": "cthree",
-      "prompt": "tools/codex-team/tasks/101-c3.md",
+      "id": "cfive",
+      "prompt": "tools/codex-team/tasks/111-c5.md",
       "owns": [
-        "src/scenes/laboratory/lib/tubeSilverField.ts",
-        "src/scenes/laboratory/lib/tubeSilverField.test.ts",
         "src/scenes/laboratory/lib/tubeFlowSolver.ts",
         "src/scenes/laboratory/lib/tubeFlowSolver.test.ts",
-        "src/scenes/laboratory/lib/silverStage.ts",
-        "src/scenes/laboratory/lib/tubePrecipitationPhysics.ts",
-        "src/scenes/laboratory/lib/night/stage1/",
-        "tests/night/wave11c3/",
-        "docs/night/wave11c3/"
+        "src/scenes/laboratory/lib/tubeJetModel.ts",
+        "src/scenes/laboratory/lib/tubeJetModel.test.ts",
+        "tests/night/wave12c5/",
+        "docs/night/wave12c5/"
       ]
     },
     {
-      "id": "cfour",
-      "prompt": "tools/codex-team/tasks/102-c4.md",
+      "id": "csix",
+      "prompt": "tools/codex-team/tasks/112-c6.md",
       "owns": [
-        "src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts",
-        "src/scenes/laboratory/lib/tubeReactionVisuals.ts",
-        "tests/tubeReactionVisuals.test.ts",
-        "src/scenes/laboratory/lib/night/render/",
-        "src/scenes/laboratory/ui/DiagnosticTools.tsx",
-        "src/scenes/laboratory/ui/DiagnosticCamera.tsx",
-        "src/scenes/laboratory/ui/Laboratory.tsx",
-        "tests/_wave11/",
-        "tests/night/wave11c4/",
-        "docs/night/wave11c4/"
+        "src/scenes/laboratory/lib/tubeSilverField.ts",
+        "src/scenes/laboratory/lib/tubeSilverField.test.ts",
+        "src/scenes/laboratory/lib/tubePrecipitationPhysics.ts",
+        "src/scenes/laboratory/lib/silverStage.ts",
+        "src/scenes/laboratory/lib/night/stage1/",
+        "tests/night/wave12c6/",
+        "docs/night/wave12c6/"
       ]
     }
   ]
