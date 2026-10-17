@@ -1,14 +1,12 @@
 {
-  "maxHours": 6,
+  "maxHours": 5,
   "nodeModulesFrom": "D:/Claude/virtugenium-lab-transfer/virtugenium-lab-transfer/node_modules",
   "jobs": [
-    { "id": "fielda", "prompt": "tools/codex-team/tasks/31-fieldA.md",
-      "owns": ["src/scenes/laboratory/lib/tubeSilverField.ts", "src/scenes/laboratory/lib/tubeSilverField.test.ts",
-               "src/scenes/laboratory/lib/tubeFlowSolver.ts", "src/scenes/laboratory/lib/tubeFlowSolver.test.ts",
-               "src/scenes/laboratory/lib/silverStage.ts", "src/scenes/laboratory/lib/night/stage1/",
-               "tests/night/stage1/", "tests/night/wave4a/", "docs/night/wave4a/", "docs/night/stage1/"] },
-    { "id": "pourb", "prompt": "tools/codex-team/tasks/32-pourB.md",
-      "owns": ["src/scenes/laboratory/ui/PourStream.tsx", "src/scenes/laboratory/lib/tubeReactionVisuals.ts",
-               "tests/tubeReactionVisuals.test.ts", "tests/night/wave4b/", "docs/night/wave4b/"] }
+    { "id": "perf", "prompt": "tools/codex-team/tasks/51-perf.md",
+      "owns": ["src/scenes/laboratory/lib/night/stage1/flocSystem.ts", "tests/night/wave6perf/", "docs/night/wave6perf/"] },
+    { "id": "game", "prompt": "tools/codex-team/tasks/52-game.md",
+      "owns": ["src/scenes/laboratory/lib/tubeReactionVisuals.ts", "tests/tubeReactionVisuals.test.ts", "tests/night/wave6game/", "docs/night/wave6game/"] },
+    { "id": "tests", "prompt": "tools/codex-team/tasks/53-tests.md",
+      "owns": ["tests/night/wave6tests/", "docs/night/wave6tests/", "tests/night/wave4a/", "tests/night/stage1/"] }
   ]
 }
