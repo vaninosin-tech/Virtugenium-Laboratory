@@ -49,7 +49,7 @@ try {
           resolve(new Blob(parts, { type: mime }));
         };
         recorder.start();
-        setTimeout(() => recorder.stop(), 4500);
+        setTimeout(() => recorder.stop(), Number(window.__vidLen ?? 4500));
         window.__startReviewVideo = null;
       };
     });

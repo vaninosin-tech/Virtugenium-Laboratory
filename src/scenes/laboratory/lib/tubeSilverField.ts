@@ -34,6 +34,7 @@ const RAFT_ROWS = 3, RAFT_HOLD = 0.04;
 const AGG_V0 = 0.0011, AGG_MAX_SPEED = 0.008, AGG_GROWTH_TIME = 6, AGG_BREAK_SHEAR = 0.05;
 /** Rate (per unit relative concentration per second) at which fine solid joins flocs (Smoluchowski-like, ~ c). */
 const FLOC_SOLID_FRACTION = () => { const v = (globalThis as { __silverPhi?: unknown }).__silverPhi; return typeof v === "number" ? v : 0.00003; };
+const FLOC_MIN_PARCEL = 5e-6;
 const FLOC_AGGREGATION = 14, FLOC_C0 = 0.25;
 const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
 
@@ -142,8 +143,10 @@ export class TubeSilverField {
     this.flocMode = silverStage() === 3;
     this.stageOne = silverStage() === 1 || this.flocMode;
     // Stage 1 carries a connected dense phase and needs the finer field grid.
-    const size = this.stageOne ? (quality === "LOW" ? TUBE_SIMULATION.field.LOW : TUBE_SIMULATION.field.HIGH)
-      : quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH;
+    // Stage 3 carries the structure in the flocs, so the carrier grid can be coarser (cost grows with the cell count).
+    const flocGrid = this.flocMode ? (quality === "LOW" ? { width: 12, height: 24, depth: 12 } : { width: 16, height: 32, depth: 16 }) : null;
+    const size = flocGrid ?? (this.stageOne ? (quality === "LOW" ? TUBE_SIMULATION.field.LOW : TUBE_SIMULATION.field.HIGH)
+      : quality === "LOW" ? TUBE_SIMULATION.jetFlow.LOW : TUBE_SIMULATION.jetFlow.HIGH);
     this.mask = new LiquidMask(size.width, size.height, size.depth, radius, bottom, height);
     this.velocity = new VelocityField(this.mask);
     this.solver = new TubeFlowSolver(this.mask, this.stageOne ? { lowDiffusion: true, ambientStrength: 0.03 } : {});
@@ -228,7 +231,8 @@ export class TubeSilverField {
     const m = this.mask;
     this.liquidLevel = level;
     this.velocity.gravityUp.copy(up);
-    this.accumulator = Math.min(0.5, this.accumulator + Math.max(0, dt));
+    // A heavy frame must not snowball: stage 3 never catches up more than 3 steps (simulated time runs slower instead).
+    this.accumulator = Math.min(this.flocMode ? 0.15 : 0.5, this.accumulator + Math.max(0, dt));
     while (this.accumulator >= TUBE_SIMULATION.field.stepSeconds - 1e-10) {
       const step = TUBE_SIMULATION.field.stepSeconds;
       this.accumulator -= step; this.age += step;
@@ -715,7 +719,8 @@ export class TubeSilverField {
       const concentration = fine * m.activeCount;
       const rate = Math.min(0.6, FLOC_AGGREGATION * concentration * (concentration / (concentration + FLOC_C0)) * dt);
       const moved = fine * rate;
-      if (moved <= 1e-12) continue;
+      // Tiny amounts stay in the suspension until more accumulates: one floc update per significant parcel, not per cell.
+      if (moved <= FLOC_MIN_PARCEL) continue;
       smoothing[i] -= moved;
       const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
       m.point(x, y, z, point);

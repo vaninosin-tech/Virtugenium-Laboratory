@@ -168,7 +168,7 @@ export class FlocSystem {
       const bucket = this.cells.get(this.cellKey(x, y, z));
       if (bucket) for (const j of bucket) if (j !== i) found.push(j);
     }
-    found.sort((a, b) => a - b);
+    // Bucket order is deterministic (insertion order, fixed loop order), so no sort is needed.
     return found;
   }
 
