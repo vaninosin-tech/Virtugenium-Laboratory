@@ -141,6 +141,8 @@ export class TubeSilverField {
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
     readonly silverAmount = 1.15) {
     this.flocMode = silverStage() === 3;
+    // Live handle for the real-game diagnostics (event logs); read-only use.
+    if (typeof window !== "undefined") (window as unknown as { __silverFieldLive?: unknown }).__silverFieldLive = this;
     this.stageOne = silverStage() === 1 || this.flocMode;
     // Stage 1 carries a connected dense phase and needs the finer field grid.
     // Stage 3 carries the structure in the flocs, so the carrier grid can be coarser (cost grows with the cell count).

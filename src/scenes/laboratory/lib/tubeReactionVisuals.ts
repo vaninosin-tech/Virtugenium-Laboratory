@@ -8,6 +8,7 @@ import { BariumSedimentField, BariumSedimentGeometry } from "./tubeBariumSedimen
 import { SilverSedimentField, SilverSedimentGeometry } from "./tubeSilverSediment";
 import { makeSilverVolumeMaterial, makeLegacySilverVolumeMaterial } from "./tubeSilverVolumeMaterial";
 import { silverStage, silverDiagnostic } from "./silverStage";
+import { deliveryEvents } from "./tubeDelivery";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
@@ -1406,6 +1407,30 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         const agitation = Math.max(motion,
           Math.min(1, Math.hypot(slope.x - previousSlopeX, slope.y - previousSlopeZ) * 15));
         const silverDelta = Math.min(elapsed, 0.05);
+        // Stage 3: chemistry follows the authoritative delivery ledger and replays it on its own clock, so a field
+        // created after the stream has started (the contents commit mounts it late) sees every step at its
+        // original time and place instead of one cumulative jump.
+        const ledger3 = silverStage() === 3 && attachedNow
+          ? deliveryEvents(attachedNow.instanceId).filter(e => e.valid && e.reagentId === "nacl") : null;
+        if (ledger3 && ledger3.length) {
+          const firstWall = ledger3[0].serial + ledger3[0].atMs;
+          const wanted = Math.max(0, (Date.now() - firstWall) / 1000);
+          let guard = 0;
+          while (silverField.ageSeconds + 0.05 <= wanted + 1e-9 && guard++ < 60) {
+            const t = firstWall + (silverField.ageSeconds + 0.05) * 1000;
+            let cumulative = 0, last = ledger3[0], recent = 0;
+            for (const e of ledger3) {
+              if (e.serial + e.atMs > t) break;
+              cumulative += e.ml; last = e;
+              if (t - (e.serial + e.atMs) <= 200) recent += e.ml;
+            }
+            silverInlet.copy(volume.worldToLocal(impactPoint.set(last.point.x, last.point.y, last.point.z)));
+            const radial3 = Math.hypot(silverInlet.x, silverInlet.z);
+            if (radial3 > radius * 0.82) { silverInlet.x *= radius * 0.82 / radial3; silverInlet.z *= radius * 0.82 / radial3; }
+            silverInlet.y = (level.value - up.value.x * silverInlet.x - up.value.z * silverInlet.z) / Math.max(0.2, up.value.y);
+            silverField.advance(0.05, up.value, level.value, silverInlet, cumulative, agitation, Math.max(0.05, recent / 0.2), undefined);
+          }
+        } else
         silverField.advance(silverDelta, up.value, level.value, silverInlet,
           attachedNow ? (impact?.reagentId === "nacl" ? impact.deliveredMl : 0)
             // Surface-first rule: in stage 3 no reagent enters the liquid except through a real stream impact
