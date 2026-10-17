@@ -10,6 +10,8 @@ export async function openSilverPage(onPage = () => {}) {
   onPage(page);
   page.setDefaultTimeout(300000);
   await page.addInitScript(() => { window.__silverStage = 3; window.__silverAgg = 0; window.__silverDiag = ""; });
+  // Extra flags for comparisons, for example INIT="window.__silverJetModel=true;window.__silverSubgrid=true;".
+  if (process.env.INIT) await page.addInitScript(process.env.INIT);
   await page.goto(process.env.URL ?? "http://127.0.0.1:5201/");
   await page.getByText("Играть", { exact: true }).click();
   await page.getByText("Песочница (временно)").click();

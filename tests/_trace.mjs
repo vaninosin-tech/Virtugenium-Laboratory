@@ -8,7 +8,7 @@ try {
   const page = await browser.newPage({ viewport: { width: Number(process.env.VW ?? 1280), height: Number(process.env.VH ?? 800) } });
   page.setDefaultTimeout(900000);
   if (process.env.SLOW) await page.addInitScript(`(() => { const k = ${Number(process.env.SLOW)}, d0 = Date.now(), real = Date.now.bind(Date); Date.now = () => d0 + (real() - d0) * k; })();`);
-  await page.addInitScript(`window.__silverStage=3; window.__silverDiag=${JSON.stringify(process.env.DIAG ?? "tracer")};${process.env.AGG0 ? " window.__silverAgg=0;" : ""}`);
+  await page.addInitScript(`window.__silverStage=3; window.__silverDiag=${JSON.stringify(process.env.DIAG ?? "tracer")};${process.env.AGG0 ? " window.__silverAgg=0;" : ""}${process.env.INIT ? " " + process.env.INIT : ""}`);
   const consoleLog = []; page.on('console', m => { if (/error|warn/i.test(m.type()) || /shader|program|GLSL/i.test(m.text())) consoleLog.push(m.type() + ': ' + m.text().slice(0, 600)); }); page.on('pageerror', e => consoleLog.push('pageerror: ' + String(e).slice(0, 600)));
   await page.goto(process.env.URL ?? "http://127.0.0.1:5201/");
   await page.getByText("Играть", { exact: true }).click();
