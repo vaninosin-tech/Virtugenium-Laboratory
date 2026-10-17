@@ -108,11 +108,11 @@ export class TubeSilverField {
   private get buoyancy() { const v = (globalThis as { __silverBuoy?: unknown }).__silverBuoy; return typeof v === "number" ? v : 0.1; }
   private get ionDiffusivity() {
     const override = (globalThis as { __silverMix?: unknown }).__silverMix;
-    return typeof override === "number" ? override : 0.0000004;
+    return typeof override === "number" ? override : 0.000002;
   }
   private get ionEddy() {
     const override = (globalThis as { __silverEddy?: unknown }).__silverEddy;
-    return typeof override === "number" ? override : 0.01;
+    return typeof override === "number" ? override : 0.3;
   }
   /** Stage 1 keeps the stream gentle so the first cotton forms under the surface. */
   private get jetScale() {
