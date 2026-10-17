@@ -185,8 +185,9 @@ function draw() {
   stream.visible = pouring;
   if (pouring) {
     const top = level + 0.03;
-    stream.scale.set(1, top - level + 0.003, 1);
-    stream.position.set(inlet.x, (top + level - 0.003) / 2, 0);
+    // The stream ends exactly at the liquid surface: whatever happens below is the mixing, not a drawn column.
+    stream.scale.set(1, top - level, 1);
+    stream.position.set(inlet.x, (top + level) / 2, 0);
   }
   const w = canvas.clientWidth, h = canvas.clientHeight, ratio = renderer.getPixelRatio();
   if (canvas.width !== Math.round(w * ratio) || canvas.height !== Math.round(h * ratio)) {
