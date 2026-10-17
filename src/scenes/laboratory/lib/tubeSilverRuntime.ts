@@ -80,10 +80,14 @@ export const silverRuntime = {
       delivered: 0, inlet, latestRate: 0, diagnostics: diag, ids: new Set() };
     entry.delivered += accepted;
     entry.inlet.copy(inlet);
-    entry.latestRate = accepted * 20;
+    // accepted is the ledger volume in mL. Accumulate all events until the next
+    // 50 ms fluid step; Q = (sum accepted mL) * 1e-6 / 0.05 m3/s.
+    entry.latestRate = (globalThis as { __silverJetModel?: unknown }).__silverJetModel
+      ? entry.latestRate + accepted * 20 : accepted * 20;
     // The first fixed step inserts chloride synchronously with the first valid event.
     if (isFirst) field.advance(0.05, up, level, inlet, entry.delivered, 0,
       entry.latestRate, undefined);
+    if (isFirst && (globalThis as { __silverJetModel?: unknown }).__silverJetModel) entry.latestRate = 0;
     entry.ids.add(id);
     diag.eventIds.push(id);
     diag.deliveredMl = entry.delivered;

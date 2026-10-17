@@ -34,6 +34,7 @@ export class TubeFlowSolver {
   lastEntrainmentFlux = 0;
   lastJetPenetration = 0;
   lastJetClippedMomentum = 0;
+  lastJetBlockedMomentum: readonly number[] = [0, 0, 0];
   lastJetProjectionChange: readonly number[] = [0, 0, 0];
   constructor(readonly mask: LiquidMask, readonly options: { lowDiffusion?: boolean; pressureIterations?: number; eddyFraction?: number; ambientStrength?: number } = {}) {
     const n = mask.data.length;
@@ -104,10 +105,22 @@ export class TubeFlowSolver {
     this.lastEntrainmentFlux = 0;
     this.lastJetPenetration = 0;
     this.lastJetClippedMomentum = 0;
+    this.lastJetBlockedMomentum = [0, 0, 0];
     this.lastJetProjectionChange = [0, 0, 0];
     if (jet && surface) {
-      jet.prepare(dt, inlet, direction, surface, typeof flag === "object" ? flag : {});
+      const options = typeof flag === "object" ? flag : {};
+      let ambientSpeed = 0, count = 0;
+      for (let a = 0; a < m.activeCount; a++) {
+        const i = m.active[a], p = m.point(i % m.nx, Math.floor(i / m.nx) % m.ny,
+          Math.floor(i / (m.nx * m.ny)));
+        if (Math.hypot(p.x - inlet.x, p.z - inlet.z) > m.radius * 0.25
+          || Math.abs(p.y - inlet.y) > 2 * m.height / m.ny) continue;
+        ambientSpeed += Math.hypot(this.flow[3 * i], this.flow[3 * i + 1], this.flow[3 * i + 2]);
+        count++;
+      }
+      jet.prepare(dt, inlet, direction, surface, { ...options, ambientSpeed: options.ambientSpeed ?? ambientSpeed / Math.max(1, count) });
       this.lastJetMomentumSource = Array.from(jet.appliedMomentum);
+      this.lastJetBlockedMomentum = Array.from(jet.blockedMomentum);
       this.lastEntrainmentFlux = jet.entrainmentFlux;
       this.lastJetPenetration = jet.penetration;
     }
@@ -154,15 +167,15 @@ export class TubeFlowSolver {
           + (ambient?.[axis] ?? 0) * dt * (this.options.ambientStrength ?? 0.15)
           // Near-surface outward spreading of a plunging jet; the pressure projection below keeps it incompressible.
           + (surface && !jet && axis !== 1 ? this.surfaceSpreadTerm(surface, p, axis, v, dt) : 0);
-        this.faces[axis][i] = Math.max(-0.09, Math.min(0.09, rawFace));
+        this.faces[axis][i] = Math.max(jet ? -0.25 : -0.09, Math.min(jet ? 0.25 : 0.09, rawFace));
         if (jet) this.lastJetClippedMomentum += Math.abs(rawFace - this.faces[axis][i])
           * 1000 * this.spacing[0] * this.spacing[1] * this.spacing[2] / dt;
       }
     }
     let pre: number[] | undefined;
     if (jet) pre = this.totalFaceMomentum(dt);
-    if (jet) this.project(300);
-    else if (flag && this.jetModel) this.project(30);
+    if (jet) this.project(120);
+    else if (flag && this.jetModel) this.project(120);
     else this.project();
     if (jet && pre) {
       const post = this.totalFaceMomentum(dt);

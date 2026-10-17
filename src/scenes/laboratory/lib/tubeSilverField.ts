@@ -383,13 +383,24 @@ export class TubeSilverField {
       if (!jetDirection) this.wallJet.negate();
       this.wallJet.x += inlet.x / m.radius * wall * 0.55;
       this.wallJet.z += inlet.z / m.radius * wall * 0.55;
+      const calibratedJet = this.stageOne && !!(globalThis as { __silverJetModel?: unknown }).__silverJetModel;
+      // The flagged source uses the incoming direction. Deflection at the bowl
+      // and side wall is produced by the wet-face projection, not prescribed here.
+      if (calibratedJet) {
+        this.wallJet.copy(jetDirection ?? up);
+        if (!jetDirection) this.wallJet.negate();
+      }
       this.solver.step(step, inlet, this.wallJet,
         amount > 0 ? 0.2 * this.jetScale * Math.min(3, Math.max(0.4, jetStrength)) : 0,
         agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined,
         0, this.stageOne ? { values: this.loadWeight, scale: m.activeCount * this.loadStrength,
           down: this.down.copy(up).negate() } : undefined,
         this.stageOne && amount > 0 && this.surfaceClosure
-          ? { x: inlet.x, z: inlet.z, level, flow: Math.max(0.05, jetStrength) * 1e-6, alpha: this.surfaceAlpha,
+          ? { x: inlet.x, z: inlet.z, level,
+            // jetStrength is the accepted ledger rate in mL/s for stage 3.
+            // 1 mL/s = 1e-6 m3/s. Preserve the legacy closure exactly with the flag off.
+            flow: (calibratedJet ? Math.max(0, jetStrength) : Math.max(0.05, jetStrength)) * 1e-6,
+            alpha: this.surfaceAlpha,
             delta: this.surfaceDelta, r0: 0.001, relaxation: 12 } : undefined);
       const kinetic = this.solver.diagnostics().energy;
       // The stream stirs the added solution into the Ag+ liquid within about a second.
