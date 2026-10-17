@@ -37,6 +37,9 @@ const FLOC_SOLID_FRACTION = () => { const v = (globalThis as { __silverPhi?: unk
 const FLOC_MIN_PARCEL = 5e-6;
 const FLOC_AGGREGATION = 14, FLOC_C0 = 0.25;
 const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
+/** Fine AgCl particles have negligible Brownian spreading on a millimetre grid. The bounded
+ * subgrid term represents unresolved stirring; the solver's measured face velocity handles advection. */
+const FINE_DIFFUSIVITY = 1e-9, FINE_EDDY_SCALE = 0.02;
 
 /** R3 bookkeeping in normalized amounts. */
 export function reactR2(silver: number, chloride: number, fraction = 1) {
@@ -139,7 +142,8 @@ export class TubeSilverField {
   }
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
-    readonly silverAmount = 1.15) {
+    readonly silverAmount = 1.15,
+    readonly fineTransport: { diffusivity?: number; eddyScale?: number } = {}) {
     this.flocMode = silverStage() === 3;
     // Live handle for the real-game diagnostics (event logs); read-only use.
     if (typeof window !== "undefined") (window as unknown as { __silverFieldLive?: unknown }).__silverFieldLive = this;
@@ -334,7 +338,9 @@ export class TubeSilverField {
       this.sedimentField.settle(step);
       for (let k = 0; k < 3; k++) {
         if (this.stageOne && k === 1) this.solver.transport(this.suspension[k], step, 0.00003, 1);
-        else if (this.stageOne && k === 0) this.solver.transport(this.suspension[k], step, 0.000012, 0.6);
+        else if (this.stageOne && k === 0) this.solver.transport(this.suspension[k], step,
+          this.flocMode ? (this.fineTransport.diffusivity ?? FINE_DIFFUSIVITY) : 0.000012,
+          this.flocMode ? (this.fineTransport.eddyScale ?? FINE_EDDY_SCALE) : 0.6);
         else this.solver.transport(this.suspension[k], step, this.stageOne ? 0.000001 : 0.000018);
         if (!this.stageOne) this.settle(this.suspension[k], step,
           TUBE_SIMULATION.silver.settlingSpeeds[k] * this.settlingBoost);

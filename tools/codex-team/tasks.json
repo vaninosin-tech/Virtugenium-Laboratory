@@ -2,9 +2,31 @@
   "maxHours": 4,
   "nodeModulesFrom": "D:/Claude/virtugenium-lab-transfer/virtugenium-lab-transfer/node_modules",
   "jobs": [
-    { "id": "runtime", "prompt": "tools/codex-team/tasks/81-runtime.md",
-      "owns": ["src/scenes/laboratory/lib/tubeSilverRuntime.ts", "src/scenes/laboratory/lib/tubeSilverGeometry.ts", "src/scenes/laboratory/lib/tubeDelivery.ts", "src/scenes/laboratory/lib/tubePourImpact.ts", "src/scenes/laboratory/lib/tubePourImpact.test.ts", "src/scenes/laboratory/lib/tubeAmounts.ts", "src/scenes/laboratory/lib/tubeAmounts.test.ts", "src/scenes/laboratory/lib/pourIntoTube.ts", "src/scenes/laboratory/lib/standTableActions.ts", "src/scenes/laboratory/lib/standTableActions.test.ts", "src/scenes/laboratory/lib/useStandMotionStore.ts", "src/scenes/laboratory/lib/useReagentStorageStore.ts", "src/scenes/laboratory/lib/useTestTubeStorageStore.ts", "src/scenes/laboratory/ui/PourStream.tsx", "tests/night/wave9runtime/", "docs/night/wave9runtime/"] },
-    { "id": "verify", "prompt": "tools/codex-team/tasks/82-verify.md",
-      "owns": ["src/scenes/laboratory/lib/tubeReactionVisuals.ts", "tests/tubeReactionVisuals.test.ts", "src/scenes/laboratory/lib/tubeShaderWarmup.ts", "tests/night/wave9verify/", "docs/night/wave9verify/", "tests/_wave9/"] }
+    {
+      "id": "cone",
+      "prompt": "tools/codex-team/tasks/91-c1.md",
+      "owns": [
+        "src/scenes/laboratory/lib/tubeSilverField.ts",
+        "src/scenes/laboratory/lib/tubeSilverField.test.ts",
+        "src/scenes/laboratory/lib/tubeFlowSolver.ts",
+        "src/scenes/laboratory/lib/tubeFlowSolver.test.ts",
+        "src/scenes/laboratory/lib/silverStage.ts",
+        "src/scenes/laboratory/lib/night/stage1/",
+        "tests/night/wave10c1/",
+        "docs/night/wave10c1/"
+      ]
+    },
+    {
+      "id": "ctwo",
+      "prompt": "tools/codex-team/tasks/92-c2.md",
+      "owns": [
+        "src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts",
+        "src/scenes/laboratory/lib/tubeReactionVisuals.ts",
+        "tests/tubeReactionVisuals.test.ts",
+        "src/scenes/laboratory/lib/night/render/",
+        "tests/night/wave10c2/",
+        "docs/night/wave10c2/"
+      ]
+    }
   ]
 }
