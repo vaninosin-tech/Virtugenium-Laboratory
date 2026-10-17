@@ -12,7 +12,8 @@ else {
   const code=await new Promise(resolve=>child.on("exit",resolve));if(code!==0)process.exit(code??1);
   trace=JSON.parse(await readFile(`${out}/${name}-run.json`,"utf8"));
 }
-const result=checkRegression(trace,{strict:!process.env.TRACE});
+{ const last=[...trace.samples].reverse().find(s=>s.A); if(last) trace={...trace,diag:last.A}; } // the recorder stores the diag selector string under diag; the checks need the runtime diagnostics
+const result=checkRegression(trace,{strict:!process.env.TRACE||process.env.STRICT==="1"});
 await writeFile(`${out}/${name}-regression.json`,JSON.stringify(result,null,2));
 console.log(result);
 if(!result.ok)process.exitCode=1;

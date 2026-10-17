@@ -6,7 +6,7 @@ export function checkRegression(trace,{strict=false}={}) {
   const impactElapsed=diag?.firstValidImpactMs < click ? diag.firstValidImpactMs : diag?.firstValidImpactMs-click;
   const before=samples.filter(s=>s.sim<click+impactElapsed);
   check("impact timing",Number.isFinite(click)&&Number.isFinite(diag?.firstValidImpactMs),near(impactElapsed,600,150));
-  check("impact on receiving surface",Number.isFinite(diag?.firstImpactPoint?.y)&&Number.isFinite(diag?.surfaceY),near(diag?.firstImpactPoint.y,diag?.surfaceY,.003));
+  check("impact on receiving surface",Number.isFinite(diag?.firstImpactPoint?.y)&&Number.isFinite(diag?.surfaceY),near(diag?.firstImpactPoint?.y,diag?.surfaceY,.003));
   check("stream above impact",samples.some(s=>s.stream?.lip||s.align?.streamTargetPx),samples.some(s=>s.stream?.lip?.[1]>diag?.firstImpactPoint?.y));
   check("unique event ids",Array.isArray(diag?.eventIds),new Set(diag?.eventIds??[]).size===(diag?.eventIds?.length??0));
   check("ledger equals field delivery",Number.isFinite(diag?.deliveredMl)&&Number.isFinite(samples.at(-1)?.B?.fieldDelivered),near(diag?.deliveredMl,samples.at(-1)?.B?.fieldDelivered,1e-9));

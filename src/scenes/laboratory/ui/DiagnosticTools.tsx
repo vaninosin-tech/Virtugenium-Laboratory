@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { simNowMs, setSimulationPaused, useStandMotionStore, CLAMP_TUBE_MOUTH } from "../lib/useStandMotionStore";
+import { useReagentStorageStore } from "../lib/useReagentStorageStore";
 
 export type DiagnosticBackground = "lab" | "black" | "gray";
 export type DiagnosticCameraSettings = { dist?: number; lateral?: number; height?: number; targetY?: number; targetSide?: number; fov?: number };
@@ -12,6 +13,8 @@ type DiagnosticApi = {
   setOpticsMode(mode: 0 | 1 | 2 | 3): void;
   setCamera(settings: DiagnosticCameraSettings): void;
   frozen(): { paused: boolean; simMs: number };
+  /** The app's own source-container accounting (a dynamically imported copy of the store would be another instance). */
+  sourceAccounting(): { sourceMl: Record<string, number>; debitedEvents: number };
 };
 
 declare global {
@@ -44,6 +47,7 @@ export function DiagnosticTools() {
       },
       setCamera: (settings) => { window.__diagCamera = { ...settings }; },
       frozen: () => ({ paused: useStandMotionStore.getState().simulationPaused, simMs: simNowMs() }),
+      sourceAccounting: () => { const st = useReagentStorageStore.getState(); return { sourceMl: { ...st.sourceMl }, debitedEvents: st.debitedEvents.size }; },
     };
     window.__diag = api;
     const update = () => {

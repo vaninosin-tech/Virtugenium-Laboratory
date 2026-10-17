@@ -20,11 +20,11 @@ try {
     const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0].instanceId;
     const amount = useReagentStorageStore.getState();
     window.__wave13 = { id, samples: [], dumps: [], next: 0, dumpAt: [500,1000,1500,2000,3000,4500,6000,9000,12000,14000],
-      sourceBefore: amount?.sourceVolume?.("sandbox-jar-nacl","nacl") ?? null };
+      sourceBefore: window.__diag.sourceAccounting().sourceMl["sandbox-jar-nacl"] ?? 1 }; // app instance of the store
     const snapshot = (full, t) => {
       const field = window.__silverRuntime?.field(id), diag = window.__silverRuntime?.diagnostics(id);
       const receiver = tubeAmount(id).volumeMl;
-      const source = useReagentStorageStore.getState().sourceVolume("sandbox-jar-nacl","nacl");
+      const source = window.__diag.sourceAccounting().sourceMl["sandbox-jar-nacl"] ?? 1;
       const basic = { t, sim: window.__diag.frozen().simMs, A: diag ? structuredClone(diag) : null,
         stream: window.__pourStreamDebug ? structuredClone(window.__pourStreamDebug) : null,
         receiverMl: receiver, sourceMl: source, solverMs: field?.solver.lastStepMs ?? null };
