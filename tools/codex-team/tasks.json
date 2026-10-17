@@ -3,28 +3,31 @@
   "nodeModulesFrom": "D:/Claude/virtugenium-lab-transfer/virtugenium-lab-transfer/node_modules",
   "jobs": [
     {
-      "id": "cfive",
-      "prompt": "tools/codex-team/tasks/111-c5.md",
+      "id": "cseven",
+      "prompt": "tools/codex-team/tasks/121-c7.md",
       "owns": [
         "src/scenes/laboratory/lib/tubeFlowSolver.ts",
         "src/scenes/laboratory/lib/tubeFlowSolver.test.ts",
         "src/scenes/laboratory/lib/tubeJetModel.ts",
         "src/scenes/laboratory/lib/tubeJetModel.test.ts",
-        "tests/night/wave12c5/",
-        "docs/night/wave12c5/"
+        "src/scenes/laboratory/lib/tubeSilverField.ts",
+        "src/scenes/laboratory/lib/tubeSilverField.test.ts",
+        "src/scenes/laboratory/lib/tubeSilverRuntime.ts",
+        "src/scenes/laboratory/lib/silverStage.ts",
+        "src/scenes/laboratory/lib/night/stage1/",
+        "tests/night/wave13c7/",
+        "docs/night/wave13c7/"
       ]
     },
     {
-      "id": "csix",
-      "prompt": "tools/codex-team/tasks/112-c6.md",
+      "id": "ceight",
+      "prompt": "tools/codex-team/tasks/122-c8.md",
       "owns": [
-        "src/scenes/laboratory/lib/tubeSilverField.ts",
-        "src/scenes/laboratory/lib/tubeSilverField.test.ts",
-        "src/scenes/laboratory/lib/tubePrecipitationPhysics.ts",
-        "src/scenes/laboratory/lib/silverStage.ts",
-        "src/scenes/laboratory/lib/night/stage1/",
-        "tests/night/wave12c6/",
-        "docs/night/wave12c6/"
+        "tests/_wave13/",
+        "tests/night/wave13c8/",
+        "docs/night/wave13c8/",
+        "src/scenes/laboratory/ui/DiagnosticTools.tsx",
+        "src/scenes/laboratory/lib/night/render/"
       ]
     }
   ]
