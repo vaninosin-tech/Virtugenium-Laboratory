@@ -33,6 +33,7 @@ const RAFT_ROWS = 3, RAFT_HOLD = 0.04;
 /** Settling law: speed of a unit aggregate (m/s), upper bound, growth time (s) and the flow speed that halves the size. */
 const AGG_V0 = 0.0011, AGG_MAX_SPEED = 0.008, AGG_GROWTH_TIME = 6, AGG_BREAK_SHEAR = 0.05;
 /** Rate (per unit relative concentration per second) at which fine solid joins flocs (Smoluchowski-like, ~ c). */
+const FLOC_SOLID_FRACTION = () => { const v = (globalThis as { __silverPhi?: unknown }).__silverPhi; return typeof v === "number" ? v : 0.00003; };
 const FLOC_AGGREGATION = 14, FLOC_C0 = 0.25;
 const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
 
@@ -698,7 +699,11 @@ export class TubeSilverField {
   private advanceFlocSystem(dt: number) {
     const m = this.mask, smoothing = this.suspension[0];
     if (!this.flocSystem) {
-      this.flocSystem = new FlocSystem({ ...DEFAULT_FLOC_CONFIG, radius: m.radius, bottom: m.bottom, height: m.height });
+      this.flocSystem = new FlocSystem({ ...DEFAULT_FLOC_CONFIG, radius: m.radius, bottom: m.bottom, height: m.height,
+        // Test C runs with fragmentation disabled; test D enables it (window.__silverBreak = 1).
+        allowBreakage: (globalThis as { __silverBreak?: unknown }).__silverBreak === 1,
+        // Porosity of the flocs sets how fast they settle (v ~ sqrt(solid fraction)); calibrated on the reference.
+        solidFraction: FLOC_SOLID_FRACTION() });
       this.flocMass = new Float32Array(m.data.length); this.flocVisual = new Float32Array(m.data.length);
     }
     const point = this.scratch;
