@@ -35,3 +35,6 @@ Three workers on disjoint files. `perf` owns only `src/scenes/laboratory/lib/nig
 
 ## WAVE 7 OVERRIDE (supersedes wave 6)
 Two Codex agents at most. `pour` owns only `src/scenes/laboratory/ui/PourStream.tsx`, `src/scenes/laboratory/lib/tubePourImpact.ts` (+ test), `tests/night/wave7pour/`, `docs/night/wave7pour/`. `reagents` owns only `tests/night/wave7reagents/`, `docs/night/wave7reagents/`. The coordinator owns `tubeSilverField.ts`, `tubeSilverVolumeMaterial.ts`, `tubeFlowSolver.ts`, `tubeReactionVisuals.ts`, `src/lab/`, the stand and `flocSystem.ts`.
+
+## WAVE 8 OVERRIDE (supersedes wave 7)
+Two Codex agents at most. `delivery` owns `src/scenes/laboratory/lib/tubeDelivery.ts`, `src/scenes/laboratory/ui/PourStream.tsx`, `src/scenes/laboratory/lib/tubePourImpact.ts` (+ test), `src/scenes/laboratory/lib/tubeAmounts.ts` (+ test), `tests/night/wave8delivery/`, `docs/night/wave8delivery/`. `integration` owns only `tests/night/wave8integration/`, `docs/night/wave8integration/`. The coordinator owns `tubeSilverField.ts`, `tubeSilverVolumeMaterial.ts`, `tubeFlowSolver.ts`, `tubeReactionVisuals.ts`, `src/lab/`, the stand and `flocSystem.ts`.
