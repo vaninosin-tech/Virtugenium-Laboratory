@@ -32,7 +32,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
       uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 9.0 }, uSteps: { value: 88 }, uNoise: { value: noiseVolume() },
-      uTintStrength: { value: 6.0 }, uTime: { value: 0 },
+      uTintStrength: { value: 6.0 }, uSmokeOn: { value: 0 }, uTime: { value: 0 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     vertexShader: `
@@ -52,6 +52,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uniform sampler3D uDense, uOverlap, uHaze, uTint, uChip, uNoise;
       uniform float uHazeStrength, uTintStrength, uTime;
       uniform int uSteps;
+      uniform float uSmokeOn;
       in vec3 vPoint;
       out vec4 outColor;
       // Value noise from a periodic 64^3 texture (see noiseVolume): one tap per lookup.
@@ -137,7 +138,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           float smokeValue = texture(uHaze,grid).r;
           float tintValue = texture(uTint,grid).r;
           float smokeDensity = 0.0, ribbon = 0.0;
-          if (smokeValue > 0.0004) {
+          if (uSmokeOn > 0.5 && smokeValue > 0.0004) {
             // Smoke as in the reference: a smooth steel-grey veil plus thin curled ribbons, like ink in water.
             vec3 sq = vec3(p.x,p.y-uBottom,p.z)/uRadius;
             vec3 swirl = vec3(noise3(sq*0.9+vec3(0.0,uTime*0.04,0.0)), noise3(sq*0.9+vec3(5.0,2.0,uTime*0.03)),
@@ -159,7 +160,8 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             accumulated += (1.0-alpha)*chipAlpha*vec3(0.96,0.97,0.98);
             alpha += (1.0-alpha)*chipAlpha;
           }
-          float hazeAlpha = 1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius);
+          // The smoke layer is switched off by default (customer request); the fine solid stays in the mass balance.
+          float hazeAlpha = uSmokeOn * (1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius));
           accumulated += (1.0-alpha)*hazeAlpha*mix(vec3(0.34,0.44,0.58),vec3(0.74,0.82,0.92),clamp(ribbon*3.0,0.0,1.0));
           alpha += (1.0-alpha)*hazeAlpha;
           float localAlpha = 1.0-exp(-(solid*26.0+mixing*0.012)*stepLength/uRadius);
