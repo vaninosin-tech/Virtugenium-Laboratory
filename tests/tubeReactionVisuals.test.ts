@@ -533,6 +533,9 @@ describe("tube reaction rendering contract", () => {
     };
     const unaffected: ReactionKind[] = ["copper-nitric", "barium-sulfate", "permanganate-redox"];
     const original = unaffected.map(snapshot);
+    for (const state of original) for (const entry of state) {
+      expect(String(entry[4])).not.toContain("cloudSource(");
+    }
     vi.stubGlobal("window", { __silverStage: 3, location: { search: "" }, setTimeout, clearTimeout });
     expect(unaffected.map(snapshot)).toEqual(original);
   });
@@ -570,9 +573,22 @@ describe("tube reaction rendering contract", () => {
       const mesh = first.get("TubeSilverDenseField");
       const material = mesh.material as THREE.ShaderMaterial;
       expect(mesh.visible).toBe(true);
+      expect(material.uniforms.uCloudOn.value).toBe(1);
       expect(material.uniforms.uDense.value).toBe(field.denseTexture);
       expect(material.uniforms.uOverlap.value).toBe(field.overlapTexture);
       expect(material.uniforms.uHaze.value).toBe(field.texture);
+      const fineTexture = new THREE.Data3DTexture(new Float32Array(1), 1, 1, 1);
+      (field as TubeSilverField & { fineTexture?: THREE.Data3DTexture }).fineTexture = fineTexture;
+      first.update(chemistry(0));
+      expect(material.uniforms.uHaze.value).toBe(fineTexture);
+      (window as Window & { __silverCloud?: boolean }).__silverCloud = false;
+      first.update(chemistry(0));
+      expect(material.uniforms.uCloudOn.value).toBe(0);
+      (window as Window & { __silverCloud?: boolean }).__silverCloud = true;
+      first.update(chemistry(0));
+      expect(material.uniforms.uCloudOn.value).toBe(1);
+      delete (field as TubeSilverField & { fineTexture?: THREE.Data3DTexture }).fineTexture;
+      fineTexture.dispose();
       expect(material.uniforms.uTint.value).toBe(field.tintTexture);
       expect(material.uniforms.uChip.value).toBe(field.chipTexture);
       first.advance(0.1, chemistry(0));
