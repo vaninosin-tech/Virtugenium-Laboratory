@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { SILVER_FINE_OPTICS as optics } from "./night/render/silverOpticsReference";
 
+// GLSL needs float literals: a bare 5 would be an int and break float multiplication.
+const glf = (v: number) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
+
 /** Periodic value-noise volume (64^3, 8 bit). One filtered texture tap replaces eight hash evaluations per noise lookup,
  * which keeps the shader small enough to compile quickly in the browser. */
 function noiseVolume() {
@@ -96,20 +99,20 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       }
       float cloudGrain(vec3 grid) {
         vec3 q = grid * vec3(textureSize(uHaze,0));
-        float f = ${optics.grainCyclesPerCell} * 6.28318530718;
-        return 1.0 + ${optics.grainAmount} * sin(f * dot(q,vec3(1.0,0.37,0.19)))
+        float f = ${glf(optics.grainCyclesPerCell)} * 6.28318530718;
+        return 1.0 + ${glf(optics.grainAmount)} * sin(f * dot(q,vec3(1.0,0.37,0.19)))
           * sin(f * dot(q,vec3(0.23,-0.41,1.0)));
       }
       float cloudSource(vec3 p, float c, vec3 towardCamera) {
         float lightDepth = 0.0;
         for (int k = 1; k <= ${optics.lightTaps}; k++) {
-          vec3 q = p + uLightDirection * uRadius * ${optics.lightTapDistance} * float(k);
-          if (wet(q)) lightDepth += texture(uHaze,uvw(q)).r * uCloudK * ${optics.lightTapDistance};
+          vec3 q = p + uLightDirection * uRadius * ${glf(optics.lightTapDistance)} * float(k);
+          if (wet(q)) lightDepth += texture(uHaze,uvw(q)).r * uCloudK * ${glf(optics.lightTapDistance)};
         }
         float angle = clamp(dot(uLightDirection,towardCamera),-1.0,1.0);
-        float phase = ${optics.isotropicFloor} + ${1 - optics.isotropicFloor} *
+        float phase = ${glf(optics.isotropicFloor)} + ${glf(1 - optics.isotropicFloor)} *
           (1.0 + uAnisotropy * angle) / (1.0 + uAnisotropy);
-        float localDepth = uCloudK * c * ${optics.lightTapDistance};
+        float localDepth = uCloudK * c * ${glf(optics.lightTapDistance)};
         float ambient = uAmbient + uAmbientBoost * (1.0-exp(-2.0*localDepth));
         return min(uLightStrength+uAmbient+uAmbientBoost,
           uAlbedo*(ambient+uLightStrength*phase*exp(-lightDepth)));
@@ -207,18 +210,18 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           if (uCloudOn > 0.5 && smokeValue > 0.0) {
             if (uOpticsMode == 1) {
               // Raw concentration colormap; no grain or light transport.
-              float a3 = 1.0-exp(-min(1.0,smokeValue)*${optics.rawScale}*stepLength/uRadius);
+              float a3 = 1.0-exp(-min(1.0,smokeValue)*${glf(optics.rawScale)}*stepLength/uRadius);
               accumulated += (1.0-alpha)*a3*vec3(clamp(smokeValue,0.0,1.0),0.12,1.0-clamp(smokeValue,0.0,1.0));
               alpha += (1.0-alpha)*a3;
             } else {
               float c = smokeValue*cloudGrain(grid);
               float a3 = 1.0-exp(-uCloudK*c*stepLength/uRadius);
-              float sourceLight = uOpticsMode == 2 ? ${optics.extinctionGrey} : cloudSource(p,c,-direction);
+              float sourceLight = uOpticsMode == 2 ? ${glf(optics.extinctionGrey)} : cloudSource(p,c,-direction);
               accumulated += (1.0-alpha)*a3*vec3(sourceLight);
               alpha += (1.0-alpha)*a3;
             }
           }
-          if (uOpticsMode != 0) { if (alpha >= ${optics.alphaStop}) break; else continue; }
+          if (uOpticsMode != 0) { if (alpha >= ${glf(optics.alphaStop)}) break; else continue; }
           float hazeAlpha = uSmokeOn * (1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius));
           accumulated += (1.0-alpha)*hazeAlpha*mix(vec3(0.34,0.44,0.58),vec3(0.74,0.82,0.92),clamp(ribbon*3.0,0.0,1.0));
           alpha += (1.0-alpha)*hazeAlpha;
@@ -228,7 +231,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             solid/(solid+mixing*0.10+0.00001));
           accumulated += (1.0-alpha)*localAlpha*color;
           alpha += (1.0-alpha)*localAlpha;
-          if (alpha >= ${optics.alphaStop}) break;
+          if (alpha >= ${glf(optics.alphaStop)}) break;
         }
         if (alpha < 0.005) discard;
         outColor = vec4(accumulated/max(alpha,0.00001),alpha);

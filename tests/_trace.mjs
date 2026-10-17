@@ -9,6 +9,7 @@ try {
   page.setDefaultTimeout(900000);
   if (process.env.SLOW) await page.addInitScript(`(() => { const k = ${Number(process.env.SLOW)}, d0 = Date.now(), real = Date.now.bind(Date); Date.now = () => d0 + (real() - d0) * k; })();`);
   await page.addInitScript(`window.__silverStage=3; window.__silverDiag=${JSON.stringify(process.env.DIAG ?? "tracer")};${process.env.AGG0 ? " window.__silverAgg=0;" : ""}`);
+  const consoleLog = []; page.on('console', m => { if (/error|warn/i.test(m.type()) || /shader|program|GLSL/i.test(m.text())) consoleLog.push(m.type() + ': ' + m.text().slice(0, 600)); }); page.on('pageerror', e => consoleLog.push('pageerror: ' + String(e).slice(0, 600)));
   await page.goto(process.env.URL ?? "http://127.0.0.1:5201/");
   await page.getByText("Играть", { exact: true }).click();
   await page.getByText("Песочница (временно)").click();
@@ -62,7 +63,7 @@ try {
         const tex = f.overlapTexture, gl = window.__three.gl;
         let mesh = null; window.__three.scene.traverse(o => { if (o.name === "TubeSilverDenseField") mesh = o; });
         rec.C = { overlapMax: omax, overlapNonzero: onz, texVersion: tex.version, uploadedVersion: gl.properties.get(tex).__version ?? null,
-          meshVisible: mesh ? mesh.visible : null, bound: mesh ? mesh.material.uniforms.uOverlap.value === tex : null, uDiag: mesh ? mesh.material.uniforms.uDiag.value : null };
+          meshVisible: mesh ? mesh.visible : null, bound: mesh ? mesh.material.uniforms.uOverlap.value === tex : null, cloudOn: mesh ? mesh.material.uniforms.uCloudOn.value : null, hazeIsFine: mesh ? mesh.material.uniforms.uHaze.value === (f.fineTexture ?? f.texture) : null, hazeMax: (() => { let mx = 0; for (let i = 0; i < f.pixels.length; i++) if (f.pixels[i] > mx) mx = f.pixels[i]; return mx; })(), optics: mesh && mesh.material.uniforms.uOpticsMode ? mesh.material.uniforms.uOpticsMode.value : null, uDiag: mesh ? mesh.material.uniforms.uDiag.value : null };
       }
       return rec;
     };
@@ -123,6 +124,6 @@ try {
   for (let k = 0; k < frames.length; k++) { const fn = `s${String(k).padStart(5, "0")}.jpg`; await writeFile(`${out}/frames/${fn}`, Buffer.from(frames[k].data, "base64")); idx.push({ fn, t: frames[k].t - frames[0].t, abs: frames[k].t }); }
   await writeFile(`${out}/frames/index.json`, JSON.stringify({ idx }));
   const data = await page.evaluate(() => { window.__trStop = true; const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0].instanceId; return { clickSim: window.__clickSim, dumps: window.__dumps || [], trace: window.__tr, diag: window.__silverRuntime.diagnostics(id) }; });
-  await writeFile(`${out}/trace.json`, JSON.stringify(data));
+  await writeFile(`${out}/trace.json`, JSON.stringify(data)); await writeFile(`${out}/console.txt`, consoleLog.join(String.fromCharCode(10)));
   console.log("trace", data.trace.length, "frames", frames.length, "clickSim", data.clickSim);
 } finally { await browser.close(); }
