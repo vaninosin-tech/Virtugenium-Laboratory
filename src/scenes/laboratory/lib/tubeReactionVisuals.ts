@@ -703,7 +703,8 @@ float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
  #include <opaque_fragment>`);
   };
   const curdGeometry = new THREE.SphereGeometry(1, 18, 14);
-  const silverVolume = kind === "silver-chloride" && silverStage() === 1
+  const stageSilverVolume = kind === "silver-chloride" && (silverStage() === 1 || silverStage() === 3);
+  const silverVolume = stageSilverVolume
     ? makeSilverVolumeMaterial(radius, box.min.y, fieldHeight)
     : makeLegacySilverVolumeMaterial(radius, box.min.y);
   const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e8f7fa", transparent: true, opacity: 0.85, roughness: 0.04, metalness: 0, depthWrite: false, depthTest: true, side: THREE.DoubleSide });
@@ -1066,9 +1067,9 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
   const silverField = kind === "silver-chloride" && hasLiquid
     ? new TubeSilverField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, fieldHeight) : null;
-  const stageOneSilver = !!silverField && silverStage() === 1;
+  const stageOneSilver = !!silverField && stageSilverVolume;
   const silverDenseGeometry = stageOneSilver
-    ? new THREE.BoxGeometry(2.4 * radius, fieldHeight + 0.3 * radius, 2.4 * radius) : null;
+    ? new THREE.BoxGeometry(2.4 * radius, fieldHeight + 0.75 * radius, 2.4 * radius) : null;
   const silverDenseMesh = silverDenseGeometry
     ? new THREE.Mesh(silverDenseGeometry, silverVolume.material) : null;
   if (silverDenseMesh && silverField) {
@@ -1079,6 +1080,9 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
     silverDenseMesh.onBeforeRender = updateSilverVolumeCamera;
     silverVolume.material.uniforms.uDense.value = silverField.denseTexture;
     silverVolume.material.uniforms.uOverlap.value = silverField.overlapTexture;
+    silverVolume.material.uniforms.uHaze.value = silverField.texture;
+    silverVolume.material.uniforms.uTint.value = silverField.tintTexture;
+    silverVolume.material.uniforms.uChip.value = silverField.chipTexture;
     group.add(silverDenseMesh);
   }
   const silverInlet = new THREE.Vector3();
@@ -1400,7 +1404,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         silverField.advance(silverDelta, up.value, level.value, silverInlet,
           attachedNow ? (impact?.reagentId === "nacl" ? impact.deliveredMl : 0)
             : THREE.MathUtils.smoothstep(silverField.ageSeconds + silverDelta, 0, 1.3), agitation,
-          impact?.flowMlPerSecond ?? 1,
+          impact?.reagentId === "nacl" ? impact.flowMlPerSecond : attachedNow ? 0 : 1,
           impact?.reagentId === "nacl" ? impactDirection.copy(impact.direction)
             .applyQuaternion(volume.getWorldQuaternion(impactQuaternion).invert()) : undefined);
         updateTubeFlowDebug("AgCl", silverField.solver, silverField.tracer,
@@ -1448,7 +1452,10 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       if (cameraPosition) cameraLocal.copy(cameraPosition).applyMatrix4(inverse);
       silverVolume.camera.value.copy(cameraLocal);
       silverVolume.material.uniforms.uLevel.value = level.value;
-      if (stageOneSilver) silverVolume.material.uniforms.uUp.value.copy(up.value);
+      if (stageOneSilver) {
+        silverVolume.material.uniforms.uUp.value.copy(up.value);
+        silverVolume.material.uniforms.uTime.value = silverField!.ageSeconds;
+      }
       if (absorption && absorptionWall && absorptionCap) {
         absorption.uniforms.uUp.value.copy(up.value);
         absorption.uniforms.uLevel.value = level.value;
