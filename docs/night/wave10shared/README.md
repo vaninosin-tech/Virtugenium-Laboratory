@@ -1,0 +1,2 @@
+Real-game field dumps (Diagnostic C setting: stage 3, precipitation on, __silverAgg=0 so the fine suspension is the only solid). Captured by tests/_trace.mjs (AGG0=1 DIAG= DUMPAT=[...]). Times are simulation ms after the NaCl click; impact is at about 600 ms.
+Fields per file: nx,ny,nz grid, radius/bottom/height (m), mask (1 = liquid cell), fine = suspension[0]*activeCount (what the shader samples as uHaze, index = x + nx*(y + ny*z)), tint, ag, cl, src (productSource), tracer, flocVisual, extent, sedimentMass, suspensionMass, flocMass.

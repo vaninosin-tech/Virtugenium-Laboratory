@@ -8,13 +8,14 @@ try {
   const page = await browser.newPage({ viewport: { width: Number(process.env.VW ?? 1280), height: Number(process.env.VH ?? 800) } });
   page.setDefaultTimeout(900000);
   if (process.env.SLOW) await page.addInitScript(`(() => { const k = ${Number(process.env.SLOW)}, d0 = Date.now(), real = Date.now.bind(Date); Date.now = () => d0 + (real() - d0) * k; })();`);
-  await page.addInitScript(`window.__silverStage=3; window.__silverDiag=${JSON.stringify(process.env.DIAG ?? "tracer")};`);
+  await page.addInitScript(`window.__silverStage=3; window.__silverDiag=${JSON.stringify(process.env.DIAG ?? "tracer")};${process.env.AGG0 ? " window.__silverAgg=0;" : ""}`);
   await page.goto(process.env.URL ?? "http://127.0.0.1:5201/");
   await page.getByText("Играть", { exact: true }).click();
   await page.getByText("Песочница (временно)").click();
   await page.waitForFunction(() => window.__sceneStore?.getState().cabinetPhase === "inspecting", null, { timeout: 300000 });
   await page.locator(".lab-boot-screen").waitFor({ state: "hidden", timeout: 300000 });
   await page.waitForTimeout(2500);
+  if (process.env.DUMPAT) await page.evaluate(v => { window.__dumpAt = v; }, JSON.parse(process.env.DUMPAT));
   if (process.env.FIELDS) await page.evaluate(() => { window.__fieldsOn = true; });
   if (process.env.OVERLAY) await page.evaluate(() => { window.__overlay = true; });
   if (process.env.HIDEUI) await page.evaluate(() => { window.__hideUi = true; });
@@ -47,6 +48,15 @@ try {
           let agT = 0, clT = 0, psT = 0, bad = 0;
           for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; agT += ag[i]; clT += cl[i]; psT += ps[i]; if (ps[i] > 0 && !(ag[i] > 0 && cl[i] > 0) && ps[i] > 1e-15) bad++; }
           rec.slice = { nx: m.nx, ny: m.ny, zc, ag: sl(ag), cl: sl(cl), src: sl(ps), tracer: sl(f.tracer), agT, clT, extent: f.extent, psT, sourceWithoutOverlapCells: bad, sediment: f.sedimentMass, susp: f.suspensionMass, coarse: f.coarseMass, wetTop: -1 };
+        }
+        if (window.__dumpAt && window.__clickSim != null) {
+          const el = rec.sim - window.__clickSim; window.__dumps = window.__dumps || [];
+          for (const t of window.__dumpAt) if (el >= t && !window.__dumps.some(d => d.t === t)) {
+            const r3 = (a) => Array.from(a, v => +v.toPrecision(6));
+            window.__dumps.push({ t, simElapsedMs: el, nx: m.nx, ny: m.ny, nz: m.nz, radius: m.radius, bottom: m.bottom, height: m.height, activeCount: m.activeCount,
+              level: f.liquidLevel, mask: Array.from(m.data), fine: r3(f.pixels), tint: r3(f.tintPixels), ag: r3(f.species["Ag+"].values), cl: r3(f.species["Cl-"].values), src: r3(f.productSource),
+              tracer: r3(f.tracer), flocVisual: r3(f.flocVisual), extent: f.extent, sedimentMass: f.sedimentMass, suspensionMass: f.suspensionMass, flocMass: f.flocSystem ? f.flocSystem.totalMass : 0 });
+          }
         }
         let omax = 0, onz = 0; for (let i = 0; i < f.overlapPixels.length; i++) { if (f.overlapPixels[i] > omax) omax = f.overlapPixels[i]; if (f.overlapPixels[i] > 1e-9) onz++; }
         const tex = f.overlapTexture, gl = window.__three.gl;
@@ -112,7 +122,7 @@ try {
   const idx = [];
   for (let k = 0; k < frames.length; k++) { const fn = `s${String(k).padStart(5, "0")}.jpg`; await writeFile(`${out}/frames/${fn}`, Buffer.from(frames[k].data, "base64")); idx.push({ fn, t: frames[k].t - frames[0].t, abs: frames[k].t }); }
   await writeFile(`${out}/frames/index.json`, JSON.stringify({ idx }));
-  const data = await page.evaluate(() => { window.__trStop = true; const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0].instanceId; return { clickSim: window.__clickSim, trace: window.__tr, diag: window.__silverRuntime.diagnostics(id) }; });
+  const data = await page.evaluate(() => { window.__trStop = true; const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0].instanceId; return { clickSim: window.__clickSim, dumps: window.__dumps || [], trace: window.__tr, diag: window.__silverRuntime.diagnostics(id) }; });
   await writeFile(`${out}/trace.json`, JSON.stringify(data));
   console.log("trace", data.trace.length, "frames", frames.length, "clickSim", data.clickSim);
 } finally { await browser.close(); }
