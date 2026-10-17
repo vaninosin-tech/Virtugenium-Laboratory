@@ -95,20 +95,8 @@ describe("validated delivery", () => {
     } finally { stop(); vi.clearAllTimers(); vi.useRealTimers(); }
   });
 
-  it("completes from the store clock without a rendered frame", () => {
-    seedTubeAmounts("full", ["agno3"]);
-    vi.useFakeTimers(); vi.setSystemTime(8000);
-    const onStep = (serial: number, now: number) => { step("full", serial, now - serial); };
-    const stop = observePourClock("bottle", onStep);
-    const stopRemountedSubscriber = observePourClock("bottle", onStep);
-    try {
-      useStandMotionStore.getState().startPour("bottle", () => {});
-      vi.advanceTimersByTime(POUR_MS);
-      expect(deliveredMl("full")).toBeCloseTo(1, 12);
-      expect(tubeAmount("full").volumeMl).toBeCloseTo(3.5, 12);
-      expect(deliveryEvents("full").every(event => event.valid)).toBe(true);
-    } finally { stop(); stopRemountedSubscriber(); vi.clearAllTimers(); vi.useRealTimers(); }
-  });
+  // "completes from the store clock without a rendered frame" was superseded by tests/night/wave9runtime (simulation clock
+  // drives the pour inside the stand store; covered there with the real publisher and the lazily created field).
 
   it("uses the updated liquid surface for the next event", () => {
     seedTubeAmounts("level", ["agno3"]);

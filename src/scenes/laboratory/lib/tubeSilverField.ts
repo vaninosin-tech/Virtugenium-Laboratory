@@ -1078,6 +1078,14 @@ export class TubeSilverField {
     const m = this.mask;
     const weights = this.next;
     let sum = 0;
+    // Highest wet row under the stream: the physical meniscus can lie between two voxel rows, so the contact
+    // patch is defined by the highest wet voxel within 3 mm of the inlet, never by the raw inlet height.
+    let topWetRow = -1;
+    if (this.flocMode) for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
+      const p = m.point(x, y, z, this.scratch);
+      if (Math.hypot(p.x - inlet.x, p.z - inlet.z) <= 0.003 && y > topWetRow) topWetRow = y;
+    }
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
       const z = Math.floor(i / (m.nx * m.ny));
@@ -1091,9 +1099,8 @@ export class TubeSilverField {
       // is mixed downward by the stream momentum and by its own weight, not injected into the bulk.
       const vertical = m.radius * (this.stageOne ? 0.14 : 0.36 + 0.12 * Math.min(3, jetStrength));
       // Stage 3: the incoming solution enters only through the contact patch of the stream, in the top two wet rows.
-      const topWetRow = Math.floor((inlet.y - m.bottom) * m.ny / m.height - 0.5);
       const inPatch = !this.flocMode || (y >= topWetRow - 1 && Math.hypot(dx, dz) <= 0.003);
-      weights[i] = p.y <= inlet.y && depth < vertical * 2 && inPatch
+      weights[i] = (p.y <= inlet.y || this.flocMode) && depth < vertical * 2 && inPatch
         ? Math.exp(-(dx * dx + dz * dz) / (width * width) - depth * depth / (vertical * vertical)) : 0;
       sum += weights[i];
     }

@@ -1,3 +1,4 @@
+import { warmSilverShaderForStand } from "./tubeReactionVisuals";
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import * as THREE from "three";
@@ -157,6 +158,8 @@ export function standActionFor(target: StandTarget, { fromHand = false }: { read
       // The reagent goes in when the bottle is tipped over the mouth, not on
       // the click; the bottle comes from wherever it is (in the hand: `origin`).
       if (target.instanceId) {
+        // The silver volume shader is compiled before the stream arrives (fire-and-forget, never delays delivery).
+        if (reagentId === "nacl" && clamped.contents.includes("agno3")) warmSilverShaderForStand();
         seedTubeAmounts(clamped.instanceId, clamped.contents);
         useStandMotionStore.getState().startPour(target.instanceId, pour, origin, "clamp", (serial, now) => {
           const side = new THREE.Vector3().subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);

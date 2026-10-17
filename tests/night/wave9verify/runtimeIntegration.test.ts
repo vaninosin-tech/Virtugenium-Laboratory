@@ -22,29 +22,36 @@ describe("stage-3 delivery integration", () => {
       silverRuntime.reset(tubeId);
       clearDeliveries(tubeId);
       setSimulationPaused(false);
-      expect(silverRuntime.field(tubeId)).toBeNull();
-      const atMs = simNowMs();
-      const event = recordDelivery({ tubeId, reagentId: "nacl", serial: 901, step: 0,
+      // The receiving tube must exist in the store: the delivery event updates its composition atomically.
+      const stores = await import(/* @vite-ignore */ new URL("../../../src/scenes/laboratory/lib/useTestTubeStorageStore.ts", import.meta.url).href);
+      const amounts = await import(/* @vite-ignore */ new URL("../../../src/scenes/laboratory/lib/tubeAmounts.ts", import.meta.url).href);
+      stores.useTestTubeStorageStore.setState({ fumeHoodTestTubes: [{ instanceId: tubeId, contents: ["agno3"] }], workbenchTestTubes: [] });
+      amounts.resetTubeAmounts(); amounts.seedTubeAmounts(tubeId, ["agno3"]);
+      expect(silverRuntime.field(tubeId) ?? null).toBeNull();
+      // A pour is stamped like the game stamps it: serial = the pour start on the simulation clock, atMs = elapsed in it.
+      const serial = simNowMs(), atMs = 0;
+      const event = recordDelivery({ tubeId, reagentId: "nacl", serial, step: 0,
         ml: 0.05, point: { x: 0, y: 0.05, z: 0 }, surfaceY: 0.05, atMs },
       { axis: { x: 0, y: 0.05, z: 0 }, radius: 0.007, surfaceY: 0.05, hasLiquid: true });
       expect(event.valid).toBe(true);
-      silverRuntime.applyDelivery(event);
+      expect(silverRuntime.applyDelivery(event)).toBe(true);
       const field = silverRuntime.field(tubeId);
       expect(field).toBeTruthy();
+      expect(silverRuntime.journal(tubeId)).toEqual([`${serial}|0`]);
+      expect(silverRuntime.applyDelivery(event)).toBe(false);   // a repeated event id has no effect
       expect(silverRuntime.journal(tubeId)).toHaveLength(1);
-      expect(silverRuntime.journal(tubeId)[0]).toEqual(event);
       expect(field.species["Cl-"].total).toBeGreaterThan(0);
-      const stamps = silverRuntime.diagnostics(tubeId).stamps;
-      expect(stamps.firstValidImpact).toBe(atMs);
-      expect(stamps.firstCompositionUpdate).toBe(atMs);
-      expect(stamps.firstFieldInit).toBe(atMs);
-      expect(stamps.firstChlorideInsertion).toBe(atMs);
+      const stamps = silverRuntime.diagnostics(tubeId);
+      expect(stamps.firstValidImpactMs).toBe(atMs);
+      expect(stamps.firstCompositionUpdateMs).toBe(atMs);
+      expect(stamps.firstFieldInitMs).toBe(atMs);
+      expect(stamps.firstChlorideInsertionMs).toBe(atMs);
       const before = field.ageSeconds;
       silverRuntime.tick(simNowMs() + 100);
       expect(field.ageSeconds).toBeGreaterThan(before);
       setSimulationPaused(true);
       const paused = field.ageSeconds;
-      silverRuntime.tick(simNowMs() + 200);
+      silverRuntime.tick(simNowMs());   // a paused simulation clock does not move, so neither does the field
       expect(field.ageSeconds).toBe(paused);
     } finally {
       setSimulationPaused(false);
