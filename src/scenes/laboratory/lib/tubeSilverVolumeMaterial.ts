@@ -32,7 +32,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
       uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 9.0 }, uSteps: { value: 88 }, uNoise: { value: noiseVolume() },
-      uTintStrength: { value: 6.0 }, uSmokeOn: { value: 0 }, uTime: { value: 0 },
+      uTintStrength: { value: 6.0 }, uSmokeOn: { value: 0 }, uDiag: { value: 0 }, uTime: { value: 0 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     vertexShader: `
@@ -52,7 +52,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uniform sampler3D uDense, uOverlap, uHaze, uTint, uChip, uNoise;
       uniform float uHazeStrength, uTintStrength, uTime;
       uniform int uSteps;
-      uniform float uSmokeOn;
+      uniform float uSmokeOn, uDiag;
       in vec3 vPoint;
       out vec4 outColor;
       // Value noise from a periodic 64^3 texture (see noiseVolume): one tap per lookup.
@@ -122,6 +122,14 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           float rim = 1.0-smoothstep(0.87,0.985,length(p.xz)/uRadius);
           float solid = cotton(field,grid,p)*rim;
           float source = texture(uOverlap,grid).r;
+          if (uDiag > 0.5) {
+            // Phase A: the incoming NaCl as a passive tracer, a translucent blue-green volume.
+            float tr = clamp(source*2.2,0.0,1.0);
+            float a2 = 1.0-exp(-tr*14.0*stepLength/uRadius);
+            accumulated += (1.0-alpha)*a2*vec3(0.2,0.75,0.95);
+            alpha += (1.0-alpha)*a2;
+            continue;
+          }
           float mixing = source > 0.015 ? smoothstep(0.015,0.08,source) : 0.0;
           float lit = 1.0, diffuse = 0.5;
           if (solid > 0.01) {

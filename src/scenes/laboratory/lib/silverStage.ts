@@ -7,3 +7,12 @@ export function silverStage(): number {
   const selected = (window as Window & { __silverStage?: unknown }).__silverStage;
   return typeof selected === "number" ? selected : 1;
 }
+
+/** Diagnostic view of experiment 2: "tracer" disables precipitation and shows only the incoming NaCl (?silverDiag=tracer). */
+export function silverDiagnostic(): string {
+  if (typeof window === "undefined") return "";
+  const fromUrl = new URLSearchParams(window.location?.search ?? "").get("silverDiag");
+  if (fromUrl) return fromUrl;
+  const selected = (window as Window & { __silverDiag?: unknown }).__silverDiag;
+  return typeof selected === "string" ? selected : "";
+}

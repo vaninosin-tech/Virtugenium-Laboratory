@@ -4,7 +4,7 @@ import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { SilverSedimentField } from "./tubeSilverSediment";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
-import { silverStage } from "./silverStage";
+import { silverStage, silverDiagnostic } from "./silverStage";
 import { DEFAULT_FLOC_CONFIG, FlocSystem } from "./night/stage1/flocSystem";
 
 /** Stage-one precipitate partition: visible curd and conserved, optically hidden fine solid. */
@@ -336,9 +336,11 @@ export class TubeSilverField {
       this.solver.transport(this.coarse, step, this.stageOne ? 0.000004 : 0.000003, this.stageOne ? 0.8 : undefined);
       const ba = this.species["Ag+"].values, so = this.species["Cl-"].values;
       this.productSource.fill(0);
+      const tracerOnly = silverDiagnostic() === "tracer";
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a];
-        const formed = precipitatePair(ba[i], so[i], m.activeCount, 0.0005, step,
+        // Phase A diagnostic (?silverDiag=tracer): precipitation is disabled and only the incoming NaCl is traced.
+        const formed = tracerOnly ? 0 : precipitatePair(ba[i], so[i], m.activeCount, 0.0005, step,
           this.suspension[0][i] + this.suspension[1][i] + this.suspension[2][i]);
         ba[i] -= formed; so[i] -= formed; this.extent += formed;
         this.productSource[i] = formed;
@@ -404,7 +406,7 @@ export class TubeSilverField {
           this.densePixels[offset + 1] = (i % m.nx + 0.5) / m.nx;
           this.densePixels[offset + 2] = (Math.floor(i / m.nx) % m.ny + 0.5) / m.ny;
           this.densePixels[offset + 3] = (Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz;
-          this.overlapPixels[i] = this.productSource[i] * m.activeCount;
+          this.overlapPixels[i] = (silverDiagnostic() === "tracer" ? this.tracer[i] * 6 : this.productSource[i]) * m.activeCount;
         }
         this.denseTexture.needsUpdate = true;
         this.overlapTexture.needsUpdate = true;
@@ -416,7 +418,7 @@ export class TubeSilverField {
           for (let axis = 0; axis < 3; axis++)
             this.densePixels[offset + axis + 1] = mass > 1e-20
               ? this.denseCoordinates[axis][i] / mass : 0;
-          this.overlapPixels[i] = this.productSource[i] * m.activeCount;
+          this.overlapPixels[i] = (silverDiagnostic() === "tracer" ? this.tracer[i] * 6 : this.productSource[i]) * m.activeCount;
         }
         this.denseTexture.needsUpdate = true;
         this.overlapTexture.needsUpdate = true;

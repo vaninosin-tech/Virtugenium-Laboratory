@@ -7,7 +7,7 @@ import { TubeSilverField } from "./tubeSilverField";
 import { BariumSedimentField, BariumSedimentGeometry } from "./tubeBariumSediment";
 import { SilverSedimentField, SilverSedimentGeometry } from "./tubeSilverSediment";
 import { makeSilverVolumeMaterial, makeLegacySilverVolumeMaterial } from "./tubeSilverVolumeMaterial";
-import { silverStage } from "./silverStage";
+import { silverStage, silverDiagnostic } from "./silverStage";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
 import { cameraInTubeSpace, TubeAbsorptionMaterial } from "./tubeAbsorptionMaterial";
@@ -1080,6 +1080,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
     silverDenseMesh.onBeforeRender = updateSilverVolumeCamera;
     silverVolume.material.uniforms.uDense.value = silverField.denseTexture;
     silverVolume.material.uniforms.uOverlap.value = silverField.overlapTexture;
+    silverVolume.material.uniforms.uDiag.value = silverDiagnostic() === "tracer" ? 1 : 0;
     silverVolume.material.uniforms.uHaze.value = silverField.texture;
     silverVolume.material.uniforms.uTint.value = silverField.tintTexture;
     silverVolume.material.uniforms.uChip.value = silverField.chipTexture;

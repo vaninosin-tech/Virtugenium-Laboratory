@@ -12,7 +12,7 @@ import { makeSilverVolumeMaterial } from "../scenes/laboratory/lib/tubeSilverVol
 // Stage 3: cohesive Lagrangian flocs (use ?stage=1 for the older concentration-field model).
 (window as unknown as { __silverStage?: number }).__silverStage = Number(new URLSearchParams(location.search).get("stage") ?? 3);
 const RADIUS = 0.007, BOTTOM = 0, FIELD_HEIGHT = 0.034;
-const LEVEL_START = 0.0262, LEVEL_END = 0.0278;
+const LEVEL_START = 0.0262, LEVEL_END = params.get("rise") === "1" ? 0.0278 : 0.0262;
 // The reference video is time-lapsed: x1 up to 6.25 s of video, x5 until 9.4 s, x50 afterwards (on-screen labels).
 const SPEED_STEPS = [{ video: 6.25, real: 6.25 }, { video: 9.4, real: 6.25 + 3.15 * 5 }];
 const MAX_TIME = 180;
@@ -88,6 +88,7 @@ function restart() {
   silver.material.uniforms.uHaze.value = field.texture;
   silver.material.uniforms.uTint.value = field.tintTexture;
   silver.material.uniforms.uChip.value = field.chipTexture;
+  silver.material.uniforms.uDiag.value = new URLSearchParams(location.search).get("silverDiag") === "tracer" ? 1 : 0;
   simTime = 0; poured = 0;
 }
 
