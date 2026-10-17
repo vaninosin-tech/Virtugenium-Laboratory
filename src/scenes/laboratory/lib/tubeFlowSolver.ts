@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { LiquidMask } from "./tubeVolumeField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
+import { TubeJetModel, type SilverJetOptions } from "./tubeJetModel";
 
 /** Closed, staggered 3D liquid flow. A face exists only between two wet cells. */
 /** Parameters of the surface-spreading closure of a plunging jet (SI units). */
@@ -26,11 +27,21 @@ export class TubeFlowSolver {
   private readonly pressureWeight: Float32Array;
   private readonly eddy: Float32Array;
   private readonly direction = new THREE.Vector3();
+  private jetModel?: TubeJetModel;
+  readonly lastStrain: Float32Array;
+  readonly lastVorticity: Float32Array;
+  lastJetMomentumSource: readonly number[] = [0, 0, 0];
+  lastEntrainmentFlux = 0;
+  lastJetPenetration = 0;
+  lastJetClippedMomentum = 0;
+  lastJetProjectionChange: readonly number[] = [0, 0, 0];
   constructor(readonly mask: LiquidMask, readonly options: { lowDiffusion?: boolean; pressureIterations?: number; eddyFraction?: number; ambientStrength?: number } = {}) {
     const n = mask.data.length;
     for (let axis = 0; axis < 3; axis++) this.faces[axis] = new Float32Array(n);
     this.previousFaces = Array.from({ length: 3 }, () => new Float32Array(n));
     this.flow = new Float32Array(n * 3);
+    this.lastStrain = new Float32Array(n);
+    this.lastVorticity = new Float32Array(n);
     this.pressure = new Float32Array(n);
     this.divergence = new Float32Array(n);
     this.outgoing = new Float64Array(n); this.flux = new Float64Array(n * 3);
@@ -87,6 +98,19 @@ export class TubeFlowSolver {
     surface?: SurfaceSpread) {
     const started = typeof performance !== "undefined" ? performance.now() : 0;
     const m = this.mask, old = this.previousFaces;
+    const flag = (globalThis as { __silverJetModel?: boolean | SilverJetOptions }).__silverJetModel;
+    const jet = flag && surface ? (this.jetModel ??= new TubeJetModel(m)) : undefined;
+    this.lastJetMomentumSource = [0, 0, 0];
+    this.lastEntrainmentFlux = 0;
+    this.lastJetPenetration = 0;
+    this.lastJetClippedMomentum = 0;
+    this.lastJetProjectionChange = [0, 0, 0];
+    if (jet && surface) {
+      jet.prepare(dt, inlet, direction, surface, typeof flag === "object" ? flag : {});
+      this.lastJetMomentumSource = Array.from(jet.appliedMomentum);
+      this.lastEntrainmentFlux = jet.entrainmentFlux;
+      this.lastJetPenetration = jet.penetration;
+    }
     for (let axis = 0; axis < 3; axis++) old[axis].set(this.faces[axis]);
     const d = this.direction.copy(direction).normalize();
     const width2 = (m.radius * 0.32) ** 2;
@@ -123,17 +147,27 @@ export class TubeFlowSolver {
           laplace += ((prev >= 0 ? old[axis][prev] : v)
             + (next >= 0 ? old[axis][next] : v) - 2 * v) * this.inverseSpacingSquared[b];
         }
-        this.faces[axis][i] = Math.max(-0.09, Math.min(0.09,
-          (advected + dt * TUBE_SIMULATION.jetFlow.molecularDiffusivity * laplace) * damp
-          + source * d.getComponent(axis)
+        const rawFace = (advected + dt * TUBE_SIMULATION.jetFlow.molecularDiffusivity * laplace) * damp
+          + (jet ? jet.source[3 * i + axis] : source * d.getComponent(axis))
           // Heavy suspended solid loads the liquid: a body force along gravity.
           + (load ? dt * load.scale * 0.5 * (load.values[i] + load.values[j]) * load.down.getComponent(axis) : 0)
           + (ambient?.[axis] ?? 0) * dt * (this.options.ambientStrength ?? 0.15)
           // Near-surface outward spreading of a plunging jet; the pressure projection below keeps it incompressible.
-          + (surface && axis !== 1 ? this.surfaceSpreadTerm(surface, p, axis, v, dt) : 0)));
+          + (surface && !jet && axis !== 1 ? this.surfaceSpreadTerm(surface, p, axis, v, dt) : 0);
+        this.faces[axis][i] = Math.max(-0.09, Math.min(0.09, rawFace));
+        if (jet) this.lastJetClippedMomentum += Math.abs(rawFace - this.faces[axis][i])
+          * 1000 * this.spacing[0] * this.spacing[1] * this.spacing[2] / dt;
       }
     }
-    this.project();
+    let pre: number[] | undefined;
+    if (jet) pre = this.totalFaceMomentum(dt);
+    if (jet) this.project(300);
+    else this.project();
+    if (jet && pre) {
+      const post = this.totalFaceMomentum(dt);
+      this.lastJetProjectionChange = post.map((v, axis) => v - pre![axis]);
+    }
+    if (flag || (globalThis as { __silverDiag?: unknown }).__silverDiag === "tracer") this.measureJetGradients();
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
       this.eddy[i] = TUBE_SIMULATION.jetFlow.eddyDiffusivity * Math.min(1, Math.hypot(
@@ -144,7 +178,41 @@ export class TubeFlowSolver {
       this.stepTimes[this.stepSamples++ % this.stepTimes.length] = this.lastStepMs;
     }
   }
-  private project() {
+  private totalFaceMomentum(dt: number) {
+    const result = [0, 0, 0], m = this.mask;
+    const factor = 1000 * this.spacing[0] * this.spacing[1] * this.spacing[2] / dt;
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a];
+      for (let k = 0; k < 3; k++) if (this.neighbor(i, k, 1) >= 0)
+        result[k] += this.faces[k][i] * factor;
+    }
+    return result;
+  }
+  private measureJetGradients() {
+    const m = this.mask;
+    this.lastStrain.fill(0); this.lastVorticity.fill(0);
+    const g = new Float64Array(9);
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a];
+      g.fill(0);
+      for (let axis = 0; axis < 3; axis++) {
+        const l = this.neighbor(i, axis, -1), r = this.neighbor(i, axis, 1);
+        if (l < 0 && r < 0) continue;
+        const h = this.spacing[axis] * (l >= 0 && r >= 0 ? 2 : 1);
+        for (let component = 0; component < 3; component++)
+          g[component * 3 + axis] = (this.flow[3 * (r >= 0 ? r : i) + component]
+            - this.flow[3 * (l >= 0 ? l : i) + component]) / h;
+      }
+      let strain2 = 0;
+      for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) {
+        const s = 0.5 * (g[3 * j + k] + g[3 * k + j]);
+        strain2 += 2 * s * s;
+      }
+      this.lastStrain[i] = Math.sqrt(strain2);
+      this.lastVorticity[i] = Math.hypot(g[7] - g[5], g[2] - g[6], g[3] - g[1]);
+    }
+  }
+  private project(iterations?: number) {
     const m = this.mask;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a]; let div = 0;
@@ -157,7 +225,7 @@ export class TubeFlowSolver {
     }
     const p = this.pressure;
     p.fill(0);
-    for (let iteration = 0; iteration < (this.options.pressureIterations ?? TUBE_SIMULATION.jetFlow.pressureIterations); iteration++) {
+    for (let iteration = 0; iteration < (iterations ?? this.options.pressureIterations ?? TUBE_SIMULATION.jetFlow.pressureIterations); iteration++) {
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a]; let sum = 0;
         for (let axis = 0; axis < 3; axis++) {
@@ -166,7 +234,8 @@ export class TubeFlowSolver {
           if (left >= 0) sum += p[left] * w;
           if (right >= 0) sum += p[right] * w;
         }
-        p[i] = this.pressureWeight[i] ? (sum - this.divergence[i]) / this.pressureWeight[i] : 0;
+        const target = this.pressureWeight[i] ? (sum - this.divergence[i]) / this.pressureWeight[i] : 0;
+        p[i] += (iterations ? 1.65 : 1) * (target - p[i]);
       }
     }
     for (let a = 0; a < m.activeCount; a++) {
