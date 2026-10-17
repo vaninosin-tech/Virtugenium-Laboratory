@@ -137,7 +137,7 @@ describe("stage 3 delivery through the real ledger", () => {
   });
 
   // tubeSilverField.inject drops later ledger increments when topWetRow is above the highest active voxel.
-  it.fails("admits a surface impact and starts chloride and product at the contact patch", () => {
+  it("admits a surface impact and starts chloride and product at the contact patch", () => {
     const h = new DeliveryHarness();
     for (let t = 0; t <= POUR_MS; t += DT) h.step(t, { conserve: true });
     exportEvents(h.rows);
@@ -208,7 +208,7 @@ describe("stage 3 delivery through the real ledger", () => {
   });
 
   // tubeSilverField.inject drops the cumulative ledger total when a render gap jumps the liquid level.
-  it.fails("retains the exact pour plan through large gaps and absent render frames", () => {
+  it("retains the exact pour plan through large gaps and absent render frames", () => {
     const h = new DeliveryHarness();
     for (const t of [0, 50, 200, 650, 850, 1200, 1700])
       h.step(t, { render: t === 0 || t === 850 || t === 1700, conserve: true });

@@ -13,6 +13,7 @@ import { useLabBootStore } from "../../../features/lab-boot/lib/useLabBootStore"
 import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import { Cabinet } from "./Cabinet";
 import { CameraRig } from "./CameraRig";
+import { DiagnosticCamera } from "./DiagnosticCamera";
 import { DevMenuPanel } from "./DevMenuPanel";
 import { FumeHood } from "./FumeHood";
 import { FumeHoodWorkArea } from "./FumeHoodWorkArea";
@@ -692,6 +693,7 @@ export function Laboratory() {
         </Selection>
 
         <CameraRig onResumeMouseLook={resumeMouseLook} />
+        <DiagnosticCamera />
         <HandController />
         <HeatingRuntime />
         <HandHeatRig />

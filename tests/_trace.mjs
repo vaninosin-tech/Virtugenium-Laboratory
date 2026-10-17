@@ -15,16 +15,18 @@ try {
   await page.waitForFunction(() => window.__sceneStore?.getState().cabinetPhase === "inspecting", null, { timeout: 300000 });
   await page.locator(".lab-boot-screen").waitFor({ state: "hidden", timeout: 300000 });
   await page.waitForTimeout(2500);
+  if (process.env.HIDEUI) await page.evaluate(() => { window.__hideUi = true; });
   await page.evaluate(async () => {
     const sm = await import("/src/scenes/laboratory/lib/useStandMotionStore.ts");
         window.__tr = []; window.__trStop = false;
     const box = document.createElement("div");
     box.style.cssText = "position:fixed;left:6px;bottom:60px;z-index:99999;font:700 22px monospace;color:#ff0;background:#000a;padding:4px 8px;white-space:pre";
     document.body.appendChild(box);
+    if (window.__hideUi) { let el = document.querySelector('canvas'); while (el && el !== document.body) { for (const sib of el.parentElement.children) if (sib !== el && sib !== box) sib.style.display = 'none'; el = el.parentElement; } }
     const stats = () => {
       const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId;
       const f = id ? window.__silverRuntime?.field(id) : null;
-      const rec = { sim: sm.simNowMs(), perf: performance.now(), rend: window.__three.gl.info.render.frame };
+      const rec = { sim: sm.simNowMs(), perf: performance.now(), wall: (performance.timeOrigin + performance.now()) / 1000, rend: window.__three.gl.info.render.frame };
       const dg = f ? window.__silverRuntime.diagnostics(id) : null;
       rec.A = { events: dg ? dg.eventIds.length : 0, valid: dg ? dg.eventIds.length : 0, delivered: dg ? dg.deliveredMl : 0, firstValid: dg ? { atMs: dg.firstValidImpactMs, y: dg.firstImpactPoint.y, surfaceY: dg.surfaceY } : null };
       if (f) {
@@ -54,20 +56,7 @@ try {
   });
   if (process.env.SHIFT) await page.evaluate(v => { window.__viewShift = v; }, Number(process.env.SHIFT));
   if (process.env.ZOOM) await page.evaluate(v => { window.__zoom = v; }, Number(process.env.ZOOM));
-  if (process.env.SIDE) await page.evaluate(async (dist) => {
-    const THREE = await import("/node_modules/.vite/deps/three.js").catch(() => null);
-    const scene = window.__three.scene, m = window.__standMotion.mouth;
-    const V = window.__three.camera.position.constructor;
-    const up = new V(0, 1, 0);
-    scene.onBeforeRender = (_r, _s, camera) => {
-      if (!m.valid) return;
-      const side = new V().subVectors(m.point, m.rod); side.y = 0; if (side.lengthSq() < 1e-8) side.set(1, 0, 0); side.normalize();
-      const across = new V().crossVectors(up, side).normalize();
-      const target = m.point.clone().add(new V(0, -0.02, 0)).addScaledVector(side, 0.02);
-      camera.position.copy(target).addScaledVector(across, dist).add(new V(0, 0.012, 0));
-      camera.lookAt(target);
-    };
-  }, Number(process.env.SIDE));
+  if (process.env.DIAGCAM) await page.evaluate(v => { window.__diagCamera = v; }, JSON.parse(process.env.DIAGCAM));
   const real = (id) => page.evaluate(async (id) => {
     const { runStandAction } = await import("/src/scenes/laboratory/lib/standTableActions.ts");
     window.__clickSim = (await import("/src/scenes/laboratory/lib/useStandMotionStore.ts")).simNowMs();
@@ -85,7 +74,7 @@ try {
   await page.waitForTimeout(Number(process.env.SECONDS ?? 14) * 1000);
   recording = false;
   const idx = [];
-  for (let k = 0; k < frames.length; k++) { const fn = `s${String(k).padStart(5, "0")}.jpg`; await writeFile(`${out}/frames/${fn}`, Buffer.from(frames[k].data, "base64")); idx.push({ fn, t: frames[k].t - frames[0].t }); }
+  for (let k = 0; k < frames.length; k++) { const fn = `s${String(k).padStart(5, "0")}.jpg`; await writeFile(`${out}/frames/${fn}`, Buffer.from(frames[k].data, "base64")); idx.push({ fn, t: frames[k].t - frames[0].t, abs: frames[k].t }); }
   await writeFile(`${out}/frames/index.json`, JSON.stringify({ idx }));
   const data = await page.evaluate(() => { window.__trStop = true; const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0].instanceId; return { clickSim: window.__clickSim, trace: window.__tr, diag: window.__silverRuntime.diagnostics(id) }; });
   await writeFile(`${out}/trace.json`, JSON.stringify(data));
