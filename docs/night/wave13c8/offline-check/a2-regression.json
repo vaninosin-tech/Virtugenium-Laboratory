@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "failures": [],
+  "unavailable": [
+    "stream above impact",
+    "receiver volume increase",
+    "source volume decrease",
+    "first chloride top rows",
+    "chloride near impact",
+    "silver conservation",
+    "no source without reactants"
+  ],
+  "checked": 1295,
+  "dumps": 0
+}
