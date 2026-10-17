@@ -31,6 +31,7 @@ const RATES = [1, 0.5, 2, 5];
 // Diagnostic views (?view=): material (default), tracer (fluid + passive tracer + velocity vectors), source (where AgCl forms),
 // nodes (aggregate nodes, links and component counts). The debug layers are drawn on a 2D canvas over the left pane.
 const VIEW = params.get("view") ?? "material";
+if (VIEW === "cloud") (window as unknown as { __silverAgg?: number }).__silverAgg = 0;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("view"), hud = $<HTMLDivElement>("hud");
 const video = $<HTMLVideoElement>("ref"), scrub = $<HTMLInputElement>("scrub"), clock = $<HTMLSpanElement>("clock");
@@ -88,6 +89,8 @@ function restart() {
   silver.material.uniforms.uHaze.value = field.texture;
   silver.material.uniforms.uTint.value = field.tintTexture;
   silver.material.uniforms.uChip.value = field.chipTexture;
+  silver.material.uniforms.uCloudOn.value = VIEW === "cloud" ? 1 : 0;
+  silver.material.uniforms.uFlocOn.value = VIEW === "cloud" ? 0 : 1;
   silver.material.uniforms.uDiag.value = new URLSearchParams(location.search).get("silverDiag") === "tracer" ? 1 : 0;
   simTime = 0; poured = 0;
 }
@@ -194,7 +197,7 @@ function draw() {
   if (canvas.width !== Math.round(w * ratio) || canvas.height !== Math.round(h * ratio)) {
     renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); layoutVideo();
   }
-  volume.visible = VIEW === "material" || VIEW === "nodes-over";
+  volume.visible = VIEW === "material" || VIEW === "cloud" || VIEW === "nodes-over";
   renderer.render(scene, camera);
   drawDiagnostics();
   hud.textContent = `налив ${(poured * 100).toFixed(0)}%   осадок ${(field.extent * 100).toFixed(0)}%`;

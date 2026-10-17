@@ -718,6 +718,8 @@ export class TubeSilverField {
       if (fine <= 1e-12) continue;
       // Smoluchowski: collisions of primary particles scale with concentration squared, so dilute regions stay a
       // fine suspension and only concentrated parts (the mixing zone) flocculate.
+      // Diagnostic C (window.__silverAgg = 0): aggregation disabled, the fine suspension alone must make the cloud.
+      if ((globalThis as { __silverAgg?: unknown }).__silverAgg === 0) continue;
       const concentration = fine * m.activeCount;
       const rate = Math.min(0.6, FLOC_AGGREGATION * concentration * (concentration / (concentration + FLOC_C0)) * dt);
       const moved = fine * rate;

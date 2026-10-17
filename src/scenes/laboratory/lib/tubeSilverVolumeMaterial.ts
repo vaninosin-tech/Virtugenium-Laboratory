@@ -32,7 +32,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
       uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 9.0 }, uSteps: { value: 88 }, uNoise: { value: noiseVolume() },
-      uTintStrength: { value: 6.0 }, uSmokeOn: { value: 0 }, uDiag: { value: 0 }, uTime: { value: 0 },
+      uTintStrength: { value: 6.0 }, uSmokeOn: { value: 0 }, uDiag: { value: 0 }, uCloudOn: { value: 0 }, uCloudK: { value: 2.2 }, uFlocOn: { value: 1 }, uTime: { value: 0 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     vertexShader: `
@@ -52,7 +52,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uniform sampler3D uDense, uOverlap, uHaze, uTint, uChip, uNoise;
       uniform float uHazeStrength, uTintStrength, uTime;
       uniform int uSteps;
-      uniform float uSmokeOn, uDiag;
+      uniform float uSmokeOn, uDiag, uCloudOn, uCloudK, uFlocOn;
       in vec3 vPoint;
       out vec4 outColor;
       // Value noise from a periodic 64^3 texture (see noiseVolume): one tap per lookup.
@@ -120,7 +120,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           vec3 grid = uvw(p);
           vec4 field = denseAt(grid);
           float rim = 1.0-smoothstep(0.87,0.985,length(p.xz)/uRadius);
-          float solid = cotton(field,grid,p)*rim;
+          float solid = uFlocOn > 0.5 ? cotton(field,grid,p)*rim : 0.0;
           float source = texture(uOverlap,grid).r;
           if (uDiag > 0.5) {
             // Phase A: the incoming NaCl as a passive tracer, a translucent blue-green volume.
@@ -169,6 +169,18 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             alpha += (1.0-alpha)*chipAlpha;
           }
           // The smoke layer is switched off by default (customer request); the fine solid stays in the mass balance.
+          if (uCloudOn > 0.5 && smokeValue > 0.0005) {
+            // Fine suspended AgCl: a volume of scattering particles (extinction = kappa * concentration), modulated by
+            // a warped noise so that the cloud has ragged, heterogeneous density instead of a smooth blob.
+            vec3 cq = vec3(p.x,p.y-uBottom,p.z)/uRadius;
+            vec3 cw = vec3(noise3(cq*1.7+vec3(1.0,4.0,2.0)),noise3(cq*1.7+vec3(7.0,2.0,5.0)),noise3(cq*1.7+vec3(3.0,8.0,6.0)))-0.5;
+            float cn = fbm3(cq*vec3(3.2,2.4,3.2)+cw*1.5+vec3(0.0,uTime*0.01,0.0));
+            float c = smokeValue*pow(clamp(cn*1.9,0.0,1.6),2.2);
+            float a3 = 1.0-exp(-uCloudK*c*stepLength/uRadius);
+            float inScatter = 0.78+0.22*clamp(1.0-smokeValue*0.4,0.0,1.0);
+            accumulated += (1.0-alpha)*a3*vec3(0.95,0.96,0.98)*inScatter;
+            alpha += (1.0-alpha)*a3;
+          }
           float hazeAlpha = uSmokeOn * (1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius));
           accumulated += (1.0-alpha)*hazeAlpha*mix(vec3(0.34,0.44,0.58),vec3(0.74,0.82,0.92),clamp(ribbon*3.0,0.0,1.0));
           alpha += (1.0-alpha)*hazeAlpha;
