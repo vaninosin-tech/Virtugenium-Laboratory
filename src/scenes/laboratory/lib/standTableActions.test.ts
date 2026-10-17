@@ -5,7 +5,9 @@ import { heatInHandAction, runStandAction, standActionFor } from "./standTableAc
 import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
 import { useBurnerStore } from "./useBurnerStore";
 import { useHeatingStore } from "./useHeatingStore";
-import { POUR_COMMIT_MS, POUR_MS, useStandMotionStore } from "./useStandMotionStore";
+import { CLAMP_TUBE_MOUTH, POUR_COMMIT_MS, POUR_MS, useStandMotionStore } from "./useStandMotionStore";
+import { resetTubeAmounts } from "./tubeAmounts";
+import { useReagentStorageStore } from "./useReagentStorageStore";
 import { useTestTubeDragStore } from "./useTestTubeDragStore";
 import { useTestTubeStorageStore, type StoredTestTube } from "./useTestTubeStorageStore";
 
@@ -22,6 +24,10 @@ const settle = () => vi.advanceTimersByTime(POUR_MS + 100);
 
 beforeEach(() => {
   vi.useFakeTimers();
+  resetTubeAmounts();
+  useReagentStorageStore.setState({ sourceMl: {}, debitedEvents: new Set() });
+  CLAMP_TUBE_MOUTH.root.identity(); CLAMP_TUBE_MOUTH.point.set(0, 0.15, 0);
+  CLAMP_TUBE_MOUTH.rod.set(-1, 0, 0); CLAMP_TUBE_MOUTH.valid = true;
   useStandMotionStore.setState({ busyUntil: 0, pour: null, clampArrival: null, rackArrival: null });
   useLaboratoryStore.setState({ selectedExperimentId: EXP1 });
   useTestTubeStorageStore.setState({

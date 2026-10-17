@@ -1,9 +1,13 @@
 import * as THREE from "three";
 import { deliver, STANDARD_POUR_ML, tubeAmount, TUBE_CAPACITY_ML } from "./tubeAmounts";
-import { POUR_MS, useStandMotionStore } from "./useStandMotionStore";
-import { recordDelivery, type DeliveryEvent, type ImpactContext } from "./tubeDelivery";
+import { onSimulationTick, POUR_MS, useStandMotionStore } from "./useStandMotionStore";
+import { recordDelivery, validateImpact, type DeliveryEvent, type ImpactContext } from "./tubeDelivery";
 import { tubeEffectiveRadius, tubeLiquidHeight } from "./tubeLiquidLevel";
 import { silverStage } from "./silverStage";
+import { silverRuntime } from "./tubeSilverRuntime";
+import { useReagentStorageStore } from "./useReagentStorageStore";
+import { useTestTubeStorageStore } from "./useTestTubeStorageStore";
+import { tryAddToTube } from "./pourIntoTube";
 
 export interface TubePourImpact {
   reagentId: string;
@@ -20,9 +24,30 @@ export const tubePourImpact = (id: string) => impacts.get(id);
 /** A validated event is the only route from a simulation step to receiving chemistry. */
 export function publishDeliveryEvent(input: Omit<DeliveryEvent, "valid" | "reason">,
   context: ImpactContext, direction: THREE.Vector3, flowMlPerSecond: number) {
-  const event = recordDelivery(input, context);
+  const source = input.sourceId ?? useStandMotionStore.getState().pour?.instanceId;
+  const requested = input.requestedMl ?? input.ml;
+  const debited = source ? useReagentStorageStore.getState().debitSource(source, input.reagentId,
+    `${input.serial}|${input.step}`, requested) : requested;
+  const limited = { ...input, requestedMl: debited, ml: Math.min(input.ml, debited) };
+  if (debited <= 0) return { ...limited, valid: false, reason: "invalid-volume" as const };
+  const stage3 = input.reagentId === "nacl" && silverStage() === 3;
+  if (stage3 && validateImpact(limited.point, context).valid && limited.ml > 0
+    && !silverRuntime.canApply({ ...limited, valid: true, reason: "ok" }))
+    return { ...limited, valid: false, reason: "invalid-volume" as const };
+  const event = recordDelivery(limited, context);
   if (!event.valid || event.ml <= 0) return event;
-  const accepted = deliver(input.tubeId, input.reagentId, event.ml);
+  let accepted = event.ml;
+  if (stage3) {
+    if (!silverRuntime.applyDelivery(event)) return { ...event, valid: false, reason: "invalid-volume" as const };
+  } else {
+    accepted = deliver(input.tubeId, input.reagentId, event.ml);
+    const state = useTestTubeStorageStore.getState();
+    for (const location of ["workbench", "fumeHood"] as const) {
+      const list = location === "workbench" ? state.workbenchTestTubes : state.fumeHoodTestTubes;
+      const index = list.findIndex(tube => tube.instanceId === input.tubeId);
+      if (index >= 0) { tryAddToTube(location, index, input.reagentId); break; }
+    }
+  }
   const previous = impacts.get(input.tubeId);
   impacts.set(input.tubeId, { reagentId: input.reagentId,
     point: new THREE.Vector3(input.point.x, input.point.y, input.point.z), direction: direction.clone(),
@@ -48,33 +73,14 @@ export interface TubePourStep {
   tubeId: string; reagentId: string; serial: number; now: number;
   mouth: THREE.Vector3; root: THREE.Matrix4; side: THREE.Vector3;
   mouthValid: boolean; radius?: number;
+  allowEmpty?: boolean;
 }
 /** The render-independent 30 ms clock for a stand pour. Clearing a pour stops it immediately. */
 export function observePourClock(instanceId: string, onStep: (serial: number, now: number) => void) {
-  let timer: ReturnType<typeof setInterval> | undefined;
-  let activeAt: number | undefined;
-  const sync = () => {
+  return onSimulationTick(now => {
     const pour = useStandMotionStore.getState().pour;
-    if (pour?.instanceId === instanceId && activeAt !== pour.at) {
-      if (timer) clearInterval(timer);
-      activeAt = pour.at;
-      timer = setInterval(() => {
-        const current = useStandMotionStore.getState().pour;
-        if (current?.instanceId === instanceId && current.at === activeAt) onStep(current.at, Date.now());
-      }, 30);
-    } else if ((!pour || pour.instanceId !== instanceId) && timer) {
-      clearInterval(timer); timer = undefined; activeAt = undefined;
-    }
-  };
-  sync();
-  const unsubscribe = useStandMotionStore.subscribe((state, previous) => {
-    const finished = previous.pour;
-    if (finished?.instanceId === instanceId && state.pour?.at !== finished.at
-      && Date.now() >= finished.at + POUR_MS)
-      onStep(finished.at, finished.at + POUR_MS);
-    sync();
+    if (pour?.instanceId === instanceId) onStep(pour.at, Math.min(now, pour.at + POUR_MS));
   });
-  return () => { unsubscribe(); if (timer) clearInterval(timer); };
 }
 /** Advance from the stand's Date.now timebase. Repeated timestamps and subscribers are idempotent. */
 export function stepTubePour(input: TubePourStep): DeliveryEvent | undefined {
@@ -94,7 +100,7 @@ export function stepTubePour(input: TubePourStep): DeliveryEvent | undefined {
   const axis = new THREE.Vector3(0, tubeLiquidHeight(volume, effectiveRadius), 0)
     .applyMatrix4(input.root);
   const context: ImpactContext = { axis, radius: input.radius ?? 0.007,
-    surfaceY, hasLiquid: input.mouthValid && volume > 0 };
+    surfaceY, hasLiquid: input.mouthValid && (volume > 0 || input.allowEmpty === true) };
   const ml = Math.max(0, Math.min(requestedMl, TUBE_CAPACITY_ML - volume));
   return publishDeliveryEvent({ tubeId: input.tubeId, reagentId: input.reagentId,
     serial: input.serial, step: Math.round(atMs), ml, requestedMl, point,

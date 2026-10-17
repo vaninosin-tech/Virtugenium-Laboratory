@@ -12,8 +12,8 @@ import type { TubeLocation } from "./useTestTubeStorageStore";
  * clicked — a quick player could otherwise pour twice, or pour into a tube
  * still in the air.
  *
- * Times are `Date.now()` milliseconds: the animators read the same clock to
- * know where they are in a motion, and tests can fake it.
+ * Pour time is simulation time. A stalled timer catches up from the elapsed
+ * clock difference; each pour remains capped at one standard portion.
  */
 
 /** Whole pour: to the tube, tip, pour, back home. */
@@ -82,29 +82,51 @@ interface StandMotionState {
   readonly rackArrival: (TubeArrival & { readonly location: TubeLocation; readonly index: number }) | null;
   /** The stand or the lamp just set down off the tray, flying from the hand to its place. */
   readonly equipmentArrival: (TubeArrival & { readonly what: "stand" | "lamp" }) | null;
+  readonly simulationPaused: boolean;
   /** Refuses stand clicks for `ms`. */
   hold: (ms: number) => void;
   /** Starts a bottle's pour; `commit` puts the reagent in the tube at the pour's tipping point. */
-  startPour: (instanceId: string, commit: () => void, from?: Position3, into?: "clamp" | "hand") => void;
+  startPour: (instanceId: string, commit: () => void, from?: Position3, into?: "clamp" | "hand",
+    onStep?: (serial: number, now: number) => void) => void;
   arriveInClamp: (world: Position3) => void;
   arriveInRack: (location: TubeLocation, index: number, world: Position3) => void;
   arriveEquipment: (what: "stand" | "lamp", world: Position3, quaternion: readonly [number, number, number, number]) => void;
 }
 
+let simulationMs = 0;
+let wallSample = Date.now();
+const tickListeners = new Set<(now: number) => void>();
+let activeStep: ((serial: number, now: number) => void) | undefined;
+let activeSerial: number | undefined;
+let activeCommit: (() => void) | undefined;
+let committed = false;
+export function simNowMs(): number {
+  const now = Date.now();
+  if (!useStandMotionStore.getState().simulationPaused) simulationMs += Math.max(0, now - wallSample);
+  wallSample = now;
+  return simulationMs;
+}
+export function setSimulationPaused(paused: boolean): void {
+  simNowMs();
+  useStandMotionStore.setState({ simulationPaused: paused });
+}
+export function onSimulationTick(listener: (now: number) => void): () => void {
+  tickListeners.add(listener);
+  return () => tickListeners.delete(listener);
+}
 export const useStandMotionStore = create<StandMotionState>((set) => ({
   busyUntil: 0,
+  simulationPaused: false,
   pour: null,
   clampArrival: null,
   rackArrival: null,
   equipmentArrival: null,
   hold: (ms) => set((state) => ({ busyUntil: Math.max(state.busyUntil, Date.now() + ms) })),
-  startPour: (instanceId, commit, from, into) => {
-    const at = Date.now();
+  startPour: (instanceId, commit, from, into, onStep) => {
+    restartSimulationTimer();
+    const at = simNowMs();
     set({ pour: { instanceId, at, from, into }, busyUntil: at + POUR_MS });
-    setTimeout(commit, POUR_COMMIT_MS);
-    setTimeout(() => {
-      set((state) => (state.pour?.at === at ? { pour: null } : state));
-    }, POUR_MS);
+    activeStep = onStep; activeSerial = at; activeCommit = commit; committed = false;
   },
   arriveInClamp: (world) => {
     const at = Date.now();
@@ -127,7 +149,32 @@ export const useStandMotionStore = create<StandMotionState>((set) => ({
 }));
 
 /** Whether a motion at the stand is still running. */
-export const standBusy = (): boolean => Date.now() < useStandMotionStore.getState().busyUntil;
+export const standBusy = (): boolean => simNowMs() < useStandMotionStore.getState().busyUntil;
+
+// One timer owns all simulation progression, regardless of React or WebGL frames.
+let simulationTimer: ReturnType<typeof setInterval>;
+function simulationPulse() {
+  const now = simNowMs();
+  const pour = useStandMotionStore.getState().pour;
+  if (pour && pour.at === activeSerial) {
+    activeStep?.(pour.at, Math.min(now, pour.at + POUR_MS));
+    for (const listener of tickListeners) listener(now);
+    if (!activeStep && !committed && now - pour.at >= POUR_COMMIT_MS) {
+      committed = true; activeCommit?.();
+    }
+    if (now - pour.at >= POUR_MS) {
+      useStandMotionStore.setState({ pour: null });
+      activeStep = undefined; activeCommit = undefined; activeSerial = undefined;
+    }
+  } else for (const listener of tickListeners) listener(now);
+}
+function restartSimulationTimer() {
+  if (simulationTimer) clearInterval(simulationTimer);
+  simulationTimer = setInterval(simulationPulse, 25);
+  if (typeof simulationTimer === "object" && "unref" in simulationTimer)
+    (simulationTimer as { unref: () => void }).unref();
+}
+restartSimulationTimer();
 
 if (import.meta.env.DEV && typeof window !== "undefined") {
   (window as unknown as { __standMotion?: unknown }).__standMotion = { store: useStandMotionStore, mouth: CLAMP_TUBE_MOUTH };

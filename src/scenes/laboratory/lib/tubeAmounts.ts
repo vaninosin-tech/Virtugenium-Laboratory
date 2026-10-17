@@ -1,5 +1,6 @@
 /** Game units are separate from virtual millilitres. A tube never spills. */
 import { silverStage } from "./silverStage";
+import { silverRuntime } from "./tubeSilverRuntime";
 
 export const TUBE_CAPACITY_ML = 5;
 export const STANDARD_POUR_ML = 1;
@@ -20,7 +21,7 @@ const registry = globalRegistry[registryKey] ??= {
   bariumExtent: new Map(), silverExtent: new Map(), permanganateExtent: new Map(),
 };
 const { tubes, seededContents, copperProgress, bariumExtent, silverExtent, permanganateExtent } = registry;
-const initial: Record<string, { ml: number; species?: Record<string, number>; copper?: number }> = {
+export const initial: Record<string, { ml: number; species?: Record<string, number>; copper?: number }> = {
   cu: { ml: 2.5, copper: 3 }, hno3: { ml: 2.5, species: { HNO3: 4.4 } },
   agno3: { ml: 2.5, species: { "Ag+": 1.15 } },
   nacl: { ml: 1, species: { "Cl-": 1 } },
@@ -115,10 +116,13 @@ export function syncPermanganateExtent(tubeId: string, extent: number) {
   permanganateExtent.set(tubeId, (permanganateExtent.get(tubeId) ?? 0) + delta);
 }
 export function clearTubeAmount(tubeId: string) {
+  // The runtime owns fields by tube identity, so a cleared tube cannot retain its old field.
+  silverRuntime.reset(tubeId);
   seededContents.delete(tubeId);
   tubes.delete(tubeId); copperProgress.delete(tubeId); bariumExtent.delete(tubeId); silverExtent.delete(tubeId); permanganateExtent.delete(tubeId);
 }
 export function resetTubeAmounts() {
+  silverRuntime.reset();
   seededContents.clear();
   tubes.clear(); copperProgress.clear(); bariumExtent.clear(); silverExtent.clear(); permanganateExtent.clear();
 }

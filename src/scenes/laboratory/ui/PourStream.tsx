@@ -1,13 +1,13 @@
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import * as THREE from "three";
 
-import { CLAMP_TUBE_MOUTH, POUR_MS, useStandMotionStore } from "../lib/useStandMotionStore";
+import { CLAMP_TUBE_MOUTH, POUR_MS, simNowMs, useStandMotionStore } from "../lib/useStandMotionStore";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
-import { observePourClock, pourFraction, pouredMl, publishTubePourImpact, stepTubePour } from "../lib/tubePourImpact";
-import { seedTubeAmounts, tubeAmount } from "../lib/tubeAmounts";
+import { pourFraction, pouredMl } from "../lib/tubePourImpact";
+import { tubeAmount } from "../lib/tubeAmounts";
 import { tubeEffectiveRadius, tubeLiquidHeight } from "../lib/tubeLiquidLevel";
 import { silverStage } from "../lib/silverStage";
 
@@ -151,47 +151,6 @@ export function PourStream({
   const mesh = useRef<THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>>(null);
   const lipDrop = useRef<THREE.Mesh>(null);
   const fallingDrops = useRef<THREE.Mesh[]>([]);
-  const delivery = useRef({ serial: -1, ml: 0 });
-  useEffect(() => {
-    const target = () => {
-      const stand = useBunsenStandStorageStore.getState();
-      const tubes = useTestTubeStorageStore.getState();
-      const targetTube = stand.attachedTubeSlotIndex === null ? undefined
-        : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[stand.attachedTubeSlotIndex];
-      const reagents = useReagentStorageStore.getState();
-      const reagentId = [...reagents.workbenchItems, ...reagents.fumeHoodItems, ...reagents.trayItems]
-        .find(item => item.instanceId === instanceId)?.reagentId;
-      return { targetTube, reagentId };
-    };
-    const advance = (serial: number, now: number) => {
-      const { targetTube, reagentId } = target();
-      if (!targetTube || !reagentId || !isStageOneSilverPour(silverStage(), reagentId, targetTube.contents)) return;
-      const side = new THREE.Vector3().subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);
-      if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
-      side.normalize();
-      stepTubePour({ tubeId: targetTube.instanceId, reagentId, serial, now,
-        mouth: CLAMP_TUBE_MOUTH.point, root: CLAMP_TUBE_MOUTH.root,
-        side, mouthValid: CLAMP_TUBE_MOUTH.valid });
-    };
-    const stopClock = observePourClock(instanceId, advance);
-    const unsubscribe = useStandMotionStore.subscribe((state, previous) => {
-    const finished = previous.pour;
-    if (!finished || finished.instanceId !== instanceId || state.pour?.at === finished.at) return;
-    const priorMl = delivery.current.serial === finished.at ? delivery.current.ml : 0;
-    if (priorMl >= 1) return;
-    const { targetTube, reagentId } = target();
-    if (targetTube && reagentId) {
-      if (isStageOneSilverPour(silverStage(), reagentId, targetTube.contents)) return;
-      seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
-      const point = CLAMP_TUBE_MOUTH.point.clone().add(new THREE.Vector3(0, -0.026, 0));
-      publishTubePourImpact(targetTube.instanceId, reagentId,
-        point, new THREE.Vector3(0, -1, 0),
-        0, 1 - priorMl, finished.at);
-      delivery.current = { serial: finished.at, ml: 1 };
-    }
-    });
-    return () => { unsubscribe(); stopClock(); };
-  }, [instanceId]);
   const dyed = /(?:^|-)kmno4$/.test(instanceId);
   const geometry = useMemo(streamGeometry, []);
   const material = useMemo(() => streamMaterial(dyed), [dyed]);
@@ -212,7 +171,7 @@ export function PourStream({
     const bottle = bottleRef.current;
     const measure = mouth.current;
     const pour = useStandMotionStore.getState().pour;
-    const k = pour?.instanceId === instanceId ? (Date.now() - pour.at) / POUR_MS : -1;
+    const k = pour?.instanceId === instanceId ? (simNowMs() - pour.at) / POUR_MS : -1;
     if (!bottle || !measure || !measure.cap || !CLAMP_TUBE_MOUTH.valid || k < STREAM_START || k > 1) {
       geometry.setDrawRange(0, 0);
       if (lipDrop.current) lipDrop.current.visible = false;
@@ -238,9 +197,14 @@ export function PourStream({
     const reagents = useReagentStorageStore.getState();
     const reagentId = [...reagents.workbenchItems, ...reagents.fumeHoodItems, ...reagents.trayItems]
       .find(item => item.instanceId === instanceId)?.reagentId;
+    if (reagentId && reagents.sourceVolume(instanceId, reagentId) <= 0) {
+      geometry.setDrawRange(0, 0);
+      if (lipDrop.current) lipDrop.current.visible = false;
+      fallingDrops.current.forEach(drop => { if (drop) drop.visible = false; });
+      return;
+    }
     const silver = !!targetTube && isStageOneSilverPour(silverStage(), reagentId, targetTube.contents);
     if (mesh.current) configureSilverStream(mesh.current, material, silver);
-    if (!silver && targetTube) seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
     if (silver) {
       scratch.side.subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);
       if (scratch.side.lengthSq() < 1e-8) scratch.side.set(1, 0, 0);
@@ -248,18 +212,6 @@ export function PourStream({
     }
     scratch.target.copy(pourTarget(CLAMP_TUBE_MOUTH.point, scratch.side, CLAMP_TUBE_MOUTH.root,
       targetTube ? tubeAmount(targetTube.instanceId).volumeMl : 0, silver));
-    if (!silver && targetTube && reagentId && pour) {
-      if (delivery.current.serial !== pour.at) delivery.current = { serial: pour.at, ml: 0 };
-      const total = streamDeliveredMl(k, scratch.lip.distanceTo(scratch.target), silver);
-      const increment = Math.max(0, total - delivery.current.ml);
-      if (increment > 0) {
-        seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
-        publishTubePourImpact(targetTube.instanceId, reagentId, scratch.target,
-          scratch.point.subVectors(scratch.target, scratch.lip).normalize(),
-          pourFraction(k) ** 2 * 4, increment, pour.at);
-        delivery.current.ml = total;
-      }
-    }
 
     const rise = THREE.MathUtils.smoothstep(k, STREAM_START, 0.44);
     const fade = 1 - THREE.MathUtils.smoothstep(k, 0.69, STREAM_END);

@@ -14,6 +14,7 @@ export interface DeliveryPoint { x: number; y: number; z: number }
 export interface DeliveryEvent {
   tubeId: string;
   reagentId: string;
+  sourceId?: string;
   /** The pour action this event belongs to (`startPour` timestamp). */
   serial: number;
   /** Monotonic step inside the pour; (serial, step) identifies an event. */

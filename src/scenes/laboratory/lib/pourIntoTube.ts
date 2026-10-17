@@ -59,7 +59,10 @@ const guardMix = (
     return true;
   }
 
-  if (isRepeat(`${tubeKey}:${verdict.kind}:${verdict.reagentId}`)) return false;
+  if (isRepeat(`${tubeKey}:${verdict.kind}:${verdict.reagentId}`)) {
+    if (verdict.kind !== "foreign") { pour(); return true; }
+    return false;
+  }
   const notices = useLabNoticeStore.getState();
   const name = reagentName(verdict.reagentId);
 
@@ -109,6 +112,14 @@ export const tryAddToTube = (location: TubeLocation, index: number, reagentId: s
     chargeOutsideHood(location, contents, [reagentId]);
     useTestTubeStorageStore.getState().addTubeContents(location, index, reagentId);
   });
+};
+
+/** Read-only preflight for a delivery event; wrong-order mistakes remain allowed. */
+export const canAddToTube = (location: TubeLocation, index: number, reagentId: string): boolean => {
+  const target = listFor(location)[index];
+  if (!target || target.contents.includes(reagentId)) return false;
+  return judgeMix(useLaboratoryStore.getState().selectedExperimentId,
+    target.contents, [reagentId]).kind !== "foreign";
 };
 
 export const tryPourBetweenTubes = (location: TubeLocation, fromIndex: number, toIndex: number): boolean => {

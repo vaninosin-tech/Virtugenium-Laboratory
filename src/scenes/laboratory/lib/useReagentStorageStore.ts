@@ -4,6 +4,7 @@ import type { ContainerType } from "../../../entities/laboratory/reagents";
 import type { HotspotTargetId } from "./layout";
 import { REAGENT_TRAY_SLOTS } from "./useTrayReagentAreaStore";
 import { useLabNoticeStore } from "./useLabNoticeStore";
+import { initial } from "./tubeAmounts";
 
 /** One reagent the player has taken — enough to re-look-up its full `ReagentContainerConfig` (`REAGENTS[reagentId]`) and render a static display copy. Display size is NOT stored per-instance: the tray uses the live, dev-tunable `heldTray.reagentScale` and the workbench uses its own live `WorkbenchReagentAreaConfig.scale` — both independent, both reactive to dev-panel changes even for items already placed. */
 export interface StoredReagent {
@@ -80,6 +81,10 @@ export function nextFreeTraySlot(trayItems: readonly StoredReagent[]): number {
 }
 
 interface ReagentStorageState {
+  readonly sourceMl: Readonly<Record<string, number>>;
+  readonly debitedEvents: ReadonlySet<string>;
+  sourceVolume: (instanceId: string, reagentId: string) => number;
+  debitSource: (instanceId: string, reagentId: string, eventId: string, requestedMl: number) => number;
   /**
    * Reagent instance ids taken during the CURRENT open session of each
    * cabinet — a fresh `Set` reference per cabinet id, replaced (never
@@ -127,6 +132,18 @@ function uniqueReagents(items: readonly StoredReagent[]): StoredReagent[] {
 }
 
 export const useReagentStorageStore = create<ReagentStorageState>((set, get) => ({
+  sourceMl: {},
+  debitedEvents: new Set(),
+  sourceVolume: (instanceId, reagentId) => get().sourceMl[instanceId] ?? initial[reagentId]?.ml ?? 0,
+  debitSource: (instanceId, reagentId, eventId, requestedMl) => {
+    const state = get();
+    if (state.debitedEvents.has(eventId) || !Number.isFinite(requestedMl) || requestedMl <= 0) return 0;
+    const available = state.sourceVolume(instanceId, reagentId);
+    const debited = Math.min(available, requestedMl);
+    set({ sourceMl: { ...state.sourceMl, [instanceId]: Math.max(0, available - debited) },
+      debitedEvents: new Set([...state.debitedEvents, eventId]) });
+    return debited;
+  },
   takenByCabinet: {},
   trayItems: [],
   workbenchItems: [],

@@ -23,6 +23,9 @@ import { bottleToTray, tubeToTray } from "./trayCarry";
 import { worktopZoneAt } from "./worktopBounds";
 import { toggleTubePick, useTestTubeDragStore } from "./useTestTubeDragStore";
 import { useTestTubeStorageStore, type StoredTestTube, type TubeLocation } from "./useTestTubeStorageStore";
+import { seedTubeAmounts } from "./tubeAmounts";
+import { stepTubePour } from "./tubePourImpact";
+import { useReagentStorageStore } from "./useReagentStorageStore";
 
 /**
  * «Действие на столе» (VL-014): the stand has no menu. Every object on the
@@ -146,12 +149,24 @@ export function standActionFor(target: StandTarget, { fromHand = false }: { read
     if (clamped.contents.includes(reagentId)) return blocked(`${formula(reagentId)} уже в пробирке`);
     const foreign = foreignIn([reagentId]);
     if (foreign) return blocked(foreignLabel(foreign));
+    if (target.instanceId && useReagentStorageStore.getState().sourceVolume(target.instanceId, reagentId) <= 0)
+      return blocked(`${formula(reagentId)} закончился`);
     const verb = reagentConfig(reagentId)?.contentsKind === "solid" ? "Насыпать" : "Прилить";
     return action(`${verb} ${formula(reagentId)} в пробирку в лапке`, (origin) => {
       const pour = () => tryAddToTube(location, clampedIndex, reagentId);
       // The reagent goes in when the bottle is tipped over the mouth, not on
       // the click; the bottle comes from wherever it is (in the hand: `origin`).
-      if (target.instanceId) useStandMotionStore.getState().startPour(target.instanceId, pour, origin);
+      if (target.instanceId) {
+        seedTubeAmounts(clamped.instanceId, clamped.contents);
+        useStandMotionStore.getState().startPour(target.instanceId, pour, origin, "clamp", (serial, now) => {
+          const side = new THREE.Vector3().subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);
+          if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
+          side.normalize();
+          stepTubePour({ tubeId: clamped.instanceId, reagentId, serial, now,
+            mouth: CLAMP_TUBE_MOUTH.point, root: CLAMP_TUBE_MOUTH.root, side,
+            mouthValid: CLAMP_TUBE_MOUTH.valid, allowEmpty: true });
+        });
+      }
       else pour();
     });
   }
@@ -287,7 +302,15 @@ export function jarPourAction(held: HeldItem, source: PourSource): StandAction |
     run: () => {
       const pour = () => tryAddToTube(tube.location, tube.index, reagentId);
       // In when the bottle is tipped over the tube's mouth, where it is held (`PourMotion`).
-      useStandMotionStore.getState().startPour(instanceId, pour, undefined, "hand");
+      const receiving = tubesAt(tube.location)[tube.index];
+      if (!receiving) return;
+      seedTubeAmounts(receiving.instanceId, receiving.contents);
+      useStandMotionStore.getState().startPour(instanceId, pour, undefined, "hand", (serial, now) => {
+        const root = new THREE.Matrix4().makeTranslation(HAND.mouth.x, HAND.mouth.y - TUBE_LENGTH, HAND.mouth.z);
+        stepTubePour({ tubeId: receiving.instanceId, reagentId, serial, now,
+          mouth: HAND.mouth, root, side: new THREE.Vector3(1, 0, 0),
+          mouthValid: HAND.mouthValid, allowEmpty: true });
+      });
     },
   };
 }

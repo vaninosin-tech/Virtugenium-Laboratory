@@ -1,6 +1,9 @@
 import { create } from "zustand";
 
 import type { Position3 } from "./layout";
+import { clearTubeAmount } from "./tubeAmounts";
+import { clearDeliveries } from "./tubeDelivery";
+import { clearTubePourImpact } from "./tubePourImpact";
 
 /** One test tube the player has taken from the glassware cabinet — plain glassware, so this only needs an id, PLUS an optional `reagentId` once it's been filled (see `setWorkbenchTubeContents`/`InspectableTestTubeSlot`'s hover-to-fill mechanic). Display size is NOT stored per-instance: unlike reagents (which use the dev-tunable `heldTray.reagentScale`/`WorkbenchReagentAreaConfig.scale`, since a bottle can sit anywhere), a tube must fit the rack's fixed holes, so it always renders at the RACK's own live scale (`TRAY_RACK_ANCHOR.scale` on the tray, `holders.workbench.scale` on the bench) — see `computeTubeSlotPosition`'s doc. */
 export interface StoredTestTube {
@@ -246,7 +249,14 @@ export const useTestTubeStorageStore = create<TestTubeStorageState>((set, get) =
       return location === "workbench" ? { workbenchTestTubes: next } : { fumeHoodTestTubes: next };
     }),
 
-  replaceWithEmptyTube: (location, index) =>
+  replaceWithEmptyTube: (location, index) => {
+    const current = get();
+    const oldTube = (location === "workbench" ? current.workbenchTestTubes : current.fumeHoodTestTubes)[index];
+    if (oldTube) {
+      clearTubeAmount(oldTube.instanceId);
+      clearDeliveries(oldTube.instanceId);
+      clearTubePourImpact(oldTube.instanceId);
+    }
     set((state) => {
       const list =
         location === "workbench" ? state.workbenchTestTubes : state.fumeHoodTestTubes;
@@ -255,7 +265,8 @@ export const useTestTubeStorageStore = create<TestTubeStorageState>((set, get) =
       const next = list.slice();
       next[index] = { instanceId: `${old.instanceId.replace(/-replaced-\d+$/, "")}-replaced-${Date.now()}`, contents: [] };
       return location === "workbench" ? { workbenchTestTubes: next } : { fumeHoodTestTubes: next };
-    }),
+    });
+  },
 
   transferTestTubesToFumeHood: (instanceIds) =>
     set((state) => {
