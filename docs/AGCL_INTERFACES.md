@@ -32,3 +32,6 @@ Customer reference video frames: D:/Claude/virtugenium-night/wave3/docs/referenc
 
 ## WAVE 6 OVERRIDE (supersedes wave 5)
 Three workers on disjoint files. `perf` owns only `src/scenes/laboratory/lib/night/stage1/flocSystem.ts`, `tests/night/wave6perf/`, `docs/night/wave6perf/`. `game` owns only `src/scenes/laboratory/lib/tubeReactionVisuals.ts`, `tests/tubeReactionVisuals.test.ts`, `tests/night/wave6game/`, `docs/night/wave6game/`. `tests` owns only `tests/night/wave6tests/`, `docs/night/wave6tests/` and cleanup edits inside `tests/night/wave4a/` and `tests/night/stage1/`. The coordinator owns `tubeSilverField.ts`, `tubeSilverVolumeMaterial.ts`, `tubeFlowSolver.ts`, `src/lab/` and the stand; nobody else edits them, and the coordinator will not edit `flocSystem.ts` while `perf` runs.
+
+## WAVE 7 OVERRIDE (supersedes wave 6)
+Two Codex agents at most. `pour` owns only `src/scenes/laboratory/ui/PourStream.tsx`, `src/scenes/laboratory/lib/tubePourImpact.ts` (+ test), `tests/night/wave7pour/`, `docs/night/wave7pour/`. `reagents` owns only `tests/night/wave7reagents/`, `docs/night/wave7reagents/`. The coordinator owns `tubeSilverField.ts`, `tubeSilverVolumeMaterial.ts`, `tubeFlowSolver.ts`, `tubeReactionVisuals.ts`, `src/lab/`, the stand and `flocSystem.ts`.
