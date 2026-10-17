@@ -248,6 +248,24 @@ describe('C6 conservative subgrid mixing', () => {
     } finally { delete (globalThis as any).__silverAgg; delete (globalThis as any).__silverSubgrid; delete (globalThis as any).__silverJetModel; vi.unstubAllGlobals(); }
   }, 120000);
 
+  it('is deterministic with the flag on and accepts an options object', () => {
+    vi.stubGlobal('window', { __silverStage: 3, location: { search: '' } });
+    (globalThis as any).__silverAgg = 0;
+    const inlet = new THREE.Vector3(.0065, .025, 0);
+    const run = () => {
+      (globalThis as any).__silverSubgrid = { coefficient: .25, maximum: 3e-6 };
+      const field = new TubeSilverField('LOW', SILVER_TUBE_RADIUS, 0, silverFieldHeight);
+      for (let k = 0; k < 40; k++)
+        field.advance(.05, up, .03, inlet, Math.min(1, (k + 1) * .04), 0, .4);
+      const state = [field.extent, ...field.species['Ag+'].values,
+        ...field.species['Cl-'].values, ...field.suspension[0]];
+      field.dispose();
+      return state;
+    };
+    try { expect(run()).toEqual(run()); }
+    finally { delete (globalThis as any).__silverAgg; delete (globalThis as any).__silverSubgrid; vi.unstubAllGlobals(); }
+  }, 30000);
+
   it('replays A and C with conservative local formation and numerical evidence', () => {
     vi.stubGlobal('window', { __silverStage: 3, location: { search: '' } });
     (globalThis as any).__silverAgg = 0; mkdirSync(output, { recursive: true });
