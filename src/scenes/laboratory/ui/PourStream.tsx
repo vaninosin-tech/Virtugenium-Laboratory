@@ -104,7 +104,8 @@ export function configureSilverStream(mesh: THREE.Mesh, material: THREE.ShaderMa
 }
 
 export function isStageOneSilverPour(stage: number, reagentId: string | undefined, contents: readonly string[]) {
-  return stage === 1 && (reagentId === "nacl" && contents.includes("agno3")
+  // Stages 1 and 3 both draw the stream down to the measured liquid surface (the impact point is the surface).
+  return (stage === 1 || stage === 3) && (reagentId === "nacl" && contents.includes("agno3")
     || reagentId === "agno3" && contents.includes("nacl"));
 }
 
