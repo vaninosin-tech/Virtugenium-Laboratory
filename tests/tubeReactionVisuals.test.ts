@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { REAGENTS } from "../src/entities/laboratory/reagents";
 import { createTubeReactionVisuals } from "../src/scenes/laboratory/lib/tubeReactionVisuals";
@@ -8,6 +8,10 @@ import type { ReactionKind, TubeChemistry } from "../src/scenes/laboratory/lib/t
 import type { RuntimeQuality } from "../src/scenes/laboratory/lib/useRuntimeQualityStore";
 
 const cleanups: (() => void)[] = [];
+afterAll(() => {
+  if (typeof window !== "undefined") delete (window as Window & { __silverStage?: number }).__silverStage;
+  vi.unstubAllGlobals();
+});
 afterEach(() => {
   cleanups.splice(0).reverse().forEach(cleanup => cleanup());
   vi.restoreAllMocks();
@@ -513,5 +517,38 @@ describe("tube reaction rendering contract", () => {
     expect(f.root.getObjectByName("TubeReactionVisuals")).toBeUndefined();
     ownedSpies.forEach(spy => expect(spy).toHaveBeenCalledTimes(1));
     sharedSpies.forEach(spy => expect(spy).not.toHaveBeenCalled());
+  });
+
+  it("keeps experiments 1, 3 and 4 rendering states unchanged with stage 3 selected", () => {
+    const snapshot = (kind: ReactionKind) => {
+      const f = fixture(kind);
+      f.update(chemistry(0.4));
+      return (f.root.getObjectByName("TubeReactionVisuals")!.children as THREE.Mesh[])
+        .map(mesh => [mesh.name, mesh.visible, mesh.renderOrder, mesh.material.type,
+          mesh.material instanceof THREE.ShaderMaterial ? mesh.material.fragmentShader : ""]);
+    };
+    const unaffected: ReactionKind[] = ["copper-nitric", "barium-sulfate", "permanganate-redox"];
+    const original = unaffected.map(snapshot);
+    vi.stubGlobal("window", { __silverStage: 3, location: { search: "" }, setTimeout, clearTimeout });
+    expect(unaffected.map(snapshot)).toEqual(original);
+  });
+
+  it("binds all five field textures and advances stage-3 volume time", () => {
+    vi.stubGlobal("window", { __silverStage: 3, location: { search: "" }, setTimeout, clearTimeout });
+    const f = fixture("silver-chloride");
+    const mesh = f.get("TubeSilverDenseField");
+    expect(mesh).toBeDefined();
+    const material = mesh.material as THREE.ShaderMaterial;
+    const names = ["uDense", "uOverlap", "uHaze", "uTint", "uChip"];
+    const textures = names.map(name => material.uniforms[name].value as THREE.Data3DTexture);
+    expect(textures.every(texture => texture instanceof THREE.Data3DTexture
+      && texture.image.width > 1 && texture.image.height > 1)).toBe(true);
+    expect(new Set(textures).size).toBe(5);
+    expect((mesh.geometry as THREE.BoxGeometry).parameters.height).toBeCloseTo(
+      material.uniforms.uHeight.value + 0.75 * material.uniforms.uRadius.value);
+    expect(mesh.renderOrder).toBe(-0.25);
+    expect(material.uniforms.uTime.value).toBe(0);
+    f.advance(0.2, chemistry(0));
+    expect(material.uniforms.uTime.value).toBeGreaterThan(0);
   });
 });
