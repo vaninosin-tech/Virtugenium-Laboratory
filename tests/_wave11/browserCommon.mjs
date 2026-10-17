@@ -22,8 +22,7 @@ export async function openSilverPage(onPage = () => {}) {
 export async function pour(page, reagentId) {
   return page.evaluate(async id => {
     const { runStandAction } = await import("/src/scenes/laboratory/lib/standTableActions.ts");
-    const { simNowMs } = await import("/src/scenes/laboratory/lib/useStandMotionStore.ts");
-    const clickSim = simNowMs();
+    const clickSim = window.__diag.frozen().simMs;
     const accepted = runStandAction({ kind: "bottle", location: "fumeHood", reagentId: id, instanceId: `sandbox-jar-${id}` });
     return { clickSim, accepted };
   }, reagentId);
@@ -38,8 +37,8 @@ export async function prepareSilver(page) {
     window.__diag.setCamera({ dist: 0.3, lateral: 0, height: 0.02, targetY: -0.035, fov: 55 });
   });
   await page.waitForFunction(() => {
-    const id = window.__testTubeStorageStore?.getState().fumeHoodTestTubes[0]?.instanceId;
-    return id && window.__silverRuntime?.field(id);
+    const tube = window.__testTubeStorageStore?.getState().fumeHoodTestTubes[0];
+    return !!tube && tube.contents.includes("agno3");
   }, null, { timeout: 30000 });
   // Stand's busyUntil is wall-clock based; leave the standard inter-action gap.
   await page.waitForTimeout(2500);
@@ -59,7 +58,7 @@ export async function tubeCrop(page) {
     camera.updateMatrixWorld();
     const V = camera.position.constructor;
     const side = new V().subVectors(m.point, m.rod).setY(0).normalize();
-    const center = m.point.clone(); center.y -= 0.025;
+    const center = m.point.clone(); center.y -= 0.115; // the liquid sits in the lower part of the tube, well below the clamp
     const corners = [];
     for (const y of [-0.04, 0.03]) for (const x of [-0.012, 0.012]) {
       const p = center.clone().addScaledVector(side, x); p.y += y; p.project(camera);
