@@ -20,6 +20,8 @@ export interface DeliveryEvent {
   step: number;
   /** Millilitres delivered by this event (already limited by the source container). */
   ml: number;
+  /** Volume consumed from the source, including a miss or capacity overflow. */
+  requestedMl?: number;
   point: DeliveryPoint;
   /** Height of the receiving free surface at the moment of impact (world metres). */
   surfaceY: number;
@@ -50,8 +52,8 @@ export function validateImpact(point: DeliveryPoint, context: ImpactContext): { 
 }
 
 const ledger = new Map<string, DeliveryEvent[]>();
-const seen = new Set<string>();
-const key = (e: Pick<DeliveryEvent, "tubeId" | "reagentId" | "serial" | "step">) => `${e.tubeId}|${e.reagentId}|${e.serial}|${e.step}`;
+const seen = new Map<string, string>();
+const key = (e: Pick<DeliveryEvent, "serial" | "step">) => `${e.serial}|${e.step}`;
 
 /**
  * Records one delivery step. Returns the stored event (valid or not). A repeated (serial, step) is rejected as a
@@ -62,9 +64,10 @@ export function recordDelivery(input: Omit<DeliveryEvent, "valid" | "reason">, c
     return { ...input, ml: 0, valid: false, reason: "invalid-volume" };
   }
   if (seen.has(key(input))) return { ...input, ml: 0, valid: false, reason: "duplicate" };
-  seen.add(key(input));
+  seen.set(key(input), input.tubeId);
   const verdict = validateImpact(input.point, context);
-  const event: DeliveryEvent = { ...input, ml: verdict.valid ? input.ml : 0, valid: verdict.valid, reason: verdict.reason };
+  const event: DeliveryEvent = { ...input, requestedMl: input.requestedMl ?? input.ml,
+    ml: verdict.valid ? input.ml : 0, valid: verdict.valid, reason: verdict.reason };
   // A miss keeps its volume out of the receiving tube; the requested volume stays in the log for the source accounting.
   const list = ledger.get(input.tubeId) ?? [];
   list.push(verdict.valid ? event : { ...event });
@@ -94,5 +97,5 @@ export function firstValidDelivery(tubeId: string, reagentId?: string): Delivery
 export function clearDeliveries(tubeId?: string) {
   if (tubeId === undefined) { ledger.clear(); seen.clear(); return; }
   ledger.delete(tubeId);
-  for (const k of [...seen]) if (k.startsWith(`${tubeId}|`)) seen.delete(k);
+  for (const [k, id] of seen) if (id === tubeId) seen.delete(k);
 }

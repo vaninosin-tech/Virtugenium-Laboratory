@@ -1,4 +1,6 @@
 /** Game units are separate from virtual millilitres. A tube never spills. */
+import { silverStage } from "./silverStage";
+
 export const TUBE_CAPACITY_ML = 5;
 export const STANDARD_POUR_ML = 1;
 /** The authored cavity is already at its resting level with 2.5 ml. */
@@ -37,6 +39,8 @@ export function tubeAmount(tubeId: string): TubeAmount {
 export function seedTubeAmounts(tubeId: string, contents: readonly string[]) {
   const state = tubeAmount(tubeId);
   for (const id of contents) {
+    // Stage 3 chloride has one entry point: a validated delivery event.
+    if (id === "nacl" && contents.includes("agno3") && silverStage() === 3) continue;
     if (seededContents.get(tubeId)?.has(id)) continue;
     deliver(tubeId, id, initial[id]?.ml ?? 0, true);
   }

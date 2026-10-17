@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { deliver, resetTubeAmounts, seedTubeAmounts, syncBariumExtent,
   syncCopperProgress, syncPermanganateExtent, tubeAmount, tubeVisualFill } from "./tubeAmounts";
 import { pouredMl } from "./tubePourImpact";
@@ -6,6 +6,18 @@ import { pouredMl } from "./tubePourImpact";
 beforeEach(resetTubeAmounts);
 
 describe("tube amounts", () => {
+  it("never seeds stage-three NaCl from a remounted tube's contents", () => {
+    vi.stubGlobal("window", { location: { search: "?silverStage=3" } });
+    try {
+      seedTubeAmounts("silver", ["agno3", "nacl"]);
+      seedTubeAmounts("silver", ["agno3", "nacl"]);
+      expect(tubeAmount("silver").volumeMl).toBe(2.5);
+      expect(tubeAmount("silver").species["Cl-"]).toBeUndefined();
+      expect(deliver("silver", "nacl", 1)).toBe(1);
+      seedTubeAmounts("silver", ["agno3", "nacl"]);
+      expect(tubeAmount("silver").species["Cl-"]).toBe(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
   it("keeps the visual liquid level inside the authored cavity", () => {
     for (const volume of [0, 1, 2.5, 3.5, 4.5, 5, Infinity, NaN]) {
       const fill = tubeVisualFill(volume);

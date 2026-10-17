@@ -6,7 +6,7 @@ import { CLAMP_TUBE_MOUTH, POUR_MS, useStandMotionStore } from "../lib/useStandM
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
-import { pourFlowMlPerSecond, pourFraction, pouredMl, publishTubePourImpact } from "../lib/tubePourImpact";
+import { observePourClock, pourFraction, pouredMl, publishTubePourImpact, stepTubePour } from "../lib/tubePourImpact";
 import { seedTubeAmounts, tubeAmount } from "../lib/tubeAmounts";
 import { tubeEffectiveRadius, tubeLiquidHeight } from "../lib/tubeLiquidLevel";
 import { silverStage } from "../lib/silverStage";
@@ -152,35 +152,46 @@ export function PourStream({
   const lipDrop = useRef<THREE.Mesh>(null);
   const fallingDrops = useRef<THREE.Mesh[]>([]);
   const delivery = useRef({ serial: -1, ml: 0 });
-  const lastImpact = useRef<{ serial: number; point: THREE.Vector3; direction: THREE.Vector3 } | null>(null);
-  useEffect(() => useStandMotionStore.subscribe((state, previous) => {
+  useEffect(() => {
+    const target = () => {
+      const stand = useBunsenStandStorageStore.getState();
+      const tubes = useTestTubeStorageStore.getState();
+      const targetTube = stand.attachedTubeSlotIndex === null ? undefined
+        : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[stand.attachedTubeSlotIndex];
+      const reagents = useReagentStorageStore.getState();
+      const reagentId = [...reagents.workbenchItems, ...reagents.fumeHoodItems, ...reagents.trayItems]
+        .find(item => item.instanceId === instanceId)?.reagentId;
+      return { targetTube, reagentId };
+    };
+    const advance = (serial: number, now: number) => {
+      const { targetTube, reagentId } = target();
+      if (!targetTube || !reagentId || !isStageOneSilverPour(silverStage(), reagentId, targetTube.contents)) return;
+      const side = new THREE.Vector3().subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);
+      if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
+      side.normalize();
+      stepTubePour({ tubeId: targetTube.instanceId, reagentId, serial, now,
+        mouth: CLAMP_TUBE_MOUTH.point, root: CLAMP_TUBE_MOUTH.root,
+        side, mouthValid: CLAMP_TUBE_MOUTH.valid });
+    };
+    const stopClock = observePourClock(instanceId, advance);
+    const unsubscribe = useStandMotionStore.subscribe((state, previous) => {
     const finished = previous.pour;
     if (!finished || finished.instanceId !== instanceId || state.pour?.at === finished.at) return;
     const priorMl = delivery.current.serial === finished.at ? delivery.current.ml : 0;
     if (priorMl >= 1) return;
-    const stand = useBunsenStandStorageStore.getState();
-    const tubes = useTestTubeStorageStore.getState();
-    const targetTube = stand.attachedTubeSlotIndex === null ? undefined
-      : (stand.onFumeHood ? tubes.fumeHoodTestTubes : tubes.workbenchTestTubes)[stand.attachedTubeSlotIndex];
-    const reagents = useReagentStorageStore.getState();
-    const reagentId = [...reagents.workbenchItems, ...reagents.fumeHoodItems, ...reagents.trayItems]
-      .find(item => item.instanceId === instanceId)?.reagentId;
+    const { targetTube, reagentId } = target();
     if (targetTube && reagentId) {
+      if (isStageOneSilverPour(silverStage(), reagentId, targetTube.contents)) return;
       seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
-      const silver = isStageOneSilverPour(silverStage(), reagentId, targetTube.contents);
-      const last = lastImpact.current;
-      // A silver charge requires a stream frame; never synthesize its first impact at the timer.
-      if (silver && (!last || last.serial !== finished.at)) return;
-      const point = silver && last
-        ? last.point.clone().setY(silverStreamEnd(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.root,
-          tubeAmount(targetTube.instanceId).volumeMl).y)
-        : CLAMP_TUBE_MOUTH.point.clone().add(new THREE.Vector3(0, -0.026, 0));
+      const point = CLAMP_TUBE_MOUTH.point.clone().add(new THREE.Vector3(0, -0.026, 0));
       publishTubePourImpact(targetTube.instanceId, reagentId,
-        point, silver && last ? last.direction : new THREE.Vector3(0, -1, 0),
+        point, new THREE.Vector3(0, -1, 0),
         0, 1 - priorMl, finished.at);
       delivery.current = { serial: finished.at, ml: 1 };
     }
-  }), [instanceId]);
+    });
+    return () => { unsubscribe(); stopClock(); };
+  }, [instanceId]);
   const dyed = /(?:^|-)kmno4$/.test(instanceId);
   const geometry = useMemo(streamGeometry, []);
   const material = useMemo(() => streamMaterial(dyed), [dyed]);
@@ -229,12 +240,15 @@ export function PourStream({
       .find(item => item.instanceId === instanceId)?.reagentId;
     const silver = !!targetTube && isStageOneSilverPour(silverStage(), reagentId, targetTube.contents);
     if (mesh.current) configureSilverStream(mesh.current, material, silver);
-    if (silver && targetTube) {
-      seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
+    if (!silver && targetTube) seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
+    if (silver) {
+      scratch.side.subVectors(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.rod).setY(0);
+      if (scratch.side.lengthSq() < 1e-8) scratch.side.set(1, 0, 0);
+      scratch.side.normalize();
     }
     scratch.target.copy(pourTarget(CLAMP_TUBE_MOUTH.point, scratch.side, CLAMP_TUBE_MOUTH.root,
       targetTube ? tubeAmount(targetTube.instanceId).volumeMl : 0, silver));
-    if (targetTube && reagentId && pour) {
+    if (!silver && targetTube && reagentId && pour) {
       if (delivery.current.serial !== pour.at) delivery.current = { serial: pour.at, ml: 0 };
       const total = streamDeliveredMl(k, scratch.lip.distanceTo(scratch.target), silver);
       const increment = Math.max(0, total - delivery.current.ml);
@@ -242,8 +256,7 @@ export function PourStream({
         seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
         publishTubePourImpact(targetTube.instanceId, reagentId, scratch.target,
           scratch.point.subVectors(scratch.target, scratch.lip).normalize(),
-          silver ? pourFlowMlPerSecond(k) : pourFraction(k) ** 2 * 4, increment, pour.at);
-        lastImpact.current = { serial: pour.at, point: scratch.target.clone(), direction: scratch.point.clone() };
+          pourFraction(k) ** 2 * 4, increment, pour.at);
         delivery.current.ml = total;
       }
     }
