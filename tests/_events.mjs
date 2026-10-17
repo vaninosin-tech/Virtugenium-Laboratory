@@ -2,10 +2,12 @@ import { chromium } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
 const out = process.env.OUT ?? "D:/Claude/virtugenium-night/frames/events";
 await mkdir(out, { recursive: true });
-const browser = await chromium.launch({ headless: false, channel: "chrome", args: ["--window-size=1400,950", "--disable-renderer-backgrounding", "--disable-background-timer-throttling"] });
+const browser = await chromium.launch({ headless: false, channel: "chrome", args: ["--window-size=1400,950", "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-features=CalculateNativeWinOcclusion"] });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.setDefaultTimeout(900000);
+  // Capture-only time dilation: the whole page clock (Date.now) runs at SLOW x real time so a slow screencast samples the pour densely.
+  if (process.env.SLOW) await page.addInitScript(`(() => { const k = ${Number(process.env.SLOW)}, d0 = Date.now(), real = Date.now.bind(Date); Date.now = () => d0 + (real() - d0) * k; })();`);
   await page.addInitScript(`window.__silverStage=3; window.__silverDiag=${JSON.stringify(process.env.DIAG ?? "tracer")};`);
   await page.goto("http://127.0.0.1:5201/");
   await page.getByText("Играть", { exact: true }).click();
@@ -38,15 +40,16 @@ try {
   });
   const real = (reagent) => page.evaluate(async (id) => {
     const { runStandAction } = await import("/src/scenes/laboratory/lib/standTableActions.ts");
-    window.__marks = window.__marks ?? []; window.__marks.push({ what: "click " + id, t: (performance.now() - window.__t0) / 1000 });
+    window.__marks = window.__marks ?? []; window.__marks.push({ what: "click " + id, t: (performance.now() - window.__t0) / 1000, epoch: Date.now() / 1000, mouth: (() => { const m = window.__standMotion.mouth.point.clone(), c = window.__three.camera; m.y -= 0.03; m.project(c); return { x: (m.x + 1) / 2 * innerWidth, y: (1 - m.y) / 2 * innerHeight }; })() });
     return runStandAction({ kind: "bottle", location: "fumeHood", reagentId: id, instanceId: `sandbox-jar-${id}` });
   }, reagent);
   // Native-rate screen recording through the DevTools screencast: it does not block the page like screenshots do.
   const cdp = await page.context().newCDPSession(page);
   const frames = []; let recording = false;
   cdp.on("Page.screencastFrame", async (f) => { if (recording) frames.push({ t: f.metadata.timestamp, data: f.data }); try { await cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }); } catch {} });
-  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 85, maxWidth: 1280, maxHeight: 800, everyNthFrame: 1 });
+  await cdp.send("Page.startScreencast", { format: "jpeg", quality: Number(process.env.JQ ?? 85), maxWidth: Number(process.env.SW ?? 1280), maxHeight: Number(process.env.SH ?? 800), everyNthFrame: 1 });
   await real("agno3");
+  if (process.env.CLOSE === "1") { await page.evaluate(async () => { const m = await import("/src/scenes/laboratory/lib/useTubeCloseUpStore.ts"); m.useTubeCloseUpStore.getState().setViewing(true); }); await page.waitForTimeout(Number(process.env.CLOSEWAIT ?? 3000)); }
   await page.waitForTimeout(7000);
   if (process.env.PREWARM === "1") { await page.evaluate(async () => { const v = await import("/src/scenes/laboratory/lib/tubeReactionVisuals.ts"); const t = window.__three; await v.prewarmBariumLiquidShader(t.gl, t.scene, t.camera, "silver-chloride"); }); await page.waitForTimeout(2000); }
   recording = true; const recT0 = Date.now() / 1000;

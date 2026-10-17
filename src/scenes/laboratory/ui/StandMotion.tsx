@@ -15,6 +15,7 @@ import {
   CLAMP_TUBE_MOUTH,
   POUR_MS,
   TUBE_FLIGHT_MS,
+  simNowMs,
   useStandMotionStore,
   type TubeArrival,
 } from "../lib/useStandMotionStore";
@@ -356,7 +357,7 @@ export function PourMotion({
     group.getWorldPosition(s.rest);
     group.getWorldQuaternion(s.restQuat);
 
-    const elapsed = pour ? Date.now() - pour.at : Infinity;
+    const elapsed = pour ? simNowMs() - pour.at : Infinity;
     // Into the tube in the clamp — or into the tube in the hand, held up to it.
     const intoHand = pour?.into === "hand";
     const pouring = !!pour && elapsed < POUR_MS && (intoHand ? HAND.mouthValid : CLAMP_TUBE_MOUTH.valid);

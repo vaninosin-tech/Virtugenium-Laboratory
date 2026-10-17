@@ -125,7 +125,8 @@ export const useStandMotionStore = create<StandMotionState>((set) => ({
   startPour: (instanceId, commit, from, into, onStep) => {
     restartSimulationTimer();
     const at = simNowMs();
-    set({ pour: { instanceId, at, from, into }, busyUntil: at + POUR_MS });
+    // `busyUntil` is a wall-clock deadline like the other stand motions (`hold`, the tube flights); `pour.at` is simulation time.
+    set({ pour: { instanceId, at, from, into }, busyUntil: Date.now() + POUR_MS });
     activeStep = onStep; activeSerial = at; activeCommit = commit; committed = false;
   },
   arriveInClamp: (world) => {
@@ -149,7 +150,8 @@ export const useStandMotionStore = create<StandMotionState>((set) => ({
 }));
 
 /** Whether a motion at the stand is still running. */
-export const standBusy = (): boolean => simNowMs() < useStandMotionStore.getState().busyUntil;
+export const standBusy = (): boolean => Date.now() < useStandMotionStore.getState().busyUntil
+  || useStandMotionStore.getState().pour !== null;
 
 // One timer owns all simulation progression, regardless of React or WebGL frames.
 let simulationTimer: ReturnType<typeof setInterval>;

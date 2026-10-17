@@ -122,6 +122,13 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           float rim = 1.0-smoothstep(0.87,0.985,length(p.xz)/uRadius);
           float solid = uFlocOn > 0.5 ? cotton(field,grid,p)*rim : 0.0;
           float source = texture(uOverlap,grid).r;
+          if (uDiag > 1.5) {
+            // Occupied-cell diagnostic: reads the concentration texture cell by cell, no optics, no normalization.
+            ivec3 sz = textureSize(uOverlap,0);
+            float cell = texelFetch(uOverlap,clamp(ivec3(grid*vec3(sz)),ivec3(0),sz-ivec3(1)),0).r;
+            if (cell > 1e-9) { accumulated += (1.0-alpha)*0.55*vec3(1.0,0.0,0.9); alpha += (1.0-alpha)*0.55; }
+            continue;
+          }
           if (uDiag > 0.5) {
             // Phase A: the incoming NaCl as a passive tracer, a translucent blue-green volume.
             float tr = clamp(source*2.2,0.0,1.0);

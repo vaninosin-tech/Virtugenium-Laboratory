@@ -8,6 +8,9 @@ export function silverStage(): number {
   return typeof selected === "number" ? selected : 1;
 }
 
+/** Both diagnostic views carry only the incoming NaCl (no precipitation): "tracer" renders it optically, "cells" renders every occupied concentration cell as an opaque magenta block that bypasses the optical shading. */
+export const silverTracerOnly = () => { const d = silverDiagnostic(); return d === "tracer" || d === "cells"; };
+
 /** Diagnostic view of experiment 2: "tracer" disables precipitation and shows only the incoming NaCl (?silverDiag=tracer). */
 export function silverDiagnostic(): string {
   if (typeof window === "undefined") return "";

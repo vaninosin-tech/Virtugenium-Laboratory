@@ -5,7 +5,7 @@ import { useReagentShaderTuningStore } from "./useReagentShaderTuningStore";
 import type { ReagentMaterialBinding } from "./reagentMaterials";
 import { QUALITY_LEVELS, useRuntimeQualityStore } from "./useRuntimeQualityStore";
 import { cancelDeferredDispose, deferDispose } from "./deferredDispose";
-import { CLAMP_TUBE_MOUTH, POUR_MS, useStandMotionStore } from "./useStandMotionStore";
+import { CLAMP_TUBE_MOUTH, POUR_MS, simNowMs, useStandMotionStore } from "./useStandMotionStore";
 
 /** Subscribe outside the frame loop; sliders do not rebuild bottles or shaders. */
 export function useReagentMaterials(instance: Object3D) {
@@ -33,7 +33,7 @@ export function useReagentMaterials(instance: Object3D) {
             pourFill.current.at = pour.at;
             pourFill.current.base = binding.getFillLevel();
           }
-          const phase = Math.max(0, Math.min(1, ((Date.now() - pour.at) / POUR_MS - 0.35) / 0.39));
+          const phase = Math.max(0, Math.min(1, ((simNowMs() - pour.at) / POUR_MS - 0.35) / 0.39));
           binding.setFillLevel(Math.max(0.04, pourFill.current.base * (1 - 0.22 * phase)));
         }
       }

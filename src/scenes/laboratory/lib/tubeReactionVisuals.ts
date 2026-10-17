@@ -1112,7 +1112,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
     silverDenseMesh.onBeforeRender = updateSilverVolumeCamera;
     silverVolume.material.uniforms.uDense.value = silverField?.denseTexture ?? null;
     silverVolume.material.uniforms.uOverlap.value = silverField?.overlapTexture ?? null;
-    silverVolume.material.uniforms.uDiag.value = silverDiagnostic() === "tracer" ? 1 : 0;
+    silverVolume.material.uniforms.uDiag.value = silverDiagnostic() === "cells" ? 2 : silverDiagnostic() === "tracer" ? 1 : 0;
     silverVolume.material.uniforms.uHaze.value = silverField?.texture ?? null;
     silverVolume.material.uniforms.uTint.value = silverField?.tintTexture ?? null;
     silverVolume.material.uniforms.uChip.value = silverField?.chipTexture ?? null;
