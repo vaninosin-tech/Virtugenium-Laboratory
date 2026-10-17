@@ -10,6 +10,9 @@ import { CLAMP_TUBE_MOUTH } from "../lib/useStandMotionStore";
  */
 interface DiagCameraSettings { dist?: number; lateral?: number; height?: number; targetY?: number; targetSide?: number; fov?: number }
 
+// The app's own instance of the stand mouth for overlays (a dynamically imported copy of the module is a different instance).
+if (import.meta.env.DEV && typeof window !== "undefined") (window as Window & { __clampMouth?: unknown }).__clampMouth = CLAMP_TUBE_MOUTH;
+
 const up = new THREE.Vector3(0, 1, 0);
 const side = new THREE.Vector3();
 const across = new THREE.Vector3();

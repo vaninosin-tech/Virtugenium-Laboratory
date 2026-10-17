@@ -63,3 +63,35 @@ describe("impact position drives the first tracer position", () => {
     expect(results[0].x + results[2].x).toBeCloseTo(2 * results[1].x, 3);
   });
 });
+
+describe("mass accounting while pouring", () => {
+  it("applied = inserted + pending, inserted = tracer = Cl- + product at every tick, pending stays within one fixed step", () => {
+    const id = "mass-tube";
+    useTestTubeStorageStore.setState({ workbenchTestTubes: [{ instanceId: id, contents: ["agno3"] }], fumeHoodTestTubes: [] });
+    seedTubeAmounts(id, ["agno3"]);
+    const serial = simNowMs();
+    const initialMl = tubeAmount(id).volumeMl;
+    const per = 0.02, ticks = 50;           // 1 mL in 50 events, one per 25 ms simulation tick (0.8 mL/s)
+    let applied = 0, maxPending = 0, worst = 0;
+    for (let k = 0; k < ticks; k++) {
+      vi.advanceTimersByTime(25);
+      const y = tubeLiquidHeight(tubeAmount(id).volumeMl, tubeEffectiveRadius(0.055));
+      const e: DeliveryEvent = { tubeId: id, reagentId: "nacl", serial, step: 25 * (k + 1), ml: per, requestedMl: per,
+        point: { x: 0, y, z: 0 }, surfaceY: y, atMs: 25 * (k + 1), valid: true, reason: "ok" };
+      expect(silverRuntime.applyDelivery(e)).toBe(true); applied += per;
+      silverRuntime.tick(simNowMs());
+      const f = silverRuntime.field(id)!; const m = f.mask; let tracer = 0;
+      for (let a = 0; a < m.activeCount; a++) tracer += f.tracer[m.active[a]];
+      const cl = f.species["Cl-"].total + f.extent;
+      const pending = applied - f.delivered; maxPending = Math.max(maxPending, pending);
+      worst = Math.max(worst, Math.abs(tracer - f.delivered), Math.abs(cl - f.delivered));
+      expect(pending).toBeGreaterThanOrEqual(-1e-12);
+      expect(tubeAmount(id).volumeMl).toBeCloseTo(initialMl + applied, 9);
+    }
+    vi.advanceTimersByTime(100); silverRuntime.tick(simNowMs());
+    const f = silverRuntime.field(id)!;
+    expect(worst).toBeLessThan(1e-12);
+    expect(maxPending).toBeLessThanOrEqual(per * 4 + 1e-12);   // at most about two ticks of flow wait for the next 50 ms step
+    expect(f.delivered).toBeCloseTo(applied, 9);
+  });
+});

@@ -15,6 +15,8 @@ try {
   await page.waitForFunction(() => window.__sceneStore?.getState().cabinetPhase === "inspecting", null, { timeout: 300000 });
   await page.locator(".lab-boot-screen").waitFor({ state: "hidden", timeout: 300000 });
   await page.waitForTimeout(2500);
+  if (process.env.FIELDS) await page.evaluate(() => { window.__fieldsOn = true; });
+  if (process.env.OVERLAY) await page.evaluate(() => { window.__overlay = true; });
   if (process.env.HIDEUI) await page.evaluate(() => { window.__hideUi = true; });
   await page.evaluate(async () => {
     const sm = await import("/src/scenes/laboratory/lib/useStandMotionStore.ts");
@@ -35,10 +37,17 @@ try {
         let ylo = 1e9, yhi = -1e9;
         for (let a = 0; a < m.activeCount; a++) { const c = m.active[a]; if (f.tracer[c] > 1e-9) { const y = Math.floor(c / m.nx) % m.ny; ylo = Math.min(ylo, y); yhi = Math.max(yhi, y); } }
         const gy = arg >= 0 ? Math.floor(arg / m.nx) % m.ny : -1;
-        rec.B = { tracerSum: sum, tracerMax: max, cells: n, rowLo: n ? ylo : null, rowHi: n ? yhi : null, ny: m.ny, nx: m.nx, nz: m.nz,
+        rec.B = { fieldDelivered: f.delivered, clTotal: f.species['Cl-'].total, extent: f.extent, tracerSum: sum, tracerMax: max, cells: n, rowLo: n ? ylo : null, rowHi: n ? yhi : null, ny: m.ny, nx: m.nx, nz: m.nz,
           argCell: arg >= 0 ? [arg % m.nx, gy, Math.floor(arg / (m.nx * m.ny))] : null,
           argLocalY_mm: arg >= 0 ? +((m.bottom + (gy + 0.5) / m.ny * m.height) * 1000).toFixed(2) : null,
           wetTopRow: (() => { let t = -1; for (let a = 0; a < m.activeCount; a++) { const y = Math.floor(m.active[a] / m.nx) % m.ny; if (y > t) t = y; } return t; })(), age: f.ageSeconds };
+        if (window.__fieldsOn && (!window.__lastSlice || rec.sim - window.__lastSlice >= 40)) {
+          window.__lastSlice = rec.sim; const zc = Math.floor(m.nz / 2), ag = f.species["Ag+"].values, cl = f.species["Cl-"].values, ps = f.productSource;
+          const sl = (arr) => { const o = []; for (let y = 0; y < m.ny; y++) for (let x = 0; x < m.nx; x++) { const i = x + m.nx * (y + m.ny * zc); o.push(m.data[i] ? arr[i] : -1); } return o; };
+          let agT = 0, clT = 0, psT = 0, bad = 0;
+          for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; agT += ag[i]; clT += cl[i]; psT += ps[i]; if (ps[i] > 0 && !(ag[i] > 0 && cl[i] > 0) && ps[i] > 1e-15) bad++; }
+          rec.slice = { nx: m.nx, ny: m.ny, zc, ag: sl(ag), cl: sl(cl), src: sl(ps), tracer: sl(f.tracer), agT, clT, extent: f.extent, psT, sourceWithoutOverlapCells: bad, sediment: f.sedimentMass, susp: f.suspensionMass, coarse: f.coarseMass, wetTop: -1 };
+        }
         let omax = 0, onz = 0; for (let i = 0; i < f.overlapPixels.length; i++) { if (f.overlapPixels[i] > omax) omax = f.overlapPixels[i]; if (f.overlapPixels[i] > 1e-9) onz++; }
         const tex = f.overlapTexture, gl = window.__three.gl;
         let mesh = null; window.__three.scene.traverse(o => { if (o.name === "TubeSilverDenseField") mesh = o; });
@@ -48,7 +57,34 @@ try {
       return rec;
     };
     const vo = Number(window.__viewShift ?? 0);
-    const frame = () => { if (window.__zoom) { const c = window.__three.camera; if (c.zoom !== window.__zoom) { c.zoom = window.__zoom; c.updateProjectionMatrix(); } } if (window.__viewShift) { const c = window.__three.camera; c.setViewOffset(innerWidth, innerHeight, 0, -window.__viewShift, innerWidth, innerHeight); } const r = stats(); r.kind = "raf"; window.__tr.push(r);
+    // Alignment overlay: ledger impact, surface line and tube walls, and the real stream trajectory, all projected through the render camera.
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg"); svg.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;z-index:99998;pointer-events:none";
+    document.body.appendChild(svg);
+    const mk = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); svg.appendChild(e); return e; };
+    const surfaceLine = mk("line", { stroke: "#2f2", "stroke-width": 2 }), wallL = mk("line", { stroke: "#fff", "stroke-width": 1, "stroke-dasharray": "4 3" }), wallR = mk("line", { stroke: "#fff", "stroke-width": 1, "stroke-dasharray": "4 3" });
+    const streamLine = mk("line", { stroke: "#f80", "stroke-width": 1.5 }), impactDot = mk("circle", { r: 6, fill: "none", stroke: "#f22", "stroke-width": 2 }), targetDot = mk("circle", { r: 3, fill: "#f80" });
+    const align = () => {
+      const m = window.__clampMouth, cam = window.__three.camera, V = cam.position.constructor;
+      const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId, dg = id ? window.__silverRuntime.diagnostics(id) : null, ps = window.__pourStreamDebug;
+      if (!m.valid || !dg || !dg.firstImpactPoint) return { why: { valid: m.valid, dg: !!dg, ip: !!(dg && dg.firstImpactPoint), id: !!id } };
+      cam.updateMatrixWorld();
+      const px = (v) => { const p = v.clone().project(cam); return { x: (p.x + 1) / 2 * innerWidth, y: (1 - p.y) / 2 * innerHeight }; };
+      const side = new V().subVectors(m.point, m.rod); side.y = 0; side.normalize();
+      const axis = new V(m.root.elements[12], dg.surfaceY, m.root.elements[14]);
+      const f = window.__silverRuntime.field(id), surfNow = f ? m.root.elements[13] + f.liquidLevel : dg.surfaceY; const R = 0.007, l = axis.clone().addScaledVector(side, -R), r = axis.clone().addScaledVector(side, R), top = axis.clone(); top.y += 0.06;
+      const set = (el, a, b) => { el.setAttribute("x1", a.x); el.setAttribute("y1", a.y); el.setAttribute("x2", b.x); el.setAttribute("y2", b.y); };
+      const impact = new V(dg.firstImpactPoint.x, dg.firstImpactPoint.y, dg.firstImpactPoint.z), pi = px(impact);
+      set(surfaceLine, px(l), px(r)); set(wallL, px(l), px(l.clone().setY(l.y + 0.06))); set(wallR, px(r), px(r.clone().setY(r.y + 0.06)));
+      impactDot.setAttribute("cx", pi.x); impactDot.setAttribute("cy", pi.y);
+      const out = { impactPx: pi, axisPx: px(axis), leftPx: px(l), rightPx: px(r), impactAcrossAxisMm: +(impact.clone().sub(axis).dot(side) * 1000).toFixed(2), impactAboveSurfaceMm: +((impact.y - dg.surfaceY) * 1000).toFixed(3) };
+      if (ps && ps.k > 0 && ps.k < 1) { const lip = new V(...ps.lip), tg = new V(...ps.target);
+        set(streamLine, px(lip), px(tg)); targetDot.setAttribute("cx", px(tg).x); targetDot.setAttribute("cy", px(tg).y);
+        out.streamTargetToImpactMm = +(tg.distanceTo(impact) * 1000).toFixed(2); out.streamTargetAcrossAxisMm = +(tg.clone().sub(axis).dot(side) * 1000).toFixed(2);
+        out.streamTargetAboveSurfaceMm = +((tg.y - dg.surfaceY) * 1000).toFixed(3); out.streamTargetAboveCurrentSurfaceMm = +((tg.y - surfNow) * 1000).toFixed(3); out.currentSurfaceRiseMm = +((surfNow - dg.surfaceY) * 1000).toFixed(3); out.streamTargetPx = px(tg); out.streamK = ps.k; }
+      return out;
+    };
+    const frame = () => { if (window.__zoom) { const c = window.__three.camera; if (c.zoom !== window.__zoom) { c.zoom = window.__zoom; c.updateProjectionMatrix(); } } if (window.__viewShift) { const c = window.__three.camera; c.setViewOffset(innerWidth, innerHeight, 0, -window.__viewShift, innerWidth, innerHeight); } const r = stats(); r.kind = "raf"; if (window.__overlay) r.align = align(); window.__tr.push(r);
       box.textContent = `sim ${r.sim.toFixed(0)} ms  frame ${r.rend}\nA valid ${r.A.valid} dl ${r.A.delivered.toFixed(3)}  B cells ${r.B ? r.B.cells : "-"} sum ${r.B ? r.B.tracerSum.toFixed(4) : "-"}\nC ovl>0 ${r.C ? r.C.overlapNonzero : "-"} up ${r.C ? r.C.uploadedVersion + "/" + r.C.texVersion : "-"}`;
       if (!window.__trStop) requestAnimationFrame(frame); };
     requestAnimationFrame(frame);

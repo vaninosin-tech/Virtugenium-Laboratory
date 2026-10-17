@@ -213,6 +213,9 @@ export function PourStream({
     scratch.target.copy(pourTarget(CLAMP_TUBE_MOUTH.point, scratch.side, CLAMP_TUBE_MOUTH.root,
       targetTube ? tubeAmount(targetTube.instanceId).volumeMl : 0, silver));
 
+    // Dev-only readout of the real stream trajectory (lip to impact) for the diagnostic overlays; nothing reads it back.
+    if (import.meta.env.DEV) (window as Window & { __pourStreamDebug?: unknown }).__pourStreamDebug = {
+      k, lip: scratch.lip.toArray(), target: scratch.target.toArray() };
     const rise = THREE.MathUtils.smoothstep(k, STREAM_START, 0.44);
     const fade = 1 - THREE.MathUtils.smoothstep(k, 0.69, STREAM_END);
     const flow = Math.min(rise, fade);
