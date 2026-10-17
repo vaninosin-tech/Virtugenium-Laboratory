@@ -6,7 +6,7 @@ import { CLAMP_TUBE_MOUTH, POUR_MS, useStandMotionStore } from "../lib/useStandM
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
-import { pourFraction, pouredMl, publishTubePourImpact } from "../lib/tubePourImpact";
+import { pourFlowMlPerSecond, pourFraction, pouredMl, publishTubePourImpact } from "../lib/tubePourImpact";
 import { seedTubeAmounts, tubeAmount } from "../lib/tubeAmounts";
 import { tubeEffectiveRadius, tubeLiquidHeight } from "../lib/tubeLiquidLevel";
 import { silverStage } from "../lib/silverStage";
@@ -110,14 +110,26 @@ export function isStageOneSilverPour(stage: number, reagentId: string | undefine
 }
 
 export function shouldDrawStream(flow: number, length: number, silver: boolean) {
-  return flow > 0.015 && (silver || length < 0.1);
+  return silver ? flow > 0 : flow > 0.015 && length < 0.1;
+}
+
+export function streamDeliveredMl(k: number, length: number, silver: boolean) {
+  return silver && !shouldDrawStream(pourFraction(k), length, true) ? 0 : pouredMl(k);
 }
 
 /** The wet surface is measured from the tube's 150 mm mouth, in its own frame. */
 export function silverStreamEnd(mouth: THREE.Vector3, tubeRoot: THREE.Matrix4, volumeMl: number) {
   const surface = new THREE.Vector3(0,
     tubeLiquidHeight(volumeMl, tubeEffectiveRadius(0.055)), 0).applyMatrix4(tubeRoot);
-  return surface.y < mouth.y ? surface.add(new THREE.Vector3(0, -0.004, 0)) : mouth.clone();
+  return surface.y < mouth.y ? new THREE.Vector3(mouth.x, surface.y, mouth.z) : mouth.clone();
+}
+
+/** Aim on the near side of the clamp; for silver, end at the measured wet surface. */
+export function pourTarget(mouth: THREE.Vector3, side: THREE.Vector3,
+  tubeRoot: THREE.Matrix4, volumeMl: number, silver: boolean) {
+  const target = mouth.clone().addScaledVector(side, 0.0065).addScaledVector(UP, -0.026);
+  if (silver) target.y = silverStreamEnd(mouth, tubeRoot, volumeMl).y;
+  return target;
 }
 
 interface MouthMeasure {
@@ -140,6 +152,7 @@ export function PourStream({
   const lipDrop = useRef<THREE.Mesh>(null);
   const fallingDrops = useRef<THREE.Mesh[]>([]);
   const delivery = useRef({ serial: -1, ml: 0 });
+  const lastImpact = useRef<{ serial: number; point: THREE.Vector3; direction: THREE.Vector3 } | null>(null);
   useEffect(() => useStandMotionStore.subscribe((state, previous) => {
     const finished = previous.pour;
     if (!finished || finished.instanceId !== instanceId || state.pour?.at === finished.at) return;
@@ -154,9 +167,17 @@ export function PourStream({
       .find(item => item.instanceId === instanceId)?.reagentId;
     if (targetTube && reagentId) {
       seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
+      const silver = isStageOneSilverPour(silverStage(), reagentId, targetTube.contents);
+      const last = lastImpact.current;
+      // A silver charge requires a stream frame; never synthesize its first impact at the timer.
+      if (silver && (!last || last.serial !== finished.at)) return;
+      const point = silver && last
+        ? last.point.clone().setY(silverStreamEnd(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.root,
+          tubeAmount(targetTube.instanceId).volumeMl).y)
+        : CLAMP_TUBE_MOUTH.point.clone().add(new THREE.Vector3(0, -0.026, 0));
       publishTubePourImpact(targetTube.instanceId, reagentId,
-        CLAMP_TUBE_MOUTH.point.clone().add(new THREE.Vector3(0, -0.026, 0)),
-        new THREE.Vector3(0, -1, 0), 0, 1 - priorMl, finished.at);
+        point, silver && last ? last.direction : new THREE.Vector3(0, -1, 0),
+        0, 1 - priorMl, finished.at);
       delivery.current = { serial: finished.at, ml: 1 };
     }
   }), [instanceId]);
@@ -199,10 +220,6 @@ export function PourStream({
     scratch.side.normalize();
     // The lowest point of the tilted rim is where liquid leaves the bottle.
     scratch.lip.copy(scratch.centre).addScaledVector(UP, -measure.neckRadius * 0.999);
-    scratch.target.copy(CLAMP_TUBE_MOUTH.point)
-      .addScaledVector(scratch.side, 0.0065)
-      .addScaledVector(UP, -0.026);
-
     const stand = useBunsenStandStorageStore.getState();
     const tubes = useTestTubeStorageStore.getState();
     const targetTube = stand.attachedTubeSlotIndex === null ? undefined
@@ -214,18 +231,19 @@ export function PourStream({
     if (mesh.current) configureSilverStream(mesh.current, material, silver);
     if (silver && targetTube) {
       seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
-      scratch.target.y = silverStreamEnd(CLAMP_TUBE_MOUTH.point, CLAMP_TUBE_MOUTH.root,
-        tubeAmount(targetTube.instanceId).volumeMl).y;
     }
+    scratch.target.copy(pourTarget(CLAMP_TUBE_MOUTH.point, scratch.side, CLAMP_TUBE_MOUTH.root,
+      targetTube ? tubeAmount(targetTube.instanceId).volumeMl : 0, silver));
     if (targetTube && reagentId && pour) {
       if (delivery.current.serial !== pour.at) delivery.current = { serial: pour.at, ml: 0 };
-      const total = pouredMl(k);
+      const total = streamDeliveredMl(k, scratch.lip.distanceTo(scratch.target), silver);
       const increment = Math.max(0, total - delivery.current.ml);
       if (increment > 0) {
         seedTubeAmounts(targetTube.instanceId, targetTube.contents.filter(id => id !== reagentId));
         publishTubePourImpact(targetTube.instanceId, reagentId, scratch.target,
           scratch.point.subVectors(scratch.target, scratch.lip).normalize(),
-          pourFraction(k) ** 2 * 4, increment, pour.at);
+          silver ? pourFlowMlPerSecond(k) : pourFraction(k) ** 2 * 4, increment, pour.at);
+        lastImpact.current = { serial: pour.at, point: scratch.target.clone(), direction: scratch.point.clone() };
         delivery.current.ml = total;
       }
     }
@@ -242,7 +260,7 @@ export function PourStream({
       scratch.binormal.crossVectors(scratch.tangent, scratch.normal).normalize();
       for (let ring = 0; ring < RINGS; ring++) {
         const t = ring / (RINGS - 1);
-        const reach = t * rise;
+        const reach = silver ? t : t * rise;
         scratch.point.copy(scratch.lip).lerp(scratch.target, reach);
         // Gravity bends the short free span toward the receiving wall.
         scratch.point.addScaledVector(scratch.side, 0.0015 * Math.sin(Math.PI * reach));

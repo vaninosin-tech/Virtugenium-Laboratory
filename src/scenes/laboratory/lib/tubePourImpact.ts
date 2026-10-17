@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { deliver, STANDARD_POUR_ML } from "./tubeAmounts";
+import { POUR_MS } from "./useStandMotionStore";
 
 export interface TubePourImpact {
   reagentId: string;
@@ -33,9 +34,15 @@ const integral = (() => {
   return values;
 })();
 export function pouredMl(k: number) {
+  if (k <= 0.35) return 0;
+  if (k >= 0.76) return STANDARD_POUR_ML;
   const x = THREE.MathUtils.clamp(k, 0, 1) * 1024;
   const i = Math.min(1023, Math.floor(x));
   return STANDARD_POUR_ML * THREE.MathUtils.lerp(integral[i], integral[i + 1], x - i) / integral[1024];
+}
+/** Instantaneous rate corresponding to pouredMl, in actual millilitres per second. */
+export function pourFlowMlPerSecond(k: number) {
+  return STANDARD_POUR_ML * pourFraction(k) ** 2 / (integral[1024] * (POUR_MS / 1000));
 }
 export function clearTubePourImpact(tubeId: string) { impacts.delete(tubeId); }
 if (import.meta.env.DEV && typeof window !== "undefined")
