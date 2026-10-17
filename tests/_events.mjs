@@ -18,11 +18,11 @@ try {
     const imp = await import("/src/scenes/laboratory/lib/tubePourImpact.ts");
     const am = await import("/src/scenes/laboratory/lib/tubeAmounts.ts");
     const sm = await import("/src/scenes/laboratory/lib/useStandMotionStore.ts");
-    window.__ev = []; window.__t0 = performance.now();
+    window.__ev = []; window.__t0 = performance.now(); window.__raf = []; (function raf(){ window.__raf.push(performance.now()); if (!window.__logStop) requestAnimationFrame(raf); })();
     window.__logStop = false;
     const sample = () => {
       const tube = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0];
-      const id = tube?.instanceId, i = id ? imp.tubePourImpact(id) : undefined, f = window.__silverFieldLive;
+      const id = tube?.instanceId, i = id ? imp.tubePourImpact(id) : undefined, f = window.__silverRuntime?.field(id) ?? window.__silverFieldLive;
       let tr = 0, depth = 0, top = -1e9, minD = 1e9, lat = 0;
       if (f) { const m = f.mask;
         for (let a = 0; a < m.activeCount; a++) { const c = m.active[a]; const y = Math.floor(c / m.nx) % m.ny; top = Math.max(top, m.bottom + (y + 0.5) / m.ny * m.height); }
@@ -59,7 +59,7 @@ try {
   await writeFile(`${out}/frames/index.json`, JSON.stringify({ recT0, firstT: frames[0]?.t, idx }));
   const ledger = await page.evaluate(async () => { const d = await import("/src/scenes/laboratory/lib/tubeDelivery.ts"); const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0].instanceId; return d.deliveryEvents(id).map(e => ({ serial: e.serial, step: e.step, ml: +e.ml.toFixed(4), req: e.requestedMl && +e.requestedMl.toFixed(4), atMs: Math.round(e.atMs), valid: e.valid, reason: e.reason, y: +(e.point.y*1000).toFixed(2), surf: +(e.surfaceY*1000).toFixed(2) })); });
   await writeFile(`${out}/ledger.json`, JSON.stringify(ledger));
-  const data = await page.evaluate(() => { window.__logStop = true; return { events: window.__ev, marks: window.__marks }; });
+  const data = await page.evaluate(() => { window.__logStop = true; const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0].instanceId; const gaps = []; for (let k = 1; k < window.__raf.length; k++) { const g = window.__raf[k] - window.__raf[k - 1]; if (g > 100) gaps.push({ atS: +((window.__raf[k - 1] - window.__t0) / 1000).toFixed(3), gapMs: Math.round(g) }); } return { events: window.__ev, marks: window.__marks, runtime: window.__silverRuntime?.diagnostics(id) ?? null, journal: window.__silverRuntime?.journal(id) ?? null, gaps, simNow: null }; });
   await writeFile(`${out}/events.json`, JSON.stringify(data));
   console.log("events", data.events.length, "marks", JSON.stringify(data.marks));
 } finally { await browser.close(); }
