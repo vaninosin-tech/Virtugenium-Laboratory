@@ -46,6 +46,7 @@ function metrics(f:TubeSilverField,t:number,impact:number){
   const m=f.mask,v=f.tracer,flow=f.solver.flow,h=[2*m.radius/m.nx,m.height/m.ny,2*m.radius/m.nz];
   const mass=sum(v,m),positive:number[]=[];let cx=0,cy=0,cz=0,far=0,below=0,peak=0,down=0,upward=0,near=0;
   let speedMax=0,speedMean=0,strainMean=0,vorticityMean=0;
+  let entrainmentMeasured=0,outflowMeasured=0;
   for(let a=0;a<m.activeCount;a++){
     const i=m.active[a],x=i%m.nx,y=Math.floor(i/m.nx)%m.ny,z=Math.floor(i/(m.nx*m.ny)),p=m.point(x,y,z),q=v[i];
     if(q>1e-15)positive.push(q);peak=Math.max(peak,q);cx+=q*p.x;cy+=q*p.y;cz+=q*p.z;
@@ -54,22 +55,37 @@ function metrics(f:TubeSilverField,t:number,impact:number){
     strainMean+=f.solver.lastStrain[i];vorticityMean+=f.solver.lastVorticity[i];
     if(flow[3*i+1]<-1e-5)down++;if(flow[3*i+1]>1e-5)upward++;
     if(Math.hypot(p.x-impact,p.z)<.003)near++;
+    // Flux through the lateral faces of a 3 mm cylindrical control volume.
+    // Count each crossing once, with inward velocity positive for entrainment.
+    for(const [axis,stride,coordinate,limit] of [[0,1,x,m.nx],[2,m.nx*m.ny,z,m.nz]]){
+      if(coordinate+1>=limit||p.y>tubeLiquidHeight(1+f.delivered,silverEffectiveRadius)
+        ||p.y<tubeLiquidHeight(1+f.delivered,silverEffectiveRadius)-.015)continue;
+      const j=i+stride;if(!m.data[j])continue;
+      const p2=m.point(j%m.nx,Math.floor(j/m.nx)%m.ny,Math.floor(j/(m.nx*m.ny)));
+      const inside=Math.hypot(p.x-impact,p.z)<.003,inside2=Math.hypot(p2.x-impact,p2.z)<.003;
+      if(inside===inside2)continue;
+      const outward=(inside?1:-1)*.5*(flow[3*i+axis]+flow[3*j+axis]);
+      const flux=outward*h[1]*(axis===0?h[2]:h[0]);
+      if(flux<0)entrainmentMeasured-=flux;else outflowMeasured+=flux;
+    }
   }
   cx/=mass||1;cy/=mass||1;cz/=mass||1;
-  let varH=0,varV=0,lowest=Infinity;
+  let varH=0,varV=0,lowest=Infinity,mixedMass=0;
   for(let a=0;a<m.activeCount;a++){const i=m.active[a],p=m.point(i%m.nx,Math.floor(i/m.nx)%m.ny,Math.floor(i/(m.nx*m.ny))),q=v[i];
     varH+=q*((p.x-cx)**2+(p.z-cz)**2);varV+=q*(p.y-cy)**2;
+    if(q<.5*peak)mixedMass+=q;
     if(q>peak*.1)lowest=Math.min(lowest,p.y);
   }
   const p95=percentile(positive,.95),s10=shape(v,m,.1*p95),s50=shape(v,m,.5*p95);
   return {t,mass,far:far/(mass||1),centroidX:cx,centroidY:cy,centroidZ:cz,
     horizontalMoment:varH/(mass||1),verticalMoment:varV/(mass||1),penetration:Math.max(0,tubeLiquidHeight(1+f.delivered,silverEffectiveRadius)-lowest),
-    mixedFraction:1-peak/(mass||1),s10Components:s10.components,s10Cells:s10.cells,s10Area:s10.area,s10SV:s10.sv,
+    mixedFraction:mixedMass/(mass||1),s10Components:s10.components,s10Cells:s10.cells,s10Area:s10.area,s10SV:s10.sv,
     s50Components:s50.components,s50Cells:s50.cells,s50Area:s50.area,s50SV:s50.sv,
     speedMax,speedMean:speedMean/m.activeCount,strainMean:strainMean/m.activeCount,vorticityMean:vorticityMean/m.activeCount,
     down,upward,near,divergence:f.solver.diagnostics().meanAbsDivergence,
     jetMomentum:f.solver.lastJetMomentumSource[1],jetClipped:f.solver.lastJetClippedMomentum,
-    jetProjection:f.solver.lastJetProjectionChange[1],entrainment:f.solver.lastEntrainmentFlux,jetDepth:f.solver.lastJetPenetration};
+    jetProjection:f.solver.lastJetProjectionChange[1],entrainment:f.solver.lastEntrainmentFlux,
+    entrainmentMeasured,outflowMeasured,jetDepth:f.solver.lastJetPenetration};
 }
 function replay(flag:boolean,impact:number,write:boolean){
   (globalThis as any).__silverJetModel=flag;
@@ -84,7 +100,7 @@ function replay(flag:boolean,impact:number,write:boolean){
     f.advance(.05,up,level,inlet,delivery,0,delivery>f.delivered?.4:0);
     const row=metrics(f,(k+1)*.05,impact);rows.push(row);
     expect(Math.abs(row.mass-delivery)).toBeLessThan(1e-12);
-    expect(row.divergence,`flag=${flag} impact=${impact} step=${k}`).toBeLessThan(1);
+    expect(row.divergence,`flag=${flag} impact=${impact} step=${k}`).toBeLessThan(.3);
     expect(f.tracer.every(x=>Number.isFinite(x)&&x>=0)).toBe(true);
     if(write&&[9,19,39,79,179].includes(k)){
       const prefix=`${flag?'on':'off'}_${row.t.toFixed(1)}s`;

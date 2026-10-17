@@ -162,6 +162,7 @@ export class TubeFlowSolver {
     let pre: number[] | undefined;
     if (jet) pre = this.totalFaceMomentum(dt);
     if (jet) this.project(300);
+    else if (flag && this.jetModel) this.project(30);
     else this.project();
     if (jet && pre) {
       const post = this.totalFaceMomentum(dt);
