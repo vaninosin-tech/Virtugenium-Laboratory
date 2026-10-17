@@ -1,5 +1,19 @@
 import * as THREE from "three";
 
+/** Periodic value-noise volume (64^3, 8 bit). One filtered texture tap replaces eight hash evaluations per noise lookup,
+ * which keeps the shader small enough to compile quickly in the browser. */
+function noiseVolume() {
+  const size = 64, data = new Uint8Array(size * size * size);
+  let seed = 1234567;
+  for (let i = 0; i < data.length; i++) { seed = (seed * 1664525 + 1013904223) >>> 0; data[i] = seed >>> 24; }
+  const texture = new THREE.Data3DTexture(data, size, size, size);
+  texture.format = THREE.RedFormat; texture.type = THREE.UnsignedByteType;
+  texture.minFilter = texture.magFilter = THREE.LinearFilter;
+  texture.wrapS = texture.wrapT = texture.wrapR = THREE.RepeatWrapping;
+  texture.unpackAlignment = 1; texture.needsUpdate = true;
+  return texture;
+}
+
 /** A 1x1x1 zero texture so the haze sampler is always valid. */
 function emptyHaze() {
   const texture = new THREE.Data3DTexture(new Float32Array(1), 1, 1, 1);
@@ -17,7 +31,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
-      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 9.0 },
+      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 9.0 }, uSteps: { value: 88 }, uNoise: { value: noiseVolume() },
       uTintStrength: { value: 6.0 }, uTime: { value: 0 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
@@ -35,19 +49,13 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uniform vec3 uCameraLocal;
       uniform float uRadius, uBottom, uHeight, uLevel;
       uniform vec3 uUp;
-      uniform sampler3D uDense, uOverlap, uHaze, uTint, uChip;
+      uniform sampler3D uDense, uOverlap, uHaze, uTint, uChip, uNoise;
       uniform float uHazeStrength, uTintStrength, uTime;
+      uniform int uSteps;
       in vec3 vPoint;
       out vec4 outColor;
-      float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453); }
-      float noise3(vec3 p) {
-        vec3 i = floor(p), f = fract(p);
-        f = f*f*(3.0-2.0*f);
-        return mix(mix(mix(hash3(i), hash3(i+vec3(1,0,0)), f.x),
-          mix(hash3(i+vec3(0,1,0)), hash3(i+vec3(1,1,0)), f.x), f.y),
-          mix(mix(hash3(i+vec3(0,0,1)), hash3(i+vec3(1,0,1)), f.x),
-          mix(hash3(i+vec3(0,1,1)), hash3(i+vec3(1,1,1)), f.x), f.y), f.z);
-      }
+      // Value noise from a periodic 64^3 texture (see noiseVolume): one tap per lookup.
+      float noise3(vec3 p) { return texture(uNoise, p*(1.0/64.0)).r; }
       float fbm3(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 3; i++) { s += a*noise3(p); p = p*2.03+vec3(1.7,9.2,3.1); a *= 0.5; } return s; }
       float billow3(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 3; i++) { s += a*abs(2.0*noise3(p)-1.0); p = p*2.1+vec3(5.3,1.1,7.7); a *= 0.5; } return s; }
       // Wet cotton wool (the look tuned in cotton-lab.html): the simulated concentration decides where the mass is
@@ -86,11 +94,6 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             +texture(uDense,g+vec3(0,d.y,0))+texture(uDense,g-vec3(0,d.y,0)))*0.113;
         return c;
       }
-      float solidAt(vec3 p) {
-        if (!wet(p)) return 0.0;
-        vec3 g = uvw(p);
-        return cotton(denseAt(g),g,p);
-      }
       void main() {
         vec3 direction = normalize(vPoint-uCameraLocal);
         vec3 boxMin = vec3(-uRadius*1.2,uBottom-uRadius*0.15,-uRadius*1.2);
@@ -103,11 +106,12 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         float entry = max(0.0,max(max(min(a.x,b.x),min(a.y,b.y)),min(a.z,b.z)));
         float exitDistance = min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z));
         if (exitDistance <= entry) discard;
-        float stepLength = (exitDistance-entry)/88.0;
+        float stepLength = (exitDistance-entry)/float(uSteps);
         vec3 accumulated = vec3(0.0);
         float alpha = 0.0;
         // Fixed 88 primary taps and three light taps per occupied sample.
-        for (int step = 0; step < 88; step++) {
+        // The bound is a uniform: the compiler cannot unroll it (unrolling 88 copies of the cotton noise took minutes to compile).
+        for (int step = 0; step < uSteps; step++) {
           // Per-pixel jitter of the sample positions removes the ray-march banding (concentric rings) on the curved floor.
           float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453);
           vec3 p = uCameraLocal+direction*(entry+(float(step)+jitter)*stepLength);
@@ -123,9 +127,11 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             // Self shadow toward the light and a slope term, as in the cotton lab.
             vec3 toLight = normalize(vec3(0.45,0.7,0.55));
             float sh = 0.0;
-            for (int k = 1; k <= 3; k++) sh += solidAt(p+toLight*uRadius*0.12*float(k));
-            lit = exp(-sh*0.9);
-            diffuse = clamp(0.5-(solidAt(p+toLight*uRadius*0.06)-solid)*3.0,0.0,1.0);
+            // Cheap lighting from the raw density (no second evaluation of the cotton noise: that made the shader
+            // so large that the browser spent minutes compiling it).
+            for (int k = 1; k <= 3; k++) { vec3 q3 = p+toLight*uRadius*0.12*float(k); if (wet(q3)) sh += texture(uDense,uvw(q3)).r; }
+            lit = exp(-sh*0.55);
+            diffuse = clamp(0.5-(texture(uDense,uvw(p+toLight*uRadius*0.07)).r-field.r)*1.2,0.0,1.0);
           }
           // Fine solid shed by the cotton tints the water: bluish white, built up gently.
           float smokeValue = texture(uHaze,grid).r;

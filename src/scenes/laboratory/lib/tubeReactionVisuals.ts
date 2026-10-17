@@ -1403,7 +1403,10 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         const silverDelta = Math.min(elapsed, 0.05);
         silverField.advance(silverDelta, up.value, level.value, silverInlet,
           attachedNow ? (impact?.reagentId === "nacl" ? impact.deliveredMl : 0)
-            : THREE.MathUtils.smoothstep(silverField.ageSeconds + silverDelta, 0, 1.3), agitation,
+            // Surface-first rule: in stage 3 no reagent enters the liquid except through a real stream impact
+            // (never from a timer, never when the container is merely picked up or tilted).
+            : silverStage() === 3 ? 0
+              : THREE.MathUtils.smoothstep(silverField.ageSeconds + silverDelta, 0, 1.3), agitation,
           impact?.reagentId === "nacl" ? impact.flowMlPerSecond : attachedNow ? 0 : 1,
           impact?.reagentId === "nacl" ? impactDirection.copy(impact.direction)
             .applyQuaternion(volume.getWorldQuaternion(impactQuaternion).invert()) : undefined);

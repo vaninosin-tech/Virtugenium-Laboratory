@@ -12,7 +12,7 @@ try {
     localStorage.setItem("virtugenium.runtime-quality.v1", quality), process.env.QUALITY);
   if (process.env.INIT) await context.addInitScript(process.env.INIT);
   const page = await context.newPage();
-  page.setDefaultTimeout(120000);
+  page.setDefaultTimeout(900000);
   page.on("pageerror", e => console.log("pageerror", e.message));
   page.on("console", message => { if (message.text().includes("Reaction shader warmup failed"))
     console.log("browser", message.type(), message.text()); });
@@ -78,7 +78,10 @@ try {
       }
     });
   }, lastReagent);
+  const clickAt = Date.now();
   await page.getByRole("button", { name: process.env.HEATED && exp === 1 ? "Опыт 1, с нагревом" : `Опыт ${exp}`, exact: true }).click();
+  // Start the recording at the click, BEFORE the container tilts and the stream falls.
+  if (process.env.VIDEO && process.env.VIDEOEARLY) await page.evaluate(() => window.__startReviewVideo?.());
   // Time is counted from the moment the last reagent is really in the tube.
   await page.waitForFunction(id => (window.__testTubeStorageStore.getState().fumeHoodTestTubes[0]?.contents ?? []).includes(id),
     lastReagent, { timeout: 120000, polling: 10 });
