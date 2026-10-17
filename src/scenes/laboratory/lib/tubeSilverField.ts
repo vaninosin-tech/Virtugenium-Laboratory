@@ -92,6 +92,14 @@ export class TubeSilverField {
   private readonly wallJet = new THREE.Vector3();
   private readonly next: Float64Array;
   private readonly flow: Float32Array;
+  /** Additional resolved-strain exchange, in normalized amount per face and step. */
+  readonly subgridFlux = new Float64Array(3);
+  /** Pre-reaction cell amounts for gated conservation diagnostics. */
+  readonly subgridAvailableAg: Float64Array;
+  readonly subgridAvailableCl: Float64Array;
+  private readonly subgridStrain: Float64Array;
+  private readonly subgridOutgoing: Float64Array;
+  private readonly subgridFaceFlux: Float64Array;
   private readonly priorUp = new THREE.Vector3(Infinity, Infinity, Infinity);
   private priorLevel = Infinity;
   private initialized = false;
@@ -192,6 +200,11 @@ export class TubeSilverField {
     this.tintTexture.unpackAlignment = 1; this.tintTexture.needsUpdate = true;
     this.next = new Float64Array(this.mask.data.length);
     this.flow = this.solver.flow;
+    this.subgridStrain = new Float64Array(this.mask.data.length);
+    this.subgridOutgoing = new Float64Array(this.mask.data.length);
+    this.subgridFaceFlux = new Float64Array(this.mask.data.length * 3);
+    this.subgridAvailableAg = new Float64Array(this.mask.data.length);
+    this.subgridAvailableCl = new Float64Array(this.mask.data.length);
     this.pixels = new Float32Array(this.mask.data.length);
     this.texture = new THREE.Data3DTexture(this.pixels, this.mask.nx, this.mask.ny, this.mask.nz);
     this.texture.format = THREE.RedFormat; this.texture.type = THREE.FloatType;
@@ -211,6 +224,79 @@ export class TubeSilverField {
   get denseMass() { return this.flocMode ? (this.flocSystem?.totalMass ?? 0) : this.dense.reduce((sum, amount) => sum + amount, 0); }
   get totalSolidMass() { return this.denseMass + this.suspensionMass + this.coarseMass + this.sedimentMass; }
   get massBalanceError() { return this.totalSolidMass - this.extent; }
+
+  /** Conservative unresolved scalar exchange. The coefficient is a modelled eddy
+   * coefficient, never a molecular diffusivity. It is zero in motionless liquid.
+   * Face transfers are limited against the sum of all outgoing transfers. */
+  private exchangeSubgrid(dt: number) {
+    const m = this.mask, stride = [1, m.nx, m.nx * m.ny];
+    const h = [2 * m.radius / m.nx, m.height / m.ny, 2 * m.radius / m.nz];
+    const delta = Math.cbrt(h[0] * h[1] * h[2]);
+    const setting = (globalThis as { __silverSubgrid?: unknown }).__silverSubgrid;
+    const options = typeof setting === "object" && setting !== null
+      ? setting as { coefficient?: number; maximum?: number } : {};
+    const coefficient = Number.isFinite(options.coefficient) ? Math.max(0, Math.min(1, options.coefficient!)) : 0.25;
+    const maximum = Number.isFinite(options.maximum) ? Math.max(0, Math.min(1e-5, options.maximum!)) : 3e-6;
+    const velocity = this.flow, strain = this.subgridStrain;
+    const limits = [m.nx, m.ny, m.nz], gradient = new Float64Array(9);
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny,
+        z = Math.floor(i / (m.nx * m.ny));
+      gradient.fill(0);
+      for (let axis = 0; axis < 3; axis++) {
+        const coordinate = axis === 0 ? x : axis === 1 ? y : z;
+        const left = coordinate > 0 && m.data[i - stride[axis]] ? i - stride[axis] : i;
+        const right = coordinate + 1 < limits[axis] && m.data[i + stride[axis]]
+          ? i + stride[axis] : i;
+        const divisor = (right === i ? 0 : 1) + (left === i ? 0 : 1);
+        if (!divisor) continue;
+        for (let component = 0; component < 3; component++)
+          gradient[component * 3 + axis] = (velocity[3 * right + component]
+            - velocity[3 * left + component]) / (divisor * h[axis]);
+      }
+      let norm2 = 0;
+      for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
+        const symmetric = 0.5 * (gradient[row * 3 + col] + gradient[col * 3 + row]);
+        norm2 += 2 * symmetric * symmetric;
+      }
+      strain[i] = Math.sqrt(norm2);
+    }
+    const fields = [this.species["Ag+"].values, this.species["Cl-"].values, this.tracer];
+    this.subgridFlux.fill(0);
+    for (let field = 0; field < fields.length; field++) {
+      const values = fields[field], outgoing = this.subgridOutgoing, flux = this.subgridFaceFlux;
+      outgoing.fill(0); flux.fill(0);
+      for (let a = 0; a < m.activeCount; a++) {
+        const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny,
+          z = Math.floor(i / (m.nx * m.ny));
+        for (let axis = 0; axis < 3; axis++) {
+          if ((axis === 0 ? x : axis === 1 ? y : z) + 1 >= limits[axis]) continue;
+          const j = i + stride[axis];
+          if (!m.data[j]) continue;
+          const modelled = Math.min(maximum, coefficient * delta * delta *
+            0.5 * (strain[i] + strain[j]));
+          const fraction = Math.min(0.08, modelled * dt / (h[axis] * h[axis]));
+          const raw = fraction * (values[i] - values[j]);
+          flux[3 * i + axis] = raw;
+          outgoing[raw >= 0 ? i : j] += Math.abs(raw);
+        }
+      }
+      for (let a = 0; a < m.activeCount; a++) {
+        const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny,
+          z = Math.floor(i / (m.nx * m.ny));
+        for (let axis = 0; axis < 3; axis++) {
+          if ((axis === 0 ? x : axis === 1 ? y : z) + 1 >= limits[axis]) continue;
+          const j = i + stride[axis];
+          if (!m.data[j]) continue;
+          const raw = flux[3 * i + axis], donor = raw >= 0 ? i : j;
+          const transfer = raw * Math.min(1, values[donor] / Math.max(1e-30, outgoing[donor]));
+          // Sequential paired updates conserve each field to roundoff.
+          values[i] -= transfer; values[j] += transfer;
+          this.subgridFlux[field] += Math.abs(transfer) / dt;
+        }
+      }
+    }
+  }
 
   diagnostics() {
     let upper = 0, lower = 0, upperCount = 0, lowerCount = 0, speed = 0;
@@ -312,6 +398,9 @@ export class TubeSilverField {
       if (!firstDeliveryStep) {
         for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing, ionEddy);
         this.solver.transport(this.tracer, step, ionMixing, ionEddy);
+        if (this.flocMode && (globalThis as { __silverSubgrid?: unknown }).__silverSubgrid) {
+          this.exchangeSubgrid(step);
+        }
       }
       if (this.stageOne && !this.flocMode) {
         this.holdFilm();
@@ -347,6 +436,9 @@ export class TubeSilverField {
       }
       this.solver.transport(this.coarse, step, this.stageOne ? 0.000004 : 0.000003, this.stageOne ? 0.8 : undefined);
       const ba = this.species["Ag+"].values, so = this.species["Cl-"].values;
+      if (this.flocMode && (globalThis as { __silverSubgrid?: unknown }).__silverSubgrid) {
+        this.subgridAvailableAg.set(ba); this.subgridAvailableCl.set(so);
+      }
       this.productSource.fill(0);
       const tracerOnly = silverTracerOnly();
       for (let a = 0; a < m.activeCount; a++) {
