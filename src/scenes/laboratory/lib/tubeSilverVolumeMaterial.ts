@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { SILVER_FINE_OPTICS as optics } from "./night/render/silverOpticsReference";
 
 /** Periodic value-noise volume (64^3, 8 bit). One filtered texture tap replaces eight hash evaluations per noise lookup,
  * which keeps the shader small enough to compile quickly in the browser. */
@@ -31,8 +32,13 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
-      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 9.0 }, uSteps: { value: 88 }, uNoise: { value: noiseVolume() },
-      uTintStrength: { value: 6.0 }, uSmokeOn: { value: 0 }, uDiag: { value: 0 }, uCloudOn: { value: 0 }, uCloudK: { value: 2.2 }, uFlocOn: { value: 1 }, uTime: { value: 0 },
+      uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 9.0 }, uSteps: { value: optics.steps }, uNoise: { value: noiseVolume() },
+      uTintStrength: { value: 6.0 }, uSmokeOn: { value: 0 }, uDiag: { value: 0 }, uCloudOn: { value: 0 },
+      uCloudK: { value: optics.kappa }, uAlbedo: { value: optics.albedo },
+      uLightDirection: { value: new THREE.Vector3(...optics.lightDirection).normalize() },
+      uLightStrength: { value: optics.lightStrength }, uAmbient: { value: optics.ambient },
+      uAmbientBoost: { value: optics.ambientBoost }, uAnisotropy: { value: optics.anisotropy },
+      uOpticsMode: { value: 0 }, uFlocOn: { value: 1 }, uTime: { value: 0 },
       uUp: { value: new THREE.Vector3(0, 1, 0) } },
     transparent: true, depthWrite: false, side: THREE.FrontSide,
     vertexShader: `
@@ -53,6 +59,9 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uniform float uHazeStrength, uTintStrength, uTime;
       uniform int uSteps;
       uniform float uSmokeOn, uDiag, uCloudOn, uCloudK, uFlocOn;
+      uniform float uAlbedo, uLightStrength, uAmbient, uAmbientBoost, uAnisotropy;
+      uniform vec3 uLightDirection;
+      uniform int uOpticsMode;
       in vec3 vPoint;
       out vec4 outColor;
       // Value noise from a periodic 64^3 texture (see noiseVolume): one tap per lookup.
@@ -84,6 +93,26 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         float radial = length(p.xz);
         float bowl = uBottom+uRadius-sqrt(max(0.0,uRadius*uRadius-radial*radial));
         return radial < uRadius*0.985 && p.y >= bowl && dot(uUp,p) <= uLevel + 0.0035;
+      }
+      float cloudGrain(vec3 grid) {
+        vec3 q = grid * vec3(textureSize(uHaze,0));
+        float f = ${optics.grainCyclesPerCell} * 6.28318530718;
+        return 1.0 + ${optics.grainAmount} * sin(f * dot(q,vec3(1.0,0.37,0.19)))
+          * sin(f * dot(q,vec3(0.23,-0.41,1.0)));
+      }
+      float cloudSource(vec3 p, float c, vec3 towardCamera) {
+        float lightDepth = 0.0;
+        for (int k = 1; k <= ${optics.lightTaps}; k++) {
+          vec3 q = p + uLightDirection * uRadius * ${optics.lightTapDistance} * float(k);
+          if (wet(q)) lightDepth += texture(uHaze,uvw(q)).r * uCloudK * ${optics.lightTapDistance};
+        }
+        float angle = clamp(dot(uLightDirection,towardCamera),-1.0,1.0);
+        float phase = ${optics.isotropicFloor} + ${1 - optics.isotropicFloor} *
+          (1.0 + uAnisotropy * angle) / (1.0 + uAnisotropy);
+        float localDepth = uCloudK * c * ${optics.lightTapDistance};
+        float ambient = uAmbient + uAmbientBoost * (1.0-exp(-2.0*localDepth));
+        return min(uLightStrength+uAmbient+uAmbientBoost,
+          uAlbedo*(ambient+uLightStrength*phase*exp(-lightDepth)));
       }
       // Packed heaps are stored column by column; a small cross blur in x and z removes the column pattern.
       vec4 denseAt(vec3 g) {
@@ -166,7 +195,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           }
           // Small torn-off chips: separate bright specks, only where chips are present.
           float chipValue = texture(uChip,grid).r;
-          if (chipValue > 0.0004) {
+          if (uOpticsMode == 0 && chipValue > 0.0004) {
             // Irregular flakes: a warped, lower-frequency noise thresholded high so only a few survive.
             vec3 cq = vec3(p.x,p.y-uBottom,p.z)/uRadius*7.0;
             vec3 cw = vec3(noise3(cq*0.7+vec3(1.0,2.0,3.0)),noise3(cq*0.7+vec3(7.0,5.0,1.0)),noise3(cq*0.7+vec3(4.0,9.0,6.0)))-0.5;
@@ -175,19 +204,21 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             accumulated += (1.0-alpha)*chipAlpha*vec3(0.96,0.97,0.98);
             alpha += (1.0-alpha)*chipAlpha;
           }
-          // The smoke layer is switched off by default (customer request); the fine solid stays in the mass balance.
-          if (uCloudOn > 0.5 && smokeValue > 0.0005) {
-            // Fine suspended AgCl: a volume of scattering particles (extinction = kappa * concentration), modulated by
-            // a warped noise so that the cloud has ragged, heterogeneous density instead of a smooth blob.
-            vec3 cq = vec3(p.x,p.y-uBottom,p.z)/uRadius;
-            vec3 cw = vec3(noise3(cq*1.7+vec3(1.0,4.0,2.0)),noise3(cq*1.7+vec3(7.0,2.0,5.0)),noise3(cq*1.7+vec3(3.0,8.0,6.0)))-0.5;
-            float cn = fbm3(cq*vec3(3.2,2.4,3.2)+cw*1.5+vec3(0.0,uTime*0.01,0.0));
-            float c = smokeValue*pow(clamp(cn*1.9,0.0,1.6),2.2);
-            float a3 = 1.0-exp(-uCloudK*c*stepLength/uRadius);
-            float inScatter = 0.78+0.22*clamp(1.0-smokeValue*0.4,0.0,1.0);
-            accumulated += (1.0-alpha)*a3*vec3(0.95,0.96,0.98)*inScatter;
-            alpha += (1.0-alpha)*a3;
+          if (uCloudOn > 0.5 && smokeValue > 0.0) {
+            if (uOpticsMode == 1) {
+              // Raw concentration colormap; no grain or light transport.
+              float a3 = 1.0-exp(-min(1.0,smokeValue)*${optics.rawScale}*stepLength/uRadius);
+              accumulated += (1.0-alpha)*a3*vec3(clamp(smokeValue,0.0,1.0),0.12,1.0-clamp(smokeValue,0.0,1.0));
+              alpha += (1.0-alpha)*a3;
+            } else {
+              float c = smokeValue*cloudGrain(grid);
+              float a3 = 1.0-exp(-uCloudK*c*stepLength/uRadius);
+              float sourceLight = uOpticsMode == 2 ? ${optics.extinctionGrey} : cloudSource(p,c,-direction);
+              accumulated += (1.0-alpha)*a3*vec3(sourceLight);
+              alpha += (1.0-alpha)*a3;
+            }
           }
+          if (uOpticsMode != 0) { if (alpha >= ${optics.alphaStop}) break; else continue; }
           float hazeAlpha = uSmokeOn * (1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius));
           accumulated += (1.0-alpha)*hazeAlpha*mix(vec3(0.34,0.44,0.58),vec3(0.74,0.82,0.92),clamp(ribbon*3.0,0.0,1.0));
           alpha += (1.0-alpha)*hazeAlpha;
@@ -197,6 +228,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             solid/(solid+mixing*0.10+0.00001));
           accumulated += (1.0-alpha)*localAlpha*color;
           alpha += (1.0-alpha)*localAlpha;
+          if (alpha >= ${optics.alphaStop}) break;
         }
         if (alpha < 0.005) discard;
         outColor = vec4(accumulated/max(alpha,0.00001),alpha);

@@ -1113,7 +1113,9 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
     silverVolume.material.uniforms.uDense.value = silverField?.denseTexture ?? null;
     silverVolume.material.uniforms.uOverlap.value = silverField?.overlapTexture ?? null;
     silverVolume.material.uniforms.uDiag.value = silverDiagnostic() === "cells" ? 2 : silverDiagnostic() === "tracer" ? 1 : 0;
-    silverVolume.material.uniforms.uHaze.value = silverField?.texture ?? null;
+    silverVolume.material.uniforms.uHaze.value = (silverField as (TubeSilverField & { fineTexture?: THREE.Data3DTexture }) | null)?.fineTexture ?? silverField?.texture ?? null;
+    silverVolume.material.uniforms.uCloudOn.value = runtimeSilver && (typeof window === "undefined"
+      || (window as Window & { __silverCloud?: boolean }).__silverCloud !== false) ? 1 : 0;
     silverVolume.material.uniforms.uTint.value = silverField?.tintTexture ?? null;
     silverVolume.material.uniforms.uChip.value = silverField?.chipTexture ?? null;
     group.add(silverDenseMesh);
@@ -1157,7 +1159,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
           silverDenseMesh.visible = !!silverField;
           silverVolume.material.uniforms.uDense.value = silverField?.denseTexture ?? null;
           silverVolume.material.uniforms.uOverlap.value = silverField?.overlapTexture ?? null;
-          silverVolume.material.uniforms.uHaze.value = silverField?.texture ?? null;
+          silverVolume.material.uniforms.uHaze.value = (silverField as (TubeSilverField & { fineTexture?: THREE.Data3DTexture }) | null)?.fineTexture ?? silverField?.texture ?? null;
           silverVolume.material.uniforms.uTint.value = silverField?.tintTexture ?? null;
           silverVolume.material.uniforms.uChip.value = silverField?.chipTexture ?? null;
         }
@@ -1501,6 +1503,8 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       if (stageOneSilver) {
         silverVolume.material.uniforms.uUp.value.copy(up.value);
         silverVolume.material.uniforms.uTime.value = silverField?.ageSeconds ?? 0;
+        silverVolume.material.uniforms.uCloudOn.value = runtimeSilver && (typeof window === "undefined"
+          || (window as Window & { __silverCloud?: boolean }).__silverCloud !== false) ? 1 : 0;
       }
       if (absorption && absorptionWall && absorptionCap) {
         absorption.uniforms.uUp.value.copy(up.value);
