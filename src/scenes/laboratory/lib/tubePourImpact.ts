@@ -121,6 +121,7 @@ export function stepTubePour(input: TubePourStep): DeliveryEvent | undefined {
   return publishDeliveryEvent({ tubeId: input.tubeId, reagentId: input.reagentId,
     sourceId, serial: input.serial, step: Math.round(atMs), ml, requestedMl, point,
     sourceOutlet: outlet?.point, sourceOutletVelocity: outlet?.velocity,
+    sourceMouth: { x: input.mouth.x, y: input.mouth.y, z: input.mouth.z },
     surfaceY, atMs }, context, new THREE.Vector3().subVectors(point, input.mouth).normalize(),
   pourFlowMlPerSecond(atMs / POUR_MS));
 }

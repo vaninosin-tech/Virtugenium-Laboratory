@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { LiquidMask } from "./tubeVolumeField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { TubeJetModel, type SilverJetOptions } from "./tubeJetModel";
+import type { TubeStreamModel } from "./tubeStreamModel";
 
 /** Closed, staggered 3D liquid flow. A face exists only between two wet cells. */
 /** Parameters of the surface-spreading closure of a plunging jet (SI units). */
@@ -25,6 +26,11 @@ export class TubeFlowSolver {
   private readonly next: Float64Array;
   private readonly adjacent: Int32Array[];
   private readonly pressureWeight: Float32Array;
+  private fixedWeight?: Float32Array;
+  /** Faces whose Courant number exceeds 0.9 in the current step (physical stream only): advected with sub-steps. */
+  private readonly fastFlag: Uint8Array;
+  private readonly fastList: Int32Array;
+  private fastCount = 0;
   private readonly eddy: Float32Array;
   private readonly direction = new THREE.Vector3();
   private jetModel?: TubeJetModel;
@@ -36,6 +42,12 @@ export class TubeFlowSolver {
   lastJetClippedMomentum = 0;
   lastJetBlockedMomentum: readonly number[] = [0, 0, 0];
   lastJetProjectionChange: readonly number[] = [0, 0, 0];
+  /** Scalar transport sub-steps for the current step (1 unless the physical stream model needs more). */
+  substeps = 1;
+  lastMaxCourant = 0;
+  lastProjectionMs = 0;
+  lastForcingMs = 0;
+  lastResidualDivergence = 0;
   constructor(readonly mask: LiquidMask, readonly options: { lowDiffusion?: boolean; pressureIterations?: number; eddyFraction?: number; ambientStrength?: number } = {}) {
     const n = mask.data.length;
     for (let axis = 0; axis < 3; axis++) this.faces[axis] = new Float32Array(n);
@@ -49,6 +61,7 @@ export class TubeFlowSolver {
     this.next = new Float64Array(n);
     this.adjacent = Array.from({ length: 6 }, () => new Int32Array(n));
     this.pressureWeight = new Float32Array(n);
+    this.fastFlag = new Uint8Array(3 * n); this.fastList = new Int32Array(3 * n);
     this.eddy = new Float32Array(n);
     this.spacing = [2 * mask.radius / mask.nx, mask.height / mask.ny, 2 * mask.radius / mask.nz];
     this.inverseSpacingSquared = this.spacing.map(s => 1 / (s * s));
@@ -96,7 +109,7 @@ export class TubeFlowSolver {
   step(dt: number, inlet: THREE.Vector3, direction: THREE.Vector3, impulse: number,
     agitation = 0, background?: (x: number, y: number, z: number) => ArrayLike<number>,
     jetReach = 0, load?: { values: Float64Array; scale: number; down: THREE.Vector3 },
-    surface?: SurfaceSpread) {
+    surface?: SurfaceSpread, stream?: TubeStreamModel, streamDissipation = 0) {
     const started = typeof performance !== "undefined" ? performance.now() : 0;
     const m = this.mask, old = this.previousFaces;
     const flag = (globalThis as { __silverJetModel?: boolean | SilverJetOptions }).__silverJetModel;
@@ -128,6 +141,7 @@ export class TubeFlowSolver {
     const d = this.direction.copy(direction).normalize();
     const width2 = (m.radius * 0.32) ** 2;
     const damp = Math.exp(-dt * (TUBE_SIMULATION.jetFlow.viscousDamping + agitation * 0.2));
+    const streamMode = !!stream, faceLimit = jet ? 0.25 : streamMode ? 1.2 : 0.09;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
       const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny;
@@ -160,28 +174,58 @@ export class TubeFlowSolver {
           laplace += ((prev >= 0 ? old[axis][prev] : v)
             + (next >= 0 ? old[axis][next] : v) - 2 * v) * this.inverseSpacingSquared[b];
         }
-        const rawFace = (advected + dt * TUBE_SIMULATION.jetFlow.molecularDiffusivity * laplace) * damp
+        // Physical stream mode: turbulent decay of the resolved flow, rate = C |u| / R (momentum is not kept for seconds).
+        const turbulent = streamMode && streamDissipation > 0 ? Math.exp(-dt * streamDissipation * Math.abs(v) / m.radius) : 1;
+        const rawFace = (advected + dt * TUBE_SIMULATION.jetFlow.molecularDiffusivity * laplace) * damp * turbulent
           + (jet ? jet.source[3 * i + axis] : source * d.getComponent(axis))
           // Heavy suspended solid loads the liquid: a body force along gravity.
           + (load ? dt * load.scale * 0.5 * (load.values[i] + load.values[j]) * load.down.getComponent(axis) : 0)
           + (ambient?.[axis] ?? 0) * dt * (this.options.ambientStrength ?? 0.15)
           // Near-surface outward spreading of a plunging jet; the pressure projection below keeps it incompressible.
           + (surface && !jet && axis !== 1 ? this.surfaceSpreadTerm(surface, p, axis, v, dt) : 0);
-        this.faces[axis][i] = Math.max(jet ? -0.25 : -0.09, Math.min(jet ? 0.25 : 0.09, rawFace));
+        this.faces[axis][i] = Math.max(-faceLimit, Math.min(faceLimit, rawFace));
         if (jet) this.lastJetClippedMomentum += Math.abs(rawFace - this.faces[axis][i])
           * 1000 * this.spacing[0] * this.spacing[1] * this.spacing[2] / dt;
       }
     }
     let pre: number[] | undefined;
     if (jet) pre = this.totalFaceMomentum(dt);
-    if (jet) this.project(120);
+    const projectStart = typeof performance !== "undefined" ? performance.now() : 0;
+    if (streamMode) {
+      // Known stream faces are overridden after the dynamics and held fixed by the projection.
+      const forcingStart = projectStart;
+      if (stream!.active) for (let a = 0; a < m.activeCount; a++) {
+        const i = m.active[a];
+        for (let axis = 0; axis < 3; axis++) if (stream!.fixed[3 * i + axis] && this.neighbor(i, axis, 1) >= 0)
+          this.faces[axis][i] = stream!.value[3 * i + axis];
+      }
+      this.lastForcingMs = projectStart ? performance.now() - forcingStart : 0;
+      this.project(stream!.active ? 120 : 40, stream!.active ? stream!.fixed : undefined);
+    } else if (jet) this.project(120);
     else if (flag && this.jetModel) this.project(120);
     else this.project();
+    this.lastProjectionMs = projectStart ? performance.now() - projectStart : 0;
+    this.substeps = 1; this.lastMaxCourant = 0;
+    for (let k = 0; k < this.fastCount; k++) this.fastFlag[this.fastList[k]] = 0;
+    this.fastCount = 0;
+    if (streamMode) {
+      let maxC = 0;
+      for (let a = 0; a < m.activeCount; a++) {
+        const i = m.active[a];
+        for (let axis = 0; axis < 3; axis++) if (this.neighbor(i, axis, 1) >= 0) {
+          const courant = Math.abs(this.faces[axis][i]) * dt / this.spacing[axis];
+          maxC = Math.max(maxC, courant);
+          if (courant > 0.9) { this.fastFlag[3 * i + axis] = 1; this.fastList[this.fastCount++] = 3 * i + axis; }
+        }
+      }
+      this.lastMaxCourant = maxC;
+      this.substeps = Math.max(1, Math.min(64, Math.ceil(maxC / 0.9)));
+    }
     if (jet && pre) {
       const post = this.totalFaceMomentum(dt);
       this.lastJetProjectionChange = post.map((v, axis) => v - pre![axis]);
     }
-    if (flag || (globalThis as { __silverDiag?: unknown }).__silverDiag === "tracer") this.measureJetGradients();
+    if (flag || streamMode || (globalThis as { __silverDiag?: unknown }).__silverDiag === "tracer") this.measureJetGradients();
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
       this.eddy[i] = TUBE_SIMULATION.jetFlow.eddyDiffusivity * Math.min(1, Math.hypot(
@@ -226,7 +270,7 @@ export class TubeFlowSolver {
       this.lastVorticity[i] = Math.hypot(g[7] - g[5], g[2] - g[6], g[3] - g[1]);
     }
   }
-  private project(iterations?: number) {
+  private project(iterations?: number, fixed?: Uint8Array) {
     const m = this.mask;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a]; let div = 0;
@@ -239,16 +283,30 @@ export class TubeFlowSolver {
     }
     const p = this.pressure;
     p.fill(0);
+    // Fixed faces (known stream velocities) carry no pressure coupling: they act as given fluxes.
+    let weight = this.pressureWeight;
+    if (fixed) {
+      weight = this.fixedWeight ??= new Float32Array(this.pressureWeight.length);
+      for (let a = 0; a < m.activeCount; a++) {
+        const i = m.active[a]; let w = 0;
+        for (let axis = 0; axis < 3; axis++) {
+          const right = this.adjacent[axis * 2 + 1][i], left = this.adjacent[axis * 2][i];
+          if (right >= 0 && !fixed[3 * i + axis]) w += this.inverseSpacingSquared[axis];
+          if (left >= 0 && !fixed[3 * left + axis]) w += this.inverseSpacingSquared[axis];
+        }
+        weight[i] = w;
+      }
+    }
     for (let iteration = 0; iteration < (iterations ?? this.options.pressureIterations ?? TUBE_SIMULATION.jetFlow.pressureIterations); iteration++) {
       for (let a = 0; a < m.activeCount; a++) {
         const i = m.active[a]; let sum = 0;
         for (let axis = 0; axis < 3; axis++) {
           const left = this.adjacent[axis * 2][i], right = this.adjacent[axis * 2 + 1][i];
           const w = this.inverseSpacingSquared[axis];
-          if (left >= 0) sum += p[left] * w;
-          if (right >= 0) sum += p[right] * w;
+          if (left >= 0 && !(fixed && fixed[3 * left + axis])) sum += p[left] * w;
+          if (right >= 0 && !(fixed && fixed[3 * i + axis])) sum += p[right] * w;
         }
-        const target = this.pressureWeight[i] ? (sum - this.divergence[i]) / this.pressureWeight[i] : 0;
+        const target = weight[i] ? (sum - this.divergence[i]) / weight[i] : 0;
         p[i] += (iterations ? 1.65 : 1) * (target - p[i]);
       }
     }
@@ -256,7 +314,7 @@ export class TubeFlowSolver {
       const i = m.active[a];
       for (let axis = 0; axis < 3; axis++) {
         const j = this.neighbor(i, axis, 1);
-        if (j >= 0) this.faces[axis][i] -= (p[j] - p[i]) / this.spacing[axis];
+        if (j >= 0 && !(fixed && fixed[3 * i + axis])) this.faces[axis][i] -= (p[j] - p[i]) / this.spacing[axis];
         const minus = this.neighbor(i, axis, -1);
         this.flow[i * 3 + axis] = ((j >= 0 ? this.faces[axis][i] : 0)
           + (minus >= 0 ? this.faces[axis][minus] : 0)) * 0.5;
@@ -264,6 +322,47 @@ export class TubeFlowSolver {
     }
   }
   transport(values: Float64Array, dt: number, diffusivity: number, eddyScale?: number) {
+    if (this.fastCount > 0) {
+      // Physical stream: faces with Courant above 0.9 (the jet column) are advected with sub-steps, every other face
+      // in a single pass together with all the diffusion. An all-zero field stays zero, so it is skipped.
+      const mm = this.mask; let any = false;
+      for (let a = 0; a < mm.activeCount && !any; a++) if (values[mm.active[a]] !== 0) any = true;
+      if (!any) return;
+      this.transportCore(values, dt, diffusivity, eddyScale, true);
+      this.advectFast(values, dt);
+      return;
+    }
+    this.transportCore(values, dt, diffusivity, eddyScale, false);
+  }
+  /** Donor-cell advection of the fast faces only, in `substeps` sub-steps; each donor exports at most its content. */
+  private advectFast(values: Float64Array, dt: number) {
+    const n = this.substeps, h = dt / n, list = this.fastList, count = this.fastCount;
+    this.outgoing.fill(0); this.flux.fill(0);        // the slow pass leaves its scratch behind
+    for (let sub = 0; sub < n; sub++) {
+      for (let k = 0; k < count; k++) {
+        const id = list[k], i = (id / 3) | 0, axis = id - 3 * i, j = this.neighbor(i, axis, 1);
+        const f = this.faces[axis][i] * h / this.spacing[axis];
+        const raw = (f >= 0 ? values[i] : values[j]) * f;
+        this.flux[id] = raw; this.outgoing[raw >= 0 ? i : j] += Math.abs(raw);
+      }
+      for (let k = 0; k < count; k++) {
+        const id = list[k], i = (id / 3) | 0, axis = id - 3 * i, j = this.neighbor(i, axis, 1);
+        const raw = this.flux[id], donor = raw >= 0 ? i : j;
+        this.flux[id] = raw * Math.min(1, values[donor] / Math.max(1e-30, this.outgoing[donor]));
+      }
+      for (let k = 0; k < count; k++) {
+        const id = list[k], i = (id / 3) | 0, axis = id - 3 * i, j = this.neighbor(i, axis, 1);
+        const amount = this.flux[id];
+        values[i] -= amount; values[j] += amount;
+        if (values[i] < 0) values[i] = 0; if (values[j] < 0) values[j] = 0;
+      }
+      for (let k = 0; k < count; k++) {
+        const id = list[k], i = (id / 3) | 0, axis = id - 3 * i, j = this.neighbor(i, axis, 1);
+        this.flux[id] = 0; this.outgoing[i] = 0; this.outgoing[j] = 0;
+      }
+    }
+  }
+  private transportCore(values: Float64Array, dt: number, diffusivity: number, eddyScale: number | undefined, skipFast: boolean) {
     const m = this.mask;
     this.next.set(values); this.outgoing.fill(0); this.flux.fill(0);
     for (let a = 0; a < m.activeCount; a++) {
@@ -271,7 +370,7 @@ export class TubeFlowSolver {
       for (let axis = 0; axis < 3; axis++) {
         const j = this.neighbor(i, axis, 1);
         if (j < 0) continue;
-        const f = this.faces[axis][i] * dt / this.spacing[axis];
+        const f = skipFast && this.fastFlag[3 * i + axis] ? 0 : this.faces[axis][i] * dt / this.spacing[axis];
         // Six wet faces may export from one cell; keep explicit diffusion below its CFL limit.
         const mixing = Math.min(0.12, (diffusivity
           + this.eddy[i] * (eddyScale ?? this.options.eddyFraction ?? (this.options.lowDiffusion ? 0.02 : 1))) * dt / this.spacing[axis] ** 2);

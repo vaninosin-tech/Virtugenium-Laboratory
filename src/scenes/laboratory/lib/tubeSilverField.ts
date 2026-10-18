@@ -6,6 +6,7 @@ import { tubeVessel } from "./vesselGeometry";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
 import { silverAggregationEnabled, silverStage, silverTracerOnly } from "./silverStage";
+import { DEFAULT_STREAM_DISSIPATION, TubeStreamModel, type StreamOptions, type StreamState } from "./tubeStreamModel";
 import { DEFAULT_FLOC_CONFIG, FlocSystem } from "./night/stage1/flocSystem";
 import { SectionalPopulation } from "./night/stage1/sectionalPopulation";
 
@@ -135,6 +136,9 @@ export class TubeSilverField {
     const value = (globalThis as { __silverStickingScale?: unknown }).__silverStickingScale;
     return typeof value === 'number' && Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, 1) : 1;
   }
+  /** Stream of the current ledger step in tube-local axes (set by the runtime; consumed by the experimental stream model). */
+  streamState?: StreamState;
+  streamModel?: TubeStreamModel;
   /** Individually represented floc components for the renderer. */
   visibleFlocs: ReturnType<FlocSystem['componentSummaries']> = [];
   flocVisual = new Float32Array(0);
@@ -446,18 +450,29 @@ export class TubeSilverField {
         this.wallJet.copy(jetDirection ?? up);
         if (!jetDirection) this.wallJet.negate();
       }
+      // Experimental physical stream (window.__silverStream): the baseline impulse and surface-spreading closures are replaced
+      // by the integral submerged jet imposed as known faces; nothing else about the field changes.
+      const streamFlag = (globalThis as { __silverStream?: unknown }).__silverStream;
+      const streamOn = !!streamFlag && this.flocMode && up.y > 0.999;
+      let stream: TubeStreamModel | undefined;
+      if (streamOn) {
+        const options: StreamOptions = typeof streamFlag === "object" ? streamFlag as StreamOptions : {};
+        stream = this.streamModel ??= new TubeStreamModel(m, options);
+        stream.prepare({ x: inlet.x, z: inlet.z }, level, this.streamState);
+      }
       this.solver.step(step, inlet, this.wallJet,
-        amount > 0 ? 0.2 * this.jetScale * Math.min(3, Math.max(0.4, jetStrength)) : 0,
+        streamOn ? 0 : amount > 0 ? 0.2 * this.jetScale * Math.min(3, Math.max(0.4, jetStrength)) : 0,
         agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined,
         0, this.stageOne ? { values: this.loadWeight, scale: m.activeCount * this.loadStrength,
           down: this.down.copy(up).negate() } : undefined,
-        this.stageOne && amount > 0 && this.surfaceClosure
+        !streamOn && this.stageOne && amount > 0 && this.surfaceClosure
           ? { x: inlet.x, z: inlet.z, level,
             // jetStrength is the accepted ledger rate in mL/s for stage 3.
             // 1 mL/s = 1e-6 m3/s. Preserve the legacy closure exactly with the flag off.
             flow: (calibratedJet ? Math.max(0, jetStrength) : Math.max(0.05, jetStrength)) * 1e-6,
             alpha: this.surfaceAlpha,
-            delta: this.surfaceDelta, r0: 0.001, relaxation: 12 } : undefined);
+            delta: this.surfaceDelta, r0: 0.001, relaxation: 12 } : undefined,
+        stream, streamOn ? ((streamFlag as StreamOptions).dissipation ?? DEFAULT_STREAM_DISSIPATION) : 0);
       const kinetic = this.solver.diagnostics().energy;
       // The stream stirs the added solution into the Ag+ liquid within about a second.
       const ionMixing = (this.stageOne ? this.ionDiffusivity : 0.00012) + agitation * 0.000003;

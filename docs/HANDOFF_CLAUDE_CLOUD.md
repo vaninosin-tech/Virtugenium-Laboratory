@@ -50,3 +50,6 @@ Results by stage (artifacts are NOT in git; they are on the user's PC under `D:\
 
 ## Update from the cloud session (2026-10-18, branch `claude/epic-brown-yxujey`)
 The user chose option 1 as a temporary stable baseline for the morning (not final, not visually accepted). Stage 3 is now the default with aggregation off; all aggregation code and knobs are kept. See `docs/night/baseline/BASELINE.md` (defaults, test results, what is unverified), `docs/night/taskB/REPORT.md` (number-conserving pivot scheme, optional via `window.__silverSectionScheme = 'conservative'`, validated on CPU only) and `docs/night/taskA/REPORT.md` (CPU profile near the surface, no fix). Sections 4 and 5 above are otherwise unchanged; nothing was merged into `main`.
+
+## Update (physical stream, cloud session)
+Experimental `window.__silverStream` (off by default): integral submerged jet from the delivery event, imposed as known faces in the pressure projection, scalars moved by the resulting faces only. Report and numbers: `docs/night/stream/REPORT.md`; Windows procedure: `docs/night/WINDOWS_VERIFICATION.md` section 5. Result: coherent but bulk entrainment-limited overlap for the game's pour inputs; upper white structures still absent; not yet seen in the game; not enabled by default.

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { TubeSilverField } from "./tubeSilverField";
+import { streamStateFromEvent } from "./tubeStreamModel";
 import { deliver, tubeAmount } from "./tubeAmounts";
 import type { DeliveryEvent } from "./tubeDelivery";
 import { tubeLiquidHeight } from "./tubeLiquidLevel";
@@ -12,7 +13,16 @@ type Diagnostic = { firstValidImpactMs?: number; firstCompositionUpdateMs?: numb
   firstFieldInitMs?: number; firstChlorideInsertionMs?: number;
   firstImpactPoint?: DeliveryEvent["point"]; deliveredMl: number; surfaceY?: number; eventIds: string[] };
 type Entry = { field: TubeSilverField; lastStep: number; delivered: number;
-  inlet: THREE.Vector3; latestRate: number; diagnostics: Diagnostic; ids: Set<string> };
+  inlet: THREE.Vector3; latestRate: number; diagnostics: Diagnostic; ids: Set<string>;
+  /** Experimental stream model only: ledger volume and last event of the current 50 ms step. */
+  pendingMl?: number; lastEvent?: DeliveryEvent };
+/** Stream of the pending ledger interval, in tube-local axes; undefined without events or without the flag. */
+function pendingStream(entry: Entry) {
+  if (!(globalThis as { __silverStream?: unknown }).__silverStream || !entry.lastEvent || !(entry.pendingMl! > 0)) return undefined;
+  const state = streamStateFromEvent({ ...entry.lastEvent, ml: entry.pendingMl! }, 50);
+  if (state) state.direction.transformDirection(CLAMP_TUBE_MOUTH.root.clone().invert());
+  return state;
+}
 const entries = new Map<string, Entry>();
 const eventId = (event: DeliveryEvent) => `${event.serial}|${event.step}`;
 const tubeSlot = (tubeId: string): { location: TubeLocation; index: number } | undefined => {
@@ -102,9 +112,13 @@ export const silverRuntime = {
     // 50 ms fluid step; Q = (sum accepted mL) * 1e-6 / 0.05 m3/s.
     entry.latestRate = (globalThis as { __silverJetModel?: unknown }).__silverJetModel
       ? entry.latestRate + accepted * 20 : accepted * 20;
+    entry.pendingMl = (entry.pendingMl ?? 0) + accepted; entry.lastEvent = event;
     // The first fixed step inserts chloride synchronously with the first valid event.
-    if (isFirst) field.advance(0.05, up, level, inlet, entry.delivered, 0,
-      entry.latestRate, undefined);
+    if (isFirst) {
+      field.streamState = pendingStream(entry);
+      field.advance(0.05, up, level, inlet, entry.delivered, 0, entry.latestRate, undefined);
+      field.streamState = undefined; entry.pendingMl = 0;
+    }
     if (isFirst && (globalThis as { __silverJetModel?: unknown }).__silverJetModel) entry.latestRate = 0;
     entry.ids.add(id);
     diag.eventIds.push(id);
@@ -124,8 +138,10 @@ export const silverRuntime = {
       while (entry.lastStep + 50 <= wanted) {
         const up = localUp();
         const level = tubeLiquidHeight(tubeAmount(tubeId).volumeMl, silverEffectiveRadius);
+        entry.field.streamState = pendingStream(entry);
         entry.field.advance(0.05, up, level, entry.inlet, entry.delivered, 0,
           entry.latestRate, undefined);
+        entry.field.streamState = undefined; entry.pendingMl = 0;
         entry.latestRate = 0;
         entry.lastStep += 50;
       }

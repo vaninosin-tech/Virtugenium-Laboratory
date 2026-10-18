@@ -19,6 +19,8 @@ export interface DeliveryEvent {
   sourceOutlet?: DeliveryPoint;
   /** Finite-difference velocity of that lip in world m/s; separate from liquid exit speed. */
   sourceOutletVelocity?: DeliveryPoint;
+  /** Receiving tube mouth centre in world metres. With no measured lip the stream model reconstructs the lip above it. */
+  sourceMouth?: DeliveryPoint;
   /** The pour action this event belongs to (`startPour` timestamp). */
   serial: number;
   /** Monotonic step inside the pour; (serial, step) identifies an event. */
