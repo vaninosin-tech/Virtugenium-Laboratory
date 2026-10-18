@@ -144,9 +144,10 @@ describe('Task B: the scheme inside the stage-3 field', () => {
     const { SILVER_TUBE_RADIUS, silverFieldHeight, silverEffectiveRadius } = await import('../../../src/scenes/laboratory/lib/tubeSilverGeometry');
     const { tubeLiquidHeight } = await import('../../../src/scenes/laboratory/lib/tubeLiquidLevel');
     const schemes: Record<string, string> = {};
-    for (const scheme of ['unset', 'conservative']) {
+    for (const scheme of ['unset', 'conservative', 'conservative52']) {
       vi.stubGlobal('window', { __silverStage: 3, __silverAgg: 1, location: { search: '' } });
-      if (scheme === 'conservative') (globalThis as { __silverSectionScheme?: string }).__silverSectionScheme = scheme;
+      if (scheme !== 'unset') (globalThis as { __silverSectionScheme?: string }).__silverSectionScheme = 'conservative';
+      if (scheme === 'conservative52') (globalThis as { __silverSectionBins?: number }).__silverSectionBins = 52;
       const up = new THREE.Vector3(0, 1, 0), inlet = new THREE.Vector3(.0065, 0, 0);
       const f = new TubeSilverField('LOW', SILVER_TUBE_RADIUS, 0, silverFieldHeight);
       try {
@@ -157,10 +158,10 @@ describe('Task B: the scheme inside the stage-3 field', () => {
           f.assertMassInvariant();
           expect(Math.abs(f.species['Ag+'].total + f.extent - 1)).toBeLessThan(1e-12);
         }
-        schemes[scheme] = f.sections.scheme;
+        schemes[scheme] = `${f.sections.scheme}/${f.sections.bins}`;
         expect(f.sections.totalMass).toBeGreaterThan(0);
-      } finally { f.dispose(); vi.unstubAllGlobals(); delete (globalThis as { __silverSectionScheme?: string }).__silverSectionScheme; }
+      } finally { f.dispose(); vi.unstubAllGlobals(); delete (globalThis as { __silverSectionScheme?: string }).__silverSectionScheme; delete (globalThis as { __silverSectionBins?: number }).__silverSectionBins; }
     }
-    expect(schemes).toEqual({ unset: 'legacy', conservative: 'conservative' });
+    expect(schemes).toEqual({ unset: 'legacy/13', conservative: 'conservative/13', conservative52: 'conservative/52' });
   }, 120000);
 });

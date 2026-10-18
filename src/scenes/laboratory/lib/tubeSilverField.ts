@@ -909,7 +909,8 @@ export class TubeSilverField {
       this.sections = new SectionalPopulation(m, this.flocSystem.config,
         4 * Math.PI / 3 * primaryRadius ** 3, STAGE3_AGCL_SOLID_M3_PER_UNIT,
         // Dev knob: 'conservative' selects the number-conserving pivot scheme (default: the legacy scheme).
-        { scheme: (globalThis as { __silverSectionScheme?: unknown }).__silverSectionScheme === 'conservative' ? 'conservative' : 'legacy' });
+        { scheme: (globalThis as { __silverSectionScheme?: unknown }).__silverSectionScheme === 'conservative' ? 'conservative' : 'legacy',
+          bins: (globalThis as { __silverSectionBins?: unknown }).__silverSectionBins as number | undefined });
       this.flocMass = new Float32Array(m.data.length); this.flocVisual = new Float32Array(m.data.length);
       this.aggregateCompaction = new Float32Array(m.data.length);
       this.aggregateLooseness = new Float32Array(m.data.length);

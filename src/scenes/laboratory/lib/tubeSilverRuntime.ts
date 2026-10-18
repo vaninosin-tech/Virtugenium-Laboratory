@@ -28,10 +28,28 @@ const localPoint = (point: DeliveryEvent["point"]) => new THREE.Vector3(point.x,
 const localUp = () => new THREE.Vector3(0, 1, 0)
   .transformDirection(CLAMP_TUBE_MOUTH.root.clone().invert());
 
+/** The tube really holds silver nitrate (a field never starts from the chloride alone). */
+const holdsSilverNitrate = (tubeId: string) => {
+  const slot = tubeSlot(tubeId);
+  if (!slot) return false;
+  const state = useTestTubeStorageStore.getState();
+  const tube = (slot.location === "workbench" ? state.workbenchTestTubes : state.fumeHoodTestTubes)[slot.index];
+  return !!tube?.contents.includes("agno3") && tubeAmount(tubeId).volumeMl > 0;
+};
+
 export const silverRuntime = {
+  /**
+   * Stage 3 models chloride poured into silver nitrate that is already in the receiving tube.
+   * Chloride into an empty tube, into other contents or before the silver nitrate (any order the experiment's
+   * mixing rules still allow) takes the plain amount-ledger path and creates no Ag+ and no field.
+   */
+  acceptsChloride(tubeId: string): boolean {
+    return entries.has(tubeId) || holdsSilverNitrate(tubeId);
+  },
   canApply(event: DeliveryEvent): boolean {
     if (!event.valid || event.ml <= 0 || event.reagentId !== "nacl") return false;
     const existing = entries.get(event.tubeId);
+    if (!existing && !holdsSilverNitrate(event.tubeId)) return false;
     if (existing?.ids.has(eventId(event))) return false;
     if (event.ml > 5 - tubeAmount(event.tubeId).volumeMl + 1e-9) return false;
     const slot = tubeSlot(event.tubeId);

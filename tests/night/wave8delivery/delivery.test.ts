@@ -8,6 +8,7 @@ import { clearTubePourImpact, observePourClock, publishTubePourImpact,
   stepTubePour, tubePourImpact } from "../../../src/scenes/laboratory/lib/tubePourImpact";
 import { tubeEffectiveRadius, tubeLiquidHeight } from "../../../src/scenes/laboratory/lib/tubeLiquidLevel";
 import { POUR_MS, useStandMotionStore } from "../../../src/scenes/laboratory/lib/useStandMotionStore";
+import { useTestTubeStorageStore } from "../../../src/scenes/laboratory/lib/useTestTubeStorageStore";
 
 const origin = new THREE.Vector3(0, 0.15, 0);
 const root = new THREE.Matrix4();
@@ -51,6 +52,8 @@ describe("validated delivery", () => {
 
   it("rejects the permissive legacy publisher for stage-three chloride", () => {
     seedTubeAmounts("tube", ["agno3"]);
+    // Stage-three chloride is claimed only for a tube that really holds silver nitrate in the contents store.
+    useTestTubeStorageStore.setState({ workbenchTestTubes: [{ instanceId: "tube", contents: ["agno3"] }], fumeHoodTestTubes: [] });
     vi.stubGlobal("window", { location: { search: "?silverStage=3" } });
     try {
       expect(publishTubePourImpact("tube", "nacl", new THREE.Vector3(0, 0.055, 0),

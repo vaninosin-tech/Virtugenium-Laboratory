@@ -17,6 +17,13 @@ export interface SectionalOptions {
   scheme?: SectionScheme;
   /** Validation hook: replaces the Brownian plus shear kernel (m3/s) for pivot pair (i, j). */
   kernel?: (i: number, j: number) => number;
+  /**
+   * Skip collisions of classes holding less than this fraction of the cell's solid. Skipped mass simply stays where
+   * it is (conservative); only its tiny contribution to the rates is dropped. Default 0 (legacy) and 1e-9 (conservative).
+   */
+  prune?: number;
+  /** Number of pivots of the conservative production grid (default 13, the legacy count). Same first and top pivot. */
+  bins?: number;
   /** Validation hook: replaces the production pivot grid (radii in m, particle masses in the same units as the ledger). */
   pivots?: { radii: ArrayLike<number>; masses: ArrayLike<number> };
 }
@@ -26,6 +33,7 @@ export class SectionalPopulation {
   static readonly count = 13;
   readonly bins: number;
   readonly scheme: SectionScheme;
+  private readonly prune: number;
   readonly masses: Float64Array[];
   readonly radii: Float64Array;
   readonly particleMass: Float64Array;
@@ -44,7 +52,9 @@ export class SectionalPopulation {
     options: SectionalOptions = {}) {
     const n = mask.data.length;
     this.scheme = options.scheme ?? 'legacy';
-    this.bins = options.pivots ? options.pivots.radii.length : SectionalPopulation.count;
+    this.prune = options.prune ?? (this.scheme === 'conservative' ? 1e-9 : 0);
+    this.bins = options.pivots ? options.pivots.radii.length
+      : this.scheme === 'conservative' ? Math.max(2, Math.floor(options.bins ?? SectionalPopulation.count)) : SectionalPopulation.count;
     const bins = this.bins;
     this.radii = new Float64Array(bins); this.particleMass = new Float64Array(bins); this.slip = new Float64Array(bins);
     this.transfers = new Float64Array(bins); this.accumulated = new Float64Array(bins);
@@ -73,7 +83,11 @@ export class SectionalPopulation {
       for (let b = 0; b < bins; b++) { this.radii[b] = options.pivots.radii[b]; this.particleMass[b] = options.pivots.masses[b]; }
     } else if (this.scheme === 'conservative') {
       // Same top pivot as the legacy grid, but the first pivot is one primary particle and the masses are geometric.
-      const top = this.particleMass[bins - 1], ratio = (top / primaryUnit) ** (1 / (bins - 1));
+      // Top pivot: the legacy grid's 13th pivot, whatever the number of pivots.
+      const topRadius = 0.32e-6 * 2.05 ** (SectionalPopulation.count - 1);
+      const top = topRadius < crossover ? primaryUnit * 0.5 * (topRadius / primaryRadius) ** 3
+        : crossoverUnit * (topRadius / crossover) ** config.fractalDimension;
+      const ratio = (top / primaryUnit) ** (1 / (bins - 1));
       for (let b = 0; b < bins; b++) {
         const mass = primaryUnit * ratio ** b;
         this.particleMass[b] = mass;
@@ -127,14 +141,20 @@ export class SectionalPopulation {
       for (let b = this.masses.length - 1; b > 0; b--)
         if (this.masses[b][cell] > 0) { highest = b; break; }
       const top = Math.min(this.masses.length - 1, highest + 1);
+      let cut = 0;
+      if (this.prune > 0) {
+        let total = 0;
+        for (let b = 0; b <= highest; b++) total += this.masses[b][cell];
+        cut = this.prune * total;
+      }
       for (let i = 0; i <= top; i++) {
         const mi = this.particleMass[i];
-        if (this.masses[i][cell] + this.delta[i][cell] <= 0) continue;
+        if (this.masses[i][cell] + this.delta[i][cell] <= cut) continue;
         for (let j = i; j <= top; j++) {
           const mj = this.particleMass[j], p = i * this.bins + j;
           const ai = this.masses[i][cell] + this.delta[i][cell];
           const aj = this.masses[j][cell] + this.delta[j][cell];
-          if (ai <= 0 || aj <= 0) continue;
+          if (ai <= cut || aj <= cut) continue;
           const kernel = this.brownian[p] + G * this.shear[p];
           const ni = ai / mi, nj = aj / mj;
           const events = Math.min((i === j ? ni / 2 : Math.min(ni, nj)) * 0.25,

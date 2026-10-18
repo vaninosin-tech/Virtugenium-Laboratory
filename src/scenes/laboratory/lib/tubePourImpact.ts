@@ -43,7 +43,7 @@ export function publishDeliveryEvent(input: Omit<DeliveryEvent, "valid" | "reaso
     `${input.serial}|${input.step}`, requested) : requested;
   const limited = { ...input, requestedMl: debited, ml: Math.min(input.ml, debited) };
   if (debited <= 0) return { ...limited, valid: false, reason: "invalid-volume" as const };
-  const stage3 = input.reagentId === "nacl" && silverStage() === 3;
+  const stage3 = input.reagentId === "nacl" && silverStage() === 3 && silverRuntime.acceptsChloride(input.tubeId);
   if (stage3 && validateImpact(limited.point, context).valid && limited.ml > 0
     && !silverRuntime.canApply({ ...limited, valid: true, reason: "ok" }))
     return { ...limited, valid: false, reason: "invalid-volume" as const };
@@ -72,7 +72,7 @@ export function publishTubePourImpact(tubeId: string, reagentId: string,
   point: THREE.Vector3, direction: THREE.Vector3, flowMlPerSecond: number,
   ml: number, serial: number) {
   // The permissive legacy channel cannot create stage-three chloride.
-  if (reagentId === "nacl" && silverStage() === 3) return 0;
+  if (reagentId === "nacl" && silverStage() === 3 && silverRuntime.acceptsChloride(tubeId)) return 0;
   const key = `${tubeId}|${reagentId}|${serial}`;
   const step = (legacySteps.get(key) ?? 0) + 1;
   legacySteps.set(key, step);

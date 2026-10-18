@@ -16,19 +16,23 @@ With aggregation off the field uses `silverAmount = 1.15` (the legacy silver amo
 Without a `window` (plain Node) `silverStage()` still returns 1; the new default applies in the page.
 The development viewer `src/lab/experimentLab.ts` keeps its old behaviour (aggregation on except in `?view=cloud`).
 
-## Does the stage change reach other experiments?
-Checked by code reading and by tests (`tests/night/baseline/defaults.test.ts`):
-- Every `silverStage() === 3` site is gated on NaCl / AgNO3 / the silver-chloride visual (`tubePourImpact`, `tubeAmounts`, `tubeReactionVisuals`, `PourStream`). The only non-gated path is NaCl delivery, and `silverRuntime.canApply` refuses it unless `judgeMix` allows NaCl in that tube. In experiments 1, 3 and 4 NaCl is "foreign", so the runtime refuses it: no field, no volume change, no contents change (tested for all three).
-- Experiment 2 still creates the field on the first valid impact (tested).
-- NOT verified: the sandbox / free mode (`selectedExperimentId === null`), where `judgeMix` allows any reagent. NaCl poured there into a tube without AgNO3, and NaCl poured first in experiment 2 (wrong order is allowed), now go through the stage-3 runtime instead of the stage-1 path. This was not tested; check it in the game.
-- Experiments 1, 3, 4 were not run in the game. Their visuals (`tubeReactionVisuals.ts`) have no stage-3 branch outside the silver-chloride kind.
+## Does the stage change reach other experiments? (re-checked)
+`tests/night/baseline/isolation.test.ts`, run with no stage override (the browser default):
+- **Rule now enforced:** stage 3 claims chloride only when the receiving tube really holds silver nitrate (`silverRuntime.acceptsChloride`: an active field or `agno3` in the tube contents with liquid in it) and a chloride delivery event arrives for that same tube. Otherwise the chloride takes the plain amount-ledger path: no Ag+ is created and no field starts. Before this change a chloride delivery into any tube whose mixing rules allowed it would go to the stage-3 runtime (and was refused or, in tubes without the same reagent, could start a field without silver nitrate). Two tests fail without the change.
+- Experiment 2, AgNO3 first, NaCl poured after: field starts (as before).
+- Experiment 2, NaCl in the tube first, AgNO3 added after: no stage-3 field, both amounts kept in the ledger (legacy path). The silver-chloride cloud for this wrong order is then **not** drawn by stage 3 (the stage-3 visual is driven only by the runtime field); the old stage-1 cloud for it is not reached from the stage-3 default. Check in the game; this is a consequence of the rule, not verified visually.
+- Free sandbox, NaCl alone: no field, no Ag+. NaCl into an empty tube: refused (no liquid). Sandbox, AgNO3 first and NaCl delivered: field starts. Sandbox tube pre-filled with both reagents: chloride is not seeded (by the stage-3 design), nothing is invented.
+- Experiments 1, 3 and 4: chloride delivery leaves contents and amounts untouched, no field.
+- Explicit overrides `?silverStage=1` and `window.__silverStage = 1` keep the legacy path.
+- Browser and Node defaults differ on purpose: without a `window` (plain Node, SSR, unit tests that do not stub one) `silverStage()` returns 1, so older tests keep their meaning; in the page the default is 3. Tests that need a mode select it explicitly (`window.__silverStage`, `?silverStage=`), and `defaults.test.ts` and `isolation.test.ts` stub a window without an override to exercise the browser default.
 
 ## Test suite (complete available suite, one process, `--no-file-parallelism`)
 | Run | Tests | Passed | Failed |
 | --- | ---: | ---: | ---: |
 | Before any change (branch as handed over) | 485 | 483 | 2 |
 | After the baseline change, before test setups were adjusted | 492 | 486 | 6 |
-| Final (this commit set) | 502 | 500 | 2 |
+| After the first baseline commit | 502 | 500 | 2 |
+| After the isolation rule, Task A diagnostics and Task B part 2 | 520 | 518 | 2 |
 
 **Existing failures (present before the change, unchanged, expectations not edited):**
 - `tests/night/wave4a/field.test.ts`: surface raft 0.0024971 against minimum 0.005.
@@ -38,7 +42,7 @@ Checked by code reading and by tests (`tests/night/baseline/defaults.test.ts`):
 - `stage1/density.test.ts` asserted that the page default is stage 1. Expectation updated on purpose: the page default is now 3 (no window still gives 1).
 - `wave18f3/sectional.test.ts`, `wave3flocs/flocSystem.test.ts`, `wave6perf/flocPerf.test.ts` (setup only), and `wave19s2/audit.test.ts` (it already declared `__silverAgg: 1` on the stubbed window, which the old code never read from there): these exercise aggregation; their window stubs now ask for `__silverAgg: 1`. `silverAggregationEnabled()` reads `window.__silverAgg` first, then `globalThis.__silverAgg`.
 
-**Newly introduced failures after the final change: none.** New tests: `tests/night/baseline/defaults.test.ts` (8), `tests/night/taskB/sectionalValidation.test.ts` (8), `tests/night/taskA/surfaceProfile.test.ts` (1).
+**Newly introduced failures after the final change: none** (one intermediate failure, `wave8delivery` "rejects the permissive legacy publisher for stage-three chloride", appeared when the isolation rule was added: its tube was only seeded in the amount ledger, not present in the contents store. The test setup now puts `agno3` into the tube store; its assertions are unchanged). New tests: `tests/night/baseline/defaults.test.ts` (8), `tests/night/taskB/sectionalValidation.test.ts` (8), `tests/night/taskA/surfaceProfile.test.ts` (1).
 Running the suite rewrites tracked diagnostic files under `docs/night/...`; they were restored with `git checkout -- docs tests/_*`.
 
 ## Not done / not verified
