@@ -188,8 +188,21 @@ export class SectionalPopulation {
     }
   }
   /** Conservative face fluxes under the resolved flow and section-specific vertical slip. */
-  transport(dt: number, flow: Float32Array, gravitySign: number, deposit: (column: number, amount: number) => void) {
+  transport(dt: number, flow: Float32Array, gravitySign: number, deposit: (column: number, amount: number) => void, subcycle = false) {
     const m = this.mask, dx = 2 * m.radius / m.nx, dy = m.height / m.ny, dz = 2 * m.radius / m.nz;
+    // Each face moves at most 12 percent of a cell per pass, so one pass follows a flow only up to 0.12 h / dt (about 2.5 mm/s here);
+    // a faster flow leaves the aggregates behind. With `subcycle` the step is cut into passes of Courant number at most 0.12 (at most 64),
+    // the same conservative scheme and the same deposit rule per pass. Off: the accepted single pass.
+    let passes = 1;
+    if (subcycle) {
+      let courant = 0;
+      for (let a = 0; a < m.activeCount; a++) {
+        const i = m.active[a];
+        courant = Math.max(courant, Math.abs(flow[3 * i]) * dt / dx, (Math.abs(flow[3 * i + 1]) + this.slip[this.slip.length - 1]) * dt / dy, Math.abs(flow[3 * i + 2]) * dt / dz);
+      }
+      passes = Math.min(64, Math.max(1, Math.ceil(courant / 0.12)));
+    }
+    if (passes > 1) { for (let k = 0; k < passes; k++) this.transport(dt / passes, flow, gravitySign, deposit, false); return; }
     const strideZ = m.nx * m.ny;
     for (let b = 0; b < this.masses.length; b++) {
       const mass = this.masses[b], delta = this.delta[b], slip = this.slip[b] * gravitySign;

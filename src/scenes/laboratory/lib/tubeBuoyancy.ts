@@ -17,7 +17,7 @@ export const EXCESS_KG_PER_MOL = {
   nano3: 0.08499 - 997 * 28.7e-6,
   agcl: 0.14332 - 997 * 25.8e-6,
 } as const;
-export const REFERENCE_DENSITY = 1008;       // kg/m3, normalisation of the relative density difference
+export const REFERENCE_DENSITY = 1010;       // kg/m3, Boussinesq reference: water 997 plus the receiving 0.1 mol/L AgNO3 (about 13 to 14)
 export const GRAVITY = 9.81;
 
 export interface BuoyancyOptions {
@@ -47,6 +47,18 @@ export function referenceExcess(unitMol: number, liquidM3: number) { return unit
 export function buoyancyOptions(flag: unknown): BuoyancyOptions | undefined {
   if (!flag) return undefined;
   return typeof flag === "object" ? flag as BuoyancyOptions : {};
+}
+/**
+ * The density coupling that is active: window.__silverDensity = true | { model: "net" | "solid", scale?, cap?, iterations?, unitMol? }
+ * (model "net", the default, is the complete composition model above; "solid" is the diagnostic that adds the solid's own weight to
+ * the tuned baseline and double counts the reacted reagents). The older __silverBuoyancy flag is still read.
+ */
+export function densityCoupling(g: { __silverDensity?: unknown; __silverBuoyancy?: unknown }): BuoyancyOptions | undefined {
+  const legacy = buoyancyOptions(g.__silverBuoyancy);
+  if (legacy) return legacy;
+  if (!g.__silverDensity) return undefined;
+  const o = (typeof g.__silverDensity === "object" ? g.__silverDensity : {}) as BuoyancyOptions & { model?: string };
+  return { ...o, mode: o.model === "solid" ? "additive" : "composition" };
 }
 
 /**

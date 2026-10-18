@@ -3,7 +3,7 @@ import { LiquidMask, SpeciesField, VelocityField } from "./tubeVolumeField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { STAGE3_AGCL_SOLID_M3_PER_UNIT, SilverSedimentField } from "./tubeSilverSediment";
 import { ConsolidatingDeposit, DEFAULT_DEPOSIT } from "./night/meso/consolidatingDeposit";
-import { GRAVITY, REFERENCE_DENSITY, buoyancyOptions, densityParts, fineWeightAcceleration, fineWeightOptions, referenceExcess, type DensityParts } from "./tubeBuoyancy";
+import { GRAVITY, REFERENCE_DENSITY, densityCoupling, densityParts, fineWeightAcceleration, fineWeightOptions, referenceExcess, type DensityParts } from "./tubeBuoyancy";
 import { tubeVessel } from "./vesselGeometry";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
@@ -289,7 +289,7 @@ export class TubeSilverField {
   get sedimentMass() { return this.sedimentField.mass; }
   /** Pressure-projection iterations while an experimental density coupling is on (the default few leave divergence that compresses scalars). */
   private get projectionIterations(): number | undefined {
-    const b = buoyancyOptions((globalThis as { __silverBuoyancy?: unknown }).__silverBuoyancy);
+    const b = densityCoupling(globalThis as { __silverDensity?: unknown; __silverBuoyancy?: unknown });
     if (b) return b.iterations ?? 120;
     const f = fineWeightOptions((globalThis as { __silverFineWeight?: unknown }).__silverFineWeight);
     return f ? f.iterations ?? 120 : undefined;
@@ -459,7 +459,7 @@ export class TubeSilverField {
       if (this.flocMode) {
         // Heavy flocs load the liquid; the poured (lighter) NaCl solution is buoyant: weight is negative where the
         // incoming-solution tracer is. Acceleration = g * (relative density difference) * volume fraction.
-        const buoy = buoyancyOptions((globalThis as { __silverBuoyancy?: unknown }).__silverBuoyancy);
+        const buoy = densityCoupling(globalThis as { __silverDensity?: unknown; __silverBuoyancy?: unknown });
         const fineWeight = buoy ? undefined : fineWeightOptions((globalThis as { __silverFineWeight?: unknown }).__silverFineWeight);
         const perUnit = fineWeight ? (fineWeight.unitMol ?? 1e-4) / this.liquidVolumeM3 : 0, cap = fineWeight?.cap ?? 100;
         for (let a = 0; a < m.activeCount; a++) {
@@ -1062,7 +1062,7 @@ export class TubeSilverField {
       this.sedimentField.deposit(column, mass);
       this.transferStep.aggregateToSediment += mass;
       this.transferStep.sectionToSediment += mass;
-    });
+    }, !!densityCoupling(globalThis as { __silverDensity?: unknown; __silverBuoyancy?: unknown }) || !!(globalThis as { __silverSectionSubcycle?: unknown }).__silverSectionSubcycle);
     // Only material with a resolved characteristic radius is promoted. A full node budget leaves
     // the mass in the moving, settling section population; the budget never changes collision rates.
     for (let a = 0; a < m.activeCount; a++) {

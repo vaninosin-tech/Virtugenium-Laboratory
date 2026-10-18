@@ -15,6 +15,7 @@ async function run() {
   vi.stubGlobal('window', { location: { search: '' }, __silverAgg: agg });
   (globalThis as Record<string, unknown>).__silverBuoyancy = process.env.BUOY ? { mode: 'composition' } : undefined;
   (globalThis as Record<string, unknown>).__silverDeposit = process.env.DEPOSIT ? true : undefined;
+  (globalThis as Record<string, unknown>).__silverDensity = process.env.DENS ? { model: process.env.DENS } : undefined;
   (globalThis as Record<string, unknown>).__silverFineWeight = process.env.FINE ? { mode: process.env.FINE === 'net' ? 'net' : 'solid' } : undefined;
   const { TubeSilverField } = await import('../../../src/scenes/laboratory/lib/tubeSilverField');
   const { SILVER_TUBE_RADIUS, silverFieldHeight, silverEffectiveRadius } = await import('../../../src/scenes/laboratory/lib/tubeSilverGeometry');
@@ -25,7 +26,7 @@ async function run() {
     flocSystem?: { nodes: { y: number; mass: number; vy: number; uy: number }[]; totalMass: number } };
   const m = f.mask, dy = m.height / m.ny, up = new THREE.Vector3(0, 1, 0), inlet = new THREE.Vector3(0.0065, 0, 0);
   let previousMl = 0, delivered = 0, mlTotal = start, level = tubeLiquidHeight(mlTotal, silverEffectiveRadius), prevDeposited = 0, lastT = 0;
-  const log: string[] = [`config: agg=${agg} AgNO3 ${start} mL 0.1 M (${(start * 0.1).toFixed(2)} mmol Ag+) + NaCl 1 mL 0.1 M (0.10 mmol) | composition buoyancy=${process.env.BUOY ? 'on' : 'off'} fine weight=${process.env.FINE ?? 'off'} stream=off`];
+  const log: string[] = [`config: agg=${agg} AgNO3 ${start} mL 0.1 M (${(start * 0.1).toFixed(2)} mmol Ag+) + NaCl 1 mL 0.1 M (0.10 mmol) | composition buoyancy=${process.env.BUOY ? 'on' : 'off'} fine weight=${process.env.FINE ?? 'off'} density model=${process.env.DENS ?? 'off (tuned baseline loads)'} stream=off`];
   const stepMs: number[] = [];
   let maxErr = 0;
   const steps = Math.round(END / 0.05);
@@ -47,6 +48,18 @@ async function run() {
     const t0 = performance.now();
     f.advance(0.05, up, level, inlet, Math.min(1, delivered), 0, rate, undefined);
     stepMs.push(performance.now() - t0);
+    if (process.env.NOCOLLIDE) (p.sections as unknown as { collide: () => void }).collide = () => undefined;   // diagnostic only: sections receive mass and move, never collide
+    if (process.env.KSEC) {   // diagnostic only: conservative explicit diffusion of the section masses (subgrid mixing like the fine suspension has)
+      const kappa = Number(process.env.KSEC), h = [2 * m.radius / m.nx, m.height / m.ny, 2 * m.radius / m.nz], strides = [1, m.nx, m.nx * m.ny], sub = Math.max(1, Math.ceil(kappa * 0.05 / (Math.min(...h) ** 2) * 8));
+      for (const bin of p.sections!.masses) for (let q = 0; q < sub; q++) {
+        const next = bin.slice();
+        for (let a = 0; a < m.activeCount; a++) { const i = m.active[a], c = [i % m.nx, Math.floor(i / m.nx) % m.ny, Math.floor(i / (m.nx * m.ny))];
+          for (let ax = 0; ax < 3; ax++) { const lim = [m.nx, m.ny, m.nz][ax]; if (c[ax] + 1 >= lim) continue; const j = i + strides[ax]; if (!m.data[j]) continue;
+            const flow = kappa * (0.05 / sub) / (h[ax] * h[ax]) * (bin[i] - bin[j]); next[i] -= flow; next[j] += flow; } }
+        bin.set(next);
+      }
+    }
+    if (process.env.NOSHEAR) (p.sections as unknown as { shear: Float64Array }).shear.fill(0);   // diagnostic only: Brownian aggregation, no shear kernel
     maxErr = Math.max(maxErr, Math.abs(f.massBalanceError));
     if (!CHECK.some(c => Math.abs(c - t) < 1e-9)) continue;
     // Ledger.
@@ -93,6 +106,49 @@ async function run() {
         for (let z = 0; z < m.nz; z++) { let r = ''; for (let x = 0; x < m.nx; x++) { const v = bedField.thicknessM(z * m.nx + x) * 1000; r += v <= 0 ? '  .  ' : v.toFixed(2).padStart(5); } rows.push(r); }
         log.push('   bed thickness map (mm, looking down, x right, z down):\n' + rows.map(r => '     ' + r).join('\n'));
       }
+    }
+    if (process.env.NDT) {   // explicit-coupling stability: N dt with N^2 = (g / rho0) (drho/dz) over vertical neighbour pairs, capped densities as in the load
+      let worst = 0, at = '', mean = 0, cnt = 0;
+      for (let a = 0; a < m.activeCount; a++) { const i = m.active[a], j = i + m.nx; if (Math.floor(i / m.nx) % m.ny + 1 >= m.ny || !m.data[j]) continue;
+        const grad = (f.compositionDensity(i, 1e-4, 100).total - f.compositionDensity(j, 1e-4, 100).total) / (m.height / m.ny);   // heavier below: positive = stable
+        if (grad > 0) { const nDt = Math.sqrt(9.81 / 1010 * grad) * 0.05; mean += nDt; cnt++; if (nDt > worst) { worst = nDt; at = `(${i % m.nx},${Math.floor(i / m.nx) % m.ny},${Math.floor(i / (m.nx * m.ny))})`; } } }
+      log.push(`   NDT t=${t}s worst N*dt ${worst.toFixed(2)} at ${at}, mean over stable pairs ${(mean / Math.max(1, cnt)).toFixed(2)} (explicit coupling needs N dt well below 2) | max|w| ${(maxW * 1000).toFixed(1)} mm/s`);
+    }
+    if (process.env.GROWTH) {
+      const rowRough = (get: (i: number) => number) => { const out: number[] = [];
+        for (let y = 2; y <= 14; y++) { const vals = new Map<number, number>(); for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; if (Math.floor(i / m.nx) % m.ny === y) vals.set(i, get(i)); }
+          const arr = [...vals.values()], mean = arr.reduce((x, z) => x + z, 0) / Math.max(1, arr.length), sd = Math.sqrt(arr.reduce((x, z) => x + (z - mean) ** 2, 0) / Math.max(1, arr.length));
+          if (sd < 1e-12 * Math.max(1, Math.abs(mean))) continue; let dev = 0, n = 0;
+          for (const [i, v] of vals) { const nb = [i - 1, i + 1, i - m.nx * m.ny, i + m.nx * m.ny].map(j => vals.get(j)).filter((q): q is number => q !== undefined); if (nb.length === 4) { dev += Math.abs(v - nb.reduce((x, z) => x + z, 0) / 4); n++; } }
+          if (n) out.push(dev / n / sd); }
+        return out.length ? (out.reduce((x, z) => x + z, 0) / out.length).toFixed(2) : 'n/a'; };
+      const sec = p.sections!;
+      log.push(`   GROWTH t=${t}s roughness fine ${rowRough(i => f.suspension[0][i])} sections ${rowRough(i => sec.masses.reduce((x, b) => x + b[i], 0))} density ${rowRough(i => f.compositionDensity(i).total)} max|w| ${(maxW * 1000).toFixed(1)} mm/s`);
+    }
+    if (process.env.PROBE) {
+      let mi = -1, mw = 0; for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; if (Math.abs(p.flow[3 * i + 1]) > mw) { mw = Math.abs(p.flow[3 * i + 1]); mi = i; } }
+      const mx = mi % m.nx, my = Math.floor(mi / m.nx) % m.ny, mz = Math.floor(mi / (m.nx * m.ny));
+      const rowStats = (y: number) => { const v: number[] = []; for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; if (Math.floor(i / m.nx) % m.ny === y) v.push(f.compositionDensity(i).total); }
+        const mean = v.reduce((x, z) => x + z, 0) / Math.max(1, v.length); return `${mean.toFixed(1)}+-${Math.sqrt(v.reduce((x, z) => x + (z - mean) ** 2, 0) / Math.max(1, v.length)).toFixed(1)}(${v.length})`; };
+      const near = (y: number) => rowStats(Math.max(0, Math.min(m.ny - 1, y)));
+      log.push(`   PROBE max|w| ${(mw * 1000).toFixed(1)} mm/s at cell (${mx},${my},${mz}) of (${m.nx},${m.ny},${m.nz}); density rows y-1..y+1 (mean+-sd kg/m3 (cells)): ${near(my - 1)} ${near(my)} ${near(my + 1)}; flocMass at cell ${(f as unknown as { flocMass: Float32Array }).flocMass[mi].toFixed(2)}, fine ${(f.suspension[0][mi] * m.activeCount).toFixed(2)}`);
+      { // grid-scale content of the density in the row of the fastest cell: deviation from the mean of the 4 horizontal neighbours over the row's sd
+        const rowVals = new Map<number, number>(); for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; if (Math.floor(i / m.nx) % m.ny === my) rowVals.set(i, f.compositionDensity(i).total); }
+        const vals = [...rowVals.values()], mean = vals.reduce((x, z) => x + z, 0) / vals.length, sd = Math.sqrt(vals.reduce((x, z) => x + (z - mean) ** 2, 0) / vals.length);
+        let dev = 0, n = 0; for (const [i, v] of rowVals) { const nb = [i - 1, i + 1, i - m.nx * m.ny, i + m.nx * m.ny].map(j => rowVals.get(j)).filter((q): q is number => q !== undefined);
+          if (nb.length === 4) { dev += Math.abs(v - nb.reduce((x, z) => x + z, 0) / 4); n++; } }
+        log.push(`   PROBE roughness (mean |rho - mean of 4 neighbours| / sd, ~0.1 smooth, ~0.8 checkerboard): ${(dev / Math.max(1, n) / Math.max(1e-9, sd)).toFixed(2)} over ${n} cells, sd ${sd.toFixed(2)} kg/m3`);
+      }
+      { // roughness of the aggregate (floc) mass field itself, rows at and around the fastest cell
+        const fm = (f as unknown as { flocMass: Float32Array }).flocMass, rows = [my - 1, my, my + 1].filter(y => y >= 0 && y < m.ny);
+        const rough = rows.map(y => { const vals = new Map<number, number>(); for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; if (Math.floor(i / m.nx) % m.ny === y) vals.set(i, fm[i]); }
+          const arr = [...vals.values()], mean = arr.reduce((x, z) => x + z, 0) / arr.length, sd = Math.sqrt(arr.reduce((x, z) => x + (z - mean) ** 2, 0) / arr.length); let dev = 0, n = 0;
+          for (const [i, v] of vals) { const nb = [i - 1, i + 1, i - m.nx * m.ny, i + m.nx * m.ny].map(j => vals.get(j)).filter((q): q is number => q !== undefined); if (nb.length === 4) { dev += Math.abs(v - nb.reduce((x, z) => x + z, 0) / 4); n++; } }
+          return `${(dev / Math.max(1, n) / Math.max(1e-9, sd)).toFixed(2)}(mean ${mean.toFixed(2)} sd ${sd.toFixed(2)})`; });
+        log.push(`   PROBE floc mass roughness rows y-1,y,y+1: ${rough.join(' ')}`);
+      }
+      const w2: string[] = []; for (let y = 0; y < m.ny; y += 3) { let s2 = 0, c = 0; for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; if (Math.floor(i / m.nx) % m.ny === y) { s2 += p.flow[3 * i + 1]; c++; } } w2.push((s2 / Math.max(1, c) * 1000).toFixed(2)); }
+      log.push(`   row-mean w by height (mm/s, rows 0,3,6..): ${w2.join(' ')}`);
     }
     const dep = (mass.deposited - prevDeposited) / Math.max(1e-9, t - lastT); prevDeposited = mass.deposited; lastT = t;
     const fmt = (v: number, d = 3) => v.toFixed(d);
