@@ -40,6 +40,8 @@ export class TubeFlowSolver {
   readonly lastStrain: Float32Array;
   /** Per-cell eddy diffusivity (m2/s) of the resolved flow after the last step, before the per-field scale (read-only view). */
   get eddyDiffusivities(): Float32Array { return this.eddy; }
+  /** Staggered face velocities (the + face of each cell along each axis), the divergence-free field the scalars must be advected with (read-only view). */
+  get faceVelocities(): readonly Float32Array[] { return this.faces; }
   readonly lastVorticity: Float32Array;
   lastJetMomentumSource: readonly number[] = [0, 0, 0];
   lastEntrainmentFlux = 0;
@@ -227,7 +229,9 @@ export class TubeFlowSolver {
     else this.project();
     this.lastProjectionMs = projectStart ? performance.now() - projectStart : 0;
     this.clearFast();
-    if (streamMode) this.classifyFast(dt);
+    // Fast faces (Courant above 0.9) are advected in sub-steps: for the physical stream and for the experimental density coupling,
+    // whose overturning flows exceed the single-pass limit of the explicit scalar transport (Courant up to 4 on the HIGH grid).
+    if (streamMode || load?.iterations) this.classifyFast(dt);
     if (jet && pre) {
       const post = this.totalFaceMomentum(dt);
       this.lastJetProjectionChange = post.map((v, axis) => v - pre![axis]);

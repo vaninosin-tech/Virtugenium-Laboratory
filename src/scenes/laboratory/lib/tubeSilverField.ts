@@ -1062,7 +1062,9 @@ export class TubeSilverField {
       this.sedimentField.deposit(column, mass);
       this.transferStep.aggregateToSediment += mass;
       this.transferStep.sectionToSediment += mass;
-    }, !!densityCoupling(globalThis as { __silverDensity?: unknown; __silverBuoyancy?: unknown }) || !!(globalThis as { __silverSectionSubcycle?: unknown }).__silverSectionSubcycle);
+    }, !!densityCoupling(globalThis as { __silverDensity?: unknown; __silverBuoyancy?: unknown }) || !!(globalThis as { __silverSectionSubcycle?: unknown }).__silverSectionSubcycle,
+    // Experimental density coupling: advect the aggregates with the solver's divergence-free face velocities (see sectionalPopulation.ts).
+    (densityCoupling(globalThis as { __silverDensity?: unknown; __silverBuoyancy?: unknown }) || (globalThis as { __silverSectionFaces?: unknown }).__silverSectionFaces) ? this.solver.faceVelocities : undefined);
     // Only material with a resolved characteristic radius is promoted. A full node budget leaves
     // the mass in the moving, settling section population; the budget never changes collision rates.
     for (let a = 0; a < m.activeCount; a++) {

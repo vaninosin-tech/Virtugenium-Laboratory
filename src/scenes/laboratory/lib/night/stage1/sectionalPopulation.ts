@@ -188,7 +188,7 @@ export class SectionalPopulation {
     }
   }
   /** Conservative face fluxes under the resolved flow and section-specific vertical slip. */
-  transport(dt: number, flow: Float32Array, gravitySign: number, deposit: (column: number, amount: number) => void, subcycle = false) {
+  transport(dt: number, flow: Float32Array, gravitySign: number, deposit: (column: number, amount: number) => void, subcycle = false, faces?: readonly ArrayLike<number>[]) {
     const m = this.mask, dx = 2 * m.radius / m.nx, dy = m.height / m.ny, dz = 2 * m.radius / m.nz;
     // Each face moves at most 12 percent of a cell per pass, so one pass follows a flow only up to 0.12 h / dt (about 2.5 mm/s here);
     // a faster flow leaves the aggregates behind. With `subcycle` the step is cut into passes of Courant number at most 0.12 (at most 64),
@@ -202,7 +202,7 @@ export class SectionalPopulation {
       }
       passes = Math.min(64, Math.max(1, Math.ceil(courant / 0.12)));
     }
-    if (passes > 1) { for (let k = 0; k < passes; k++) this.transport(dt / passes, flow, gravitySign, deposit, false); return; }
+    if (passes > 1) { for (let k = 0; k < passes; k++) this.transport(dt / passes, flow, gravitySign, deposit, false, faces); return; }
     const strideZ = m.nx * m.ny;
     for (let b = 0; b < this.masses.length; b++) {
       const mass = this.masses[b], delta = this.delta[b], slip = this.slip[b] * gravitySign;
@@ -222,7 +222,10 @@ export class SectionalPopulation {
           }
           if (j < 0 || !m.data[j]) continue;
           const axis = side >> 1, sign = side % 2 ? 1 : -1;
-          const v = 0.5 * (flow[3 * i + axis] + flow[3 * j + axis]) + (axis === 1 ? slip : 0);
+          // With `faces` the flux uses the solver's staggered face velocity (divergence free, the same field the scalars use); otherwise the
+          // average of the two cell-centred velocities, which is not divergence free on the staggered grid.
+          const carrier = faces ? (sign > 0 ? Number(faces[axis][i]) : Number(faces[axis][j])) : 0.5 * (flow[3 * i + axis] + flow[3 * j + axis]);
+          const v = carrier + (axis === 1 ? slip : 0);
           const share = Math.max(0, sign * v) * dt / (axis === 0 ? dx : axis === 1 ? dy : dz);
           const moved = original * Math.min(0.12, share);
           delta[i] -= moved; delta[j] += moved; out += moved;

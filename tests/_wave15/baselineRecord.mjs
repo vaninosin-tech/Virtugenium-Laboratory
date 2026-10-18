@@ -7,7 +7,9 @@ import { tubeCrop } from "../_wave11/browserCommon.mjs";
 
 const root=process.env.OUT??"docs/night/wave15r2/captures";
 const modes=process.env.BOTH==="1"?["wide","close"]:[process.env.CAMERA??"wide"];
-const cameras={wide:{dist:.42,fov:30,targetY:-.045,targetSide:.02},close:{dist:.2,fov:20,targetY:-.115,targetSide:0}};
+// wide, close: the developer spectator camera (DiagnosticCamera.tsx: side view across the bottle direction, 2 cm above the target, looking at it).
+// game: the game's own camera at the stand with the tube close-up opened by Q (CameraRig.tsx, horizontal side view of the tube).
+const cameras={wide:{dist:.42,fov:30,targetY:-.045,targetSide:.02},close:{dist:.2,fov:20,targetY:-.115,targetSide:0},game:{game:true}};
 const dumpAt=JSON.parse(process.env.DUMPAT??"[500,1000,2000,3000,4500,6000,9000,12000,14000,17000,20000,22000,24000]");
 const durationMs=Number(process.env.DURATION_MS??24000);
 const slow=Number(process.env.SLOW??.15);
@@ -28,7 +30,7 @@ for(const mode of modes){
     await page.waitForFunction(()=>window.__sceneStore?.getState().cabinetPhase==="inspecting"&&window.__diag&&window.__clampMouth?.valid&&window.__three?.gl);
     await page.locator(".lab-boot-screen").waitFor({state:"hidden"});
     await page.evaluate(async({camera,dumpAt,hideUi})=>{
-      window.__diagCamera=camera;
+      window.__diagCamera=camera.game?undefined:camera;
       const sm=await import("/src/scenes/laboratory/lib/useStandMotionStore.ts");
       const box=document.createElement("div");box.style.cssText="position:fixed;left:6px;bottom:60px;z-index:99999;font:700 22px monospace;color:#ff0;background:#000a;padding:4px 8px;white-space:pre";document.body.appendChild(box);
       if(hideUi){let el=document.querySelector("canvas");while(el&&el!==document.body){for(const sib of el.parentElement.children)if(sib!==el&&sib!==box)sib.style.display="none";el=el.parentElement;}}
@@ -52,6 +54,7 @@ for(const mode of modes){
       const frame=()=>{sample("raf");if(!run.stop)requestAnimationFrame(frame);};requestAnimationFrame(frame);
       sm.onSimulationTick(()=>{if(!run.stop)sample("tick");});
     },{camera:cameras[mode],dumpAt,hideUi:process.env.HIDEUI!=="0"});
+    if(cameras[mode].game){await page.keyboard.press("KeyQ");await page.waitForTimeout(2500);}   // the game camera: tube close-up
     const pour=id=>page.evaluate(async reagentId=>{const {runStandAction}=await import("/src/scenes/laboratory/lib/standTableActions.ts");return runStandAction({kind:"bottle",location:"fumeHood",reagentId,instanceId:`sandbox-jar-${reagentId}`});},id);
     if(!(await pour("agno3")))throw new Error("AgNO3 refused");
     await page.waitForFunction(()=>window.__testTubeStorageStore?.getState().fumeHoodTestTubes[0]?.contents.includes("agno3"));

@@ -15,6 +15,7 @@ async function run() {
   vi.stubGlobal('window', { location: { search: '' }, __silverAgg: agg });
   (globalThis as Record<string, unknown>).__silverBuoyancy = process.env.BUOY ? { mode: 'composition' } : undefined;
   (globalThis as Record<string, unknown>).__silverDeposit = process.env.DEPOSIT ? true : undefined;
+  (globalThis as Record<string, unknown>).__silverSectionFaces = process.env.SFACES ? 1 : undefined;
   (globalThis as Record<string, unknown>).__silverViscosity = process.env.NU ? Number(process.env.NU) : undefined;
   (globalThis as Record<string, unknown>).__silverDensity = process.env.DENS ? { model: process.env.DENS } : undefined;
   (globalThis as Record<string, unknown>).__silverFineWeight = process.env.FINE ? { mode: process.env.FINE === 'net' ? 'net' : 'solid' } : undefined;
@@ -22,7 +23,7 @@ async function run() {
   const { SILVER_TUBE_RADIUS, silverFieldHeight, silverEffectiveRadius } = await import('../../../src/scenes/laboratory/lib/tubeSilverGeometry');
   const { tubeLiquidHeight } = await import('../../../src/scenes/laboratory/lib/tubeLiquidLevel');
   const { pouredMl } = await import('../../../src/scenes/laboratory/lib/tubePourImpact');
-  const f = new TubeSilverField('LOW', SILVER_TUBE_RADIUS, 0, silverFieldHeight, start);   // start mL of 0.1 mol/L AgNO3 = start units of 0.1 mmol Ag+
+  const f = new TubeSilverField((process.env.QUALITY ?? 'LOW') as 'LOW' | 'HIGH', SILVER_TUBE_RADIUS, 0, silverFieldHeight, start);   // start mL of 0.1 mol/L AgNO3 = start units of 0.1 mmol Ag+
   const p = f as unknown as { flow: Float32Array; sections?: { masses: Float64Array[]; slip: number[] | Float64Array; radii: number[] | Float64Array; totalMass: number };
     flocSystem?: { nodes: { y: number; mass: number; vy: number; uy: number }[]; totalMass: number } };
   const m = f.mask, dy = m.height / m.ny, up = new THREE.Vector3(0, 1, 0), inlet = new THREE.Vector3(0.0065, 0, 0);
@@ -30,6 +31,9 @@ async function run() {
   const log: string[] = [`config: agg=${agg} AgNO3 ${start} mL 0.1 M (${(start * 0.1).toFixed(2)} mmol Ag+) + NaCl 1 mL 0.1 M (0.10 mmol) | composition buoyancy=${process.env.BUOY ? 'on' : 'off'} fine weight=${process.env.FINE ?? 'off'} density model=${process.env.DENS ?? 'off (tuned baseline loads)'} stream=off`];
   const stepMs: number[] = [];
   let maxErr = 0;
+  const audit = process.env.AUDIT ? process.env.AUDIT.split(',').map(Number) : null; const A = { work: 0, visc: 0, damp: 0, ke0: 0, ke1: 0, pe0: 0, pe1: 0, started: false };
+  const vol = (2 * f.mask.radius / f.mask.nx) * (f.mask.height / f.mask.ny) * (2 * f.mask.radius / f.mask.nz);
+  const nuAudit = process.env.NU ? Number(process.env.NU) : 2e-7;
   const steps = Math.round(END / 0.05);
   for (let n = 0; n <= steps; n++) {
     const atMs = n * 50, t = n * 0.05;
@@ -62,6 +66,21 @@ async function run() {
     }
     if (process.env.NOSHEAR) (p.sections as unknown as { shear: Float64Array }).shear.fill(0);   // diagnostic only: Brownian aggregation, no shear kernel
     maxErr = Math.max(maxErr, Math.abs(f.massBalanceError));
+    if (audit && t >= audit[0] - 1e-9 && t <= audit[1] + 1e-9) {
+      const pp = p as unknown as { flow: Float32Array; solver: { adjacent: Int32Array[] } }; let work = 0, pe = 0, ke = 0, visc = 0;
+      const sol = (f as unknown as { solver: { adjacent: Int32Array[]; flow: Float32Array } }).solver, fl = sol.flow, adj = sol.adjacent, sp = [2 * m.radius / m.nx, m.height / m.ny, 2 * m.radius / m.nz];
+      for (let a2 = 0; a2 < m.activeCount; a2++) {
+        const i = m.active[a2], y = (Math.floor(i / m.nx) % m.ny + 0.5) * sp[1], rho = f.compositionDensity(i, 1e-4, 100).total, acc = 9.81 * rho / 1010;
+        work += acc * (-fl[3 * i + 1]) * vol; pe += acc * y * vol; ke += 0.5 * (fl[3 * i] ** 2 + fl[3 * i + 1] ** 2 + fl[3 * i + 2] ** 2) * vol;
+        let g2 = 0; for (let axis = 0; axis < 3; axis++) { const l = adj[axis * 2][i], r = adj[axis * 2 + 1][i]; if (l < 0 && r < 0) continue; const h = sp[axis] * (l >= 0 && r >= 0 ? 2 : 1);
+          for (let c = 0; c < 3; c++) { const d = (fl[3 * (r >= 0 ? r : i) + c] - fl[3 * (l >= 0 ? l : i) + c]) / h; g2 += d * d; } }
+        visc += nuAudit * g2 * vol;
+      }
+      void pp;
+      if (!A.started) { A.started = true; A.pe0 = pe; A.ke0 = ke; }
+      A.work += work * 0.05; A.visc += visc * 0.05; A.damp += 0.26 * 2 * ke * 0.05; A.pe1 = pe; A.ke1 = ke;
+      if (Math.abs(t - audit[1]) < 1e-9) log.push(`   AUDIT ${audit[0]}-${audit[1]}s: buoyancy work ${A.work.toExponential(2)}, -dPE (all density, incl. transfers and deposit) ${(-(A.pe1 - A.pe0)).toExponential(2)}, viscous ${A.visc.toExponential(2)}, Rayleigh damping ${A.damp.toExponential(2)}, KE ${A.ke0.toExponential(2)} -> ${A.ke1.toExponential(2)}, numerical residual dKE-(work-diss) ${(A.ke1 - A.ke0 - (A.work - A.visc - A.damp)).toExponential(2)}`);
+    }
     if (!CHECK.some(c => Math.abs(c - t) < 1e-9)) continue;
     // Ledger.
     const mass: Mass = { formed: f.extent, fine: f.suspensionMass, sections: p.sections?.totalMass ?? 0, flocs: p.flocSystem?.totalMass ?? 0,
@@ -158,6 +177,9 @@ async function run() {
     log.push(`   sediment: equivalent bowl fill ${(sed.equivalentFillHeight * 1000).toFixed(3)} mm, porosity ${sed.porosity.toFixed(3)}, compaction ${sed.compaction.toFixed(3)}`);
     log.push(`   suspended by band (top->bottom, share of suspended): ${Array.from(suspended).reverse().map(v => fmt(ww > 0 ? v / ww : 0, 2)).join(' ')}`);
     log.push(`   fine-only share: ${Array.from(fineBand).reverse().map(v => fmt(mass.fine > 0 ? v / mass.fine : 0, 2)).join(' ')} | density excess mean kg/m3: ${Array.from(densityBand).reverse().map((v, k) => fmt(v / Math.max(1, Array.from(cells).reverse()[k]), 1)).join(' ')}`);
+    { const fl = (f as unknown as { solver: { flow: Float32Array } }).solver.flow, v1 = (2 * m.radius / m.nx) * (m.height / m.ny) * (2 * m.radius / m.nz); let ke2 = 0;
+      for (let a2 = 0; a2 < m.activeCount; a2++) { const i = m.active[a2]; ke2 += 0.5 * (fl[3 * i] ** 2 + fl[3 * i + 1] ** 2 + fl[3 * i + 2] ** 2) * v1; }
+      log.push(`   KE ${ke2.toExponential(2)} (m5/s2 per unit density)`); }
     log.push(`   centroid ${fmt(ww > 0 ? cw / ww * 1000 : 0, 2)}mm of ${fmt(level * 1000, 1)}mm | mass-weighted vertical velocity: fluid ${fmt(ww > 0 ? wFluid / ww * 1000 : 0, 4)} mm/s, gravitational slip ${fmt(ww > 0 ? wSlip / ww * 1000 : 0, 5)} mm/s | max|w| ${fmt(maxW * 1000, 3)} mm/s mean|w| ${fmt(sumAbsW / m.activeCount * 1000, 4)} mm/s | deposit flux ${dep.toExponential(2)} units/s`);
   }
   { const sorted = [...stepMs].sort((a, b) => a - b); log.push(`CPU (node, one core): mean ${(stepMs.reduce((a, b) => a + b, 0) / stepMs.length).toFixed(2)} ms/step, p99 ${sorted[Math.floor(sorted.length * 0.99)].toFixed(2)} ms, max ${sorted.at(-1)!.toFixed(2)} ms over ${stepMs.length} steps`); }
