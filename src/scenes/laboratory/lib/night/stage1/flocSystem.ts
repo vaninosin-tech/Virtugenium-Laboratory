@@ -236,8 +236,8 @@ export class FlocSystem {
     let best = -1, bestD = Infinity;
     for (const i of this.nearbyPoint(x, y, z, Math.max(this.maxRadius, nodeRadius(mass, c)) * 1.3)) {
       const n = this.nodes[i], d = Math.hypot(n.x - x, n.y - y, n.z - z);
-      // Fine solid joins a floc that is within about one quantum radius of it (cluster growth).
-      const reach = (nodeRadius(n.mass, c) + nodeRadius(mass, c)) * 1.3;
+      // Deep overlap coalesces. Shallower contacts can remain separate linked pieces.
+      const reach = (nodeRadius(n.mass, c) + nodeRadius(mass, c)) * 0.6;
       if (d < reach && d < bestD) { bestD = d; best = i; }
     }
     if (best >= 0 && this.nodes[best].mass < c.quantum * 3) {
@@ -306,8 +306,31 @@ export class FlocSystem {
     this.compact(dt);
     // A link breaks from the stretch the flow has just imposed, before the constraint pulls the nodes back.
     if (c.allowBreakage) this.breakLinks();
+    this.mergeContacts();
     for (let sweep = 0; sweep < 3; sweep++) { this.relaxLinks(); this.separate(); this.confine(); }
     this.rebuildCells();
+  }
+
+  /** Unlinked pieces that collide can become one aggregate; no mass is created by the merger. */
+  private mergeContacts() {
+    const c = this.config;
+    let merged = true;
+    while (merged) {
+      merged = false;
+      for (let i = 0; i < this.nodes.length && !merged; i++) {
+        const a = this.nodes[i], reach = this.radii[i] + this.maxRadius;
+        for (const j of this.nearby(i, reach)) {
+          if (j <= i || this.adjacency[i].includes(j)) continue;
+          const b = this.nodes[j], dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+          const contact = c.contact * (this.radii[i] + this.radii[j]);
+          if (dx * dx + dy * dy + dz * dz > contact * contact) continue;
+          if (dx * (b.vx - a.vx) + dy * (b.vy - a.vy) + dz * (b.vz - a.vz) >= 0) continue;
+          this.mergeNodes(i, j);
+          merged = true;
+          break;
+        }
+      }
+    }
   }
 
   /** Free node slots by merging the lightest close pair, then place pending mass in the freed slots. */

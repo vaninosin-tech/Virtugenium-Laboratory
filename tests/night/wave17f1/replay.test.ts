@@ -52,13 +52,15 @@ function run(quality: 'LOW' | 'HIGH', flowing: boolean, artifacts: boolean) {
         cumulative[key] += f.transferStep[key];
       const fine = f.suspensionMass + f.coarseMass, aggregate = f.denseMass, sediment = f.sedimentMass;
       const pending = f.flocSystem.pendingMass;
+      const seedMass = f.aggregateSeeds.reduce((sum, amount) => sum + amount, 0);
       maxNodes = Math.max(maxNodes, f.flocSystem.nodes.length);
       maxPending = Math.max(maxPending, pending);
       maxError = Math.max(maxError, Math.abs(f.massBalanceError));
       maxStoichError = Math.max(maxStoichError,
         Math.abs(f.species['Ag+'].total + f.extent - f.silverAmount),
         Math.abs(f.species['Cl-'].total + f.extent - f.delivered));
-      const row = { t, extent: f.extent, fine, aggregate, sediment, pending,
+      const row = { t, extent: f.extent, fine, aggregate, sediment, pending, seedMass,
+        nodeMass: aggregate - seedMass - pending,
         nodes: f.flocSystem.nodes.length, heightMm: Math.max(...f.sedimentHeightPixels) * 1000,
         bulkMl: f.sedimentMass * f.sedimentHeightScale * 1e6,
         ...Object.fromEntries(Object.entries(f.transferStep).flatMap(([name, amount]) =>
