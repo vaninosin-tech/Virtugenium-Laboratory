@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { reactR2, TubeSilverField } from "./tubeSilverField";
+import { tubeVessel } from "./vesselGeometry";
 
 describe("AgCl R2 field", () => {
   it("reacts only where both ions meet and consumes them equally", () => {
@@ -29,4 +30,31 @@ describe("AgCl R2 field", () => {
       expect(Number.isFinite(value) && value >= 0).toBe(true);
     field.dispose();
   }, 30000);
+
+  it("keeps all silver scalar amounts in wet cells while the level rises and the tube tilts", () => {
+    const field = new TubeSilverField("LOW", tubeVessel.innerRadius, 0,
+      tubeVessel.heightFromVolume(tubeVessel.capacityMl));
+    const inlet = new THREE.Vector3(0, tubeVessel.heightFromVolume(1), 0);
+    const upright = new THREE.Vector3(0, 1, 0);
+    const arrays = () => [...Object.values(field.species).map(s => s.values),
+      ...field.suspension, field.coarse, field.tracer, field.dense, ...field.denseCoordinates];
+    const totals = () => arrays().map(values => values.reduce((sum, value) => sum + value, 0));
+    const assertDryEmpty = () => {
+      for (const values of arrays()) for (let i = 0; i < values.length; i++)
+        if (!field.mask.data[i]) expect(Math.abs(values[i])).toBeLessThan(1e-12);
+    };
+    field.advance(0.05, upright, tubeVessel.heightFromVolume(1), inlet, 0);
+    const before = totals();
+    field.advance(0.05, upright, tubeVessel.heightFromVolume(2), inlet, 0);
+    const afterRise = totals();
+    before.forEach((value, index) => expect(afterRise[index]).toBeCloseTo(value, 12));
+    assertDryEmpty();
+    const tilt = new THREE.Vector3(0.5, Math.sqrt(0.75), 0);
+    const beforeTilt = totals();
+    field.advance(0.05, tilt, tubeVessel.heightFromVolume(2), inlet, 0);
+    const afterTilt = totals();
+    beforeTilt.forEach((value, index) => expect(afterTilt[index]).toBeCloseTo(value, 12));
+    assertDryEmpty();
+    field.dispose();
+  });
 });

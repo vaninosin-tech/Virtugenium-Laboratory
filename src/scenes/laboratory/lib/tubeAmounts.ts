@@ -1,12 +1,14 @@
 /** Game units are separate from virtual millilitres. A tube never spills. */
 import { silverStage } from "./silverStage";
 import { silverRuntime } from "./tubeSilverRuntime";
+import { tubeVessel } from "./vesselGeometry";
 
-export const TUBE_CAPACITY_ML = 5;
+export const TUBE_CAPACITY_ML = tubeVessel.capacityMl;
 export const STANDARD_POUR_ML = 1;
-/** The authored cavity is already at its resting level with 2.5 ml. */
+/** Fraction of the authored liquid mesh occupied by actual game millilitres. */
 export function tubeVisualFill(volumeMl: number): number {
-  return Number.isFinite(volumeMl) ? Math.max(0, Math.min(1, volumeMl / 2.5)) : 0;
+  return Number.isFinite(volumeMl)
+    ? tubeVessel.heightFromVolume(volumeMl) / tubeVessel.cavityHeight : 0;
 }
 export type TubeAmount = { volumeMl: number; species: Record<string, number>; copper: number };
 type AmountRegistry = {

@@ -3,6 +3,7 @@ import { copperReactionState, type CopperReactionState } from "./tubeReactions";
 import type { TemperatureField } from "./tubeTemperatureField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { TubeFlowSolver } from "./tubeFlowSolver";
+import { tubeVessel } from "./vesselGeometry";
 
 export type SpeciesId = "Cu2+" | (string & {});
 export type ReactionState = CopperReactionState;
@@ -10,10 +11,13 @@ export type ReactionState = CopperReactionState;
 const finite = (v: number) => Number.isFinite(v) ? v : 0;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
-/** A local, closed liquid volume. Each occupied voxel has equal numerical volume. */
+/** A local, closed liquid volume. Scalar arrays store amounts, while cellVolumeMl records wet physical volume. */
 export class LiquidMask {
   readonly data: Uint8Array;
   readonly active: Int32Array;
+  /** Physical liquid millilitres represented by each active voxel. */
+  readonly cellVolumeMl: Float64Array;
+  wetVolumeMl = 0;
   activeCount = 0;
   readonly nx: number;
   readonly ny: number;
@@ -31,6 +35,7 @@ export class LiquidMask {
     this.radius = radius; this.bottom = bottom; this.height = height;
     this.data = new Uint8Array(nx * ny * nz);
     this.active = new Int32Array(this.data.length);
+    this.cellVolumeMl = new Float64Array(this.data.length);
     this.update(this.up, bottom + height * 0.7);
   }
 
@@ -63,12 +68,48 @@ export class LiquidMask {
   update(up: THREE.Vector3, level: number) {
     this.up.copy(up).normalize(); this.level = level;
     this.activeCount = 0;
+    const dx = 2 * this.radius / this.nx, dy = this.height / this.ny, dz = 2 * this.radius / this.nz;
+    const canonical = this.radius === tubeVessel.innerRadius
+      && this.height <= tubeVessel.cavityHeight
+      && this.height >= tubeVessel.heightFromVolume(tubeVessel.capacityMl);
+    let sampledMl = 0;
     for (let z = 0; z < this.nz; z++) for (let y = 0; y < this.ny; y++)
       for (let x = 0; x < this.nx; x++) {
         const i = this.index(x, y, z);
         this.data[i] = this.contains(this.point(x, y, z, this.pointScratch)) ? 1 : 0;
-        if (this.data[i]) this.active[this.activeCount++] = i;
+        this.cellVolumeMl[i] = 0;
+        if (this.data[i]) {
+          this.active[this.activeCount++] = i;
+          const box: readonly [number, number, number, number, number, number] = [
+            -this.radius + x * dx, -this.radius + (x + 1) * dx,
+            y * dy, (y + 1) * dy,
+            -this.radius + z * dz, -this.radius + (z + 1) * dz,
+          ];
+          const fraction = canonical && this.up.y > 0.999999
+            ? tubeVessel.cellLiquidFraction(box, level - this.bottom)
+            : canonical ? this.tiltedCellFraction(box, level) : 1;
+          this.cellVolumeMl[i] = fraction * dx * dy * dz * 1e6;
+          sampledMl += this.cellVolumeMl[i];
+        }
       }
+    // Existing fields store amounts. This physical volume map supplies their
+    // concentration denominator without changing any saved or cached amounts.
+    this.wetVolumeMl = canonical ? tubeVessel.volumeFromHeight(level - this.bottom) : sampledMl;
+    const scale = sampledMl > 0 ? this.wetVolumeMl / sampledMl : 0;
+    for (let a = 0; a < this.activeCount; a++) this.cellVolumeMl[this.active[a]] *= scale;
+  }
+
+  private tiltedCellFraction(box: readonly [number, number, number, number, number, number], level: number) {
+    let wet = 0;
+    const n = 3;
+    for (let iy = 0; iy < n; iy++) for (let ix = 0; ix < n; ix++) for (let iz = 0; iz < n; iz++) {
+      const x = box[0] + (ix + 0.5) / n * (box[1] - box[0]);
+      const h = box[2] + (iy + 0.5) / n * (box[3] - box[2]);
+      const z = box[4] + (iz + 0.5) / n * (box[5] - box[4]);
+      const r2 = h < this.radius ? 2 * this.radius * h - h * h : this.radius * this.radius;
+      if (x * x + z * z <= r2 && this.up.x * x + this.up.y * (this.bottom + h) + this.up.z * z <= level) wet++;
+    }
+    return wet / (n * n * n);
   }
 }
 

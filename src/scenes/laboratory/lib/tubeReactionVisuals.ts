@@ -16,7 +16,7 @@ import { TubePermanganateField } from "./tubePermanganateField";
 import { tubePourImpact } from "./tubePourImpact";
 import { updateTubeFlowDebug } from "./tubeFlowDebug";
 import { seedTubeAmounts, syncBariumExtent, syncSilverExtent, syncCopperProgress, syncPermanganateExtent, tubeAmount } from "./tubeAmounts";
-import { tubeEffectiveRadius, tubeLiquidFill, tubeLiquidHeight } from "./tubeLiquidLevel";
+import { tubeVessel } from "./vesselGeometry";
 import { TubeMotion } from "./tubeMotion";
 import { CLAMP_TUBE_MOUTH } from "./useStandMotionStore";
 import { fillTestTubeContents, resolveTubeContents, testTubeLiquidFill } from "./testTubeContents";
@@ -507,9 +507,8 @@ export function createTubeReactionVisuals(root: THREE.Object3D, kind: ReactionKi
   const headRadius = Math.min(shellBox.max.x - shellBox.min.x, shellBox.max.z - shellBox.min.z) * 0.45;
   // Read the lip in cavity coordinates so authored node transforms remain valid.
   const lip = volume.worldToLocal(shell.localToWorld(new THREE.Vector3(0, shell.geometry.boundingBox!.max.y, 0)));
-  const effectiveRadius = tubeEffectiveRadius(size.y);
-  const fieldHeight = Math.max(size.y, tubeLiquidHeight(5, effectiveRadius) + radius * 0.25);
-  const renderHeight = fieldHeight;
+  const fieldHeight = tubeVessel.heightFromVolume(tubeVessel.capacityMl);
+  const renderHeight = tubeVessel.cavityHeight;
   // Include the starting 2.5 ml and the full 5 ml capacity in the Cu field.
   const copperHeight = fieldHeight;
   const baseline = volume.material;
@@ -1166,7 +1165,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
       }
       const impact = options.activeSurface && attachedNow ? tubePourImpact(attachedNow.instanceId) : undefined;
       const fill = attachedNow && tubeAmount(attachedNow.instanceId).volumeMl > 0
-        ? tubeLiquidFill(tubeAmount(attachedNow.instanceId).volumeMl, effectiveRadius, size.y)
+        ? tubeVessel.heightFromVolume(tubeAmount(attachedNow.instanceId).volumeMl) / size.y
         : THREE.MathUtils.lerp(startFill, targetFill, THREE.MathUtils.smoothstep(pourAge, 0, 1.3));
       transport?.advance(dt, fill);
       waveSurface?.setQuality(quality);

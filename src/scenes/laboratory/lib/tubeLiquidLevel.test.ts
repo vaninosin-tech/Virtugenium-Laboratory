@@ -16,8 +16,8 @@ describe("tube volume geometry", () => {
     }
     expect(tubeLiquidFill(3.5, radius, 0.055)).toBeGreaterThan(tubeLiquidFill(2.5, radius, 0.055));
     const effective = tubeEffectiveRadius(0.0555);
-    expect(tubeLiquidHeight(2.5, effective)).toBeCloseTo(0.0555, 10);
-    expect(tubeLiquidHeight(3.5, effective)).toBeGreaterThan(0.0555);
+    expect(effective).toBe(radius);
+    expect(tubeLiquidHeight(2.5, effective)).toBeCloseTo(0.01857, 4);
     expect(tubeLiquidHeight(5, effective)).toBeGreaterThan(tubeLiquidHeight(3.5, effective));
   });
 });
