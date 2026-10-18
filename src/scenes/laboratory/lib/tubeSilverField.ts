@@ -125,6 +125,16 @@ export class TubeSilverField {
   /** Sub-resolution aggregate section; advected until a local parcel can be represented by a node. */
   readonly aggregateSeeds: Float64Array;
   private readonly sectionSticking: Float64Array;
+  /** Dev-only stage-3 assumptions. Defaults preserve the calibrated aggregation path. */
+  private get primaryRadiusM() {
+    const value = (globalThis as { __silverPrimaryRadiusUm?: unknown }).__silverPrimaryRadiusUm;
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0.02 && value <= 0.2
+      ? value * 1e-6 : PRIMARY_RADIUS_M;
+  }
+  private get stickingScale() {
+    const value = (globalThis as { __silverStickingScale?: unknown }).__silverStickingScale;
+    return typeof value === 'number' && Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, 1) : 1;
+  }
   /** Individually represented floc components for the renderer. */
   visibleFlocs: ReturnType<FlocSystem['componentSummaries']> = [];
   flocVisual = new Float32Array(0);
@@ -888,15 +898,16 @@ export class TubeSilverField {
 
   /** Primary particles flocculate where the fine solid is concentrated (rate ~ concentration), then the flocs move. */
   private advanceFlocSystem(dt: number) {
-    const m = this.mask, smoothing = this.suspension[0];
+    const m = this.mask, smoothing = this.suspension[0], primaryRadius = this.primaryRadiusM;
+    const stickingScale = this.stickingScale;
     if (!this.flocSystem) {
       this.flocSystem = new FlocSystem({ ...DEFAULT_FLOC_CONFIG, radius: m.radius, bottom: m.bottom, height: m.height,
         allowBreakage: (globalThis as { __silverBreak?: unknown }).__silverBreak === 1,
-        quantum: FLOC_QUANTUM, solidFraction: FLOC_SOLID_FRACTION,
+        quantum: FLOC_QUANTUM, solidFraction: FLOC_SOLID_FRACTION, primaryRadius,
         maxNodes: typeof (globalThis as { __silverNodeBudget?: unknown }).__silverNodeBudget === 'number'
           ? Math.max(1, Math.floor((globalThis as { __silverNodeBudget?: number }).__silverNodeBudget!)) : 260 });
       this.sections = new SectionalPopulation(m, this.flocSystem.config,
-        4 * Math.PI / 3 * PRIMARY_RADIUS_M ** 3, STAGE3_AGCL_SOLID_M3_PER_UNIT);
+        4 * Math.PI / 3 * primaryRadius ** 3, STAGE3_AGCL_SOLID_M3_PER_UNIT);
       this.flocMass = new Float32Array(m.data.length); this.flocVisual = new Float32Array(m.data.length);
       this.aggregateCompaction = new Float32Array(m.data.length);
       this.aggregateLooseness = new Float32Array(m.data.length);
@@ -904,7 +915,7 @@ export class TubeSilverField {
     const point = this.scratch;
     const liquidM3 = Math.max(1e-12, tubeVessel.volumeFromHeight(this.liquidLevel) * 1e-6);
     const cellM3 = liquidM3 / m.activeCount;
-    const primaryVolume = PRIMARY_SOLID_M3;
+    const primaryVolume = primaryRadius === PRIMARY_RADIUS_M ? PRIMARY_SOLID_M3 : 4 * Math.PI / 3 * primaryRadius ** 3;
     const brownianKernel = 8 * BOLTZMANN * TEMPERATURE_K / (3 * WATER_VISCOSITY_PA_S);
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a], fine = smoothing[i];
@@ -917,11 +928,11 @@ export class TubeSilverField {
       const excessChloride = Math.max(0, this.species['Cl-'].values[i]
         - this.species['Ag+'].values[i]) * m.activeCount * 0.1 / (liquidM3 * 1e6);
       const sticking = (0.05 + 0.9 * electrolyte / (electrolyte + 0.005))
-        * (0.8 + 0.2 * excessChloride / (excessChloride + 0.001));
+        * (0.8 + 0.2 * excessChloride / (excessChloride + 0.001)) * stickingScale;
       this.sectionSticking[i] = sticking;
       if (fine <= 1e-12) continue;
       const numberDensity = fine * STAGE3_AGCL_SOLID_M3_PER_UNIT / (primaryVolume * cellM3);
-      const shearKernel = this.solver.lastStrain[i] * (2 * PRIMARY_RADIUS_M) ** 3 / 3;
+      const shearKernel = this.solver.lastStrain[i] * (2 * primaryRadius) ** 3 / 3;
       const moved = fine * -Math.expm1(-sticking * (brownianKernel + shearKernel) * numberDensity * dt);
       if (moved <= 0) continue;
       const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
