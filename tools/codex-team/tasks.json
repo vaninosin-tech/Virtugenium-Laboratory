@@ -3,43 +3,37 @@
   "nodeModulesFrom": "D:/Claude/virtugenium-lab-transfer/virtugenium-lab-transfer/node_modules",
   "jobs": [
     {
-      "id": "ffive",
-      "prompt": "tools/codex-team/tasks/171-f3.md",
+      "id": "sone",
+      "prompt": "tools/codex-team/tasks/181-s1.md",
       "owns": [
         "src/scenes/laboratory/lib/tubeSilverField.ts",
         "src/scenes/laboratory/lib/tubeSilverField.test.ts",
-        "src/scenes/laboratory/lib/night/stage1/",
         "src/scenes/laboratory/lib/silverStage.ts",
-        "src/scenes/laboratory/lib/tubePrecipitationPhysics.ts",
-        "src/scenes/laboratory/lib/tubeSilverSediment.ts",
-        "tests/night/wave3flocs/",
-        "tests/night/wave16f1/",
-        "tests/night/wave17f1/",
         "tests/night/wave18f3/",
-        "docs/night/wave18f3/",
+        "tests/night/wave19s1/",
+        "docs/night/wave19s1/",
         "docs/night/wave16shared/"
       ]
     },
     {
-      "id": "fsix",
-      "prompt": "tools/codex-team/tasks/172-f4.md",
+      "id": "stwo",
+      "prompt": "tools/codex-team/tasks/182-s2.md",
       "owns": [
-        "src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts",
+        "src/scenes/laboratory/lib/night/stage1/sectionalPopulation.ts",
         "src/scenes/laboratory/lib/tubeSilverSediment.ts",
+        "src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts",
         "src/scenes/laboratory/lib/tubeReactionVisuals.ts",
         "tests/tubeReactionVisuals.test.ts",
         "src/scenes/laboratory/lib/night/render/",
-        "tests/night/wave16f2/",
-        "tests/night/wave17f2/",
         "tests/night/wave18f4/",
-        "tests/_wave16/",
-        "tests/_wave17/",
+        "tests/night/wave19s2/",
         "tests/_wave18/",
+        "tests/_wave19/",
         "tests/_wave15/baselineRecord.mjs",
         "tests/_wave15/buildComparison.mjs",
         "tests/_wave15/runBaseline.mjs",
         "tests/_wave15/comparisonCore.mjs",
-        "docs/night/wave18f4/"
+        "docs/night/wave19s2/"
       ]
     }
   ]
