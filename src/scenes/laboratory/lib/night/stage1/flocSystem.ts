@@ -241,9 +241,14 @@ export class FlocSystem {
       if (d < reach && d < bestD) { bestD = d; best = i; }
     }
     if (best >= 0 && this.nodes[best].mass < c.quantum * 3) {
-      this.nodes[best].mass += mass;
-      const radius = nodeRadius(this.nodes[best].mass, c);
+      const node = this.nodes[best], total = node.mass + mass;
+      node.x = (node.x * node.mass + x * mass) / total;
+      node.y = (node.y * node.mass + y * mass) / total;
+      node.z = (node.z * node.mass + z * mass) / total;
+      node.mass = total;
+      const radius = nodeRadius(total, c);
       if (radius > this.maxRadius) this.maxRadius = radius;
+      this.rebuildCells();
       return true;
     }
     if (this.nodes.length >= c.maxNodes) {
@@ -358,6 +363,7 @@ export class FlocSystem {
 
   private mergeNodes(i: number, j: number) {
     const a = this.nodes[i], b = this.nodes[j], m = a.mass + b.mass;
+    this.compaction[i] = (this.compaction[i] * a.mass + this.compaction[j] * b.mass) / m;
     a.x = (a.x * a.mass + b.x * b.mass) / m; a.y = (a.y * a.mass + b.y * b.mass) / m; a.z = (a.z * a.mass + b.z * b.mass) / m;
     a.vx = (a.vx * a.mass + b.vx * b.mass) / m; a.vy = (a.vy * a.mass + b.vy * b.mass) / m; a.vz = (a.vz * a.mass + b.vz * b.mass) / m;
     a.mass = m;
@@ -524,6 +530,36 @@ export class FlocSystem {
       sizes.push(count);
     }
     return sizes.sort((p, q) => q - p);
+  }
+
+  /** Mass-centred connected structures; dimensions follow the actual nodes and their mass-derived radii. */
+  componentSummaries() {
+    const seen = new Uint8Array(this.nodes.length);
+    const result: { center: [number, number, number]; radiusOfGyration: number; mass: number;
+      nodeIds: number[]; bounds: [number, number, number] }[] = [];
+    for (let start = 0; start < this.nodes.length; start++) {
+      if (seen[start]) continue;
+      const ids: number[] = [], stack = [start]; seen[start] = 1;
+      let mass = 0, cx = 0, cy = 0, cz = 0;
+      while (stack.length) {
+        const i = stack.pop()!, n = this.nodes[i]; ids.push(i);
+        mass += n.mass; cx += n.mass * n.x; cy += n.mass * n.y; cz += n.mass * n.z;
+        for (const j of this.adjacency[i]) if (!seen[j]) { seen[j] = 1; stack.push(j); }
+      }
+      cx /= mass; cy /= mass; cz /= mass;
+      let gyration = 0, minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (const i of ids) {
+        const n = this.nodes[i], r = nodeRadius(n.mass, this.config);
+        gyration += n.mass * ((n.x - cx) ** 2 + (n.y - cy) ** 2 + (n.z - cz) ** 2);
+        minX = Math.min(minX, n.x - r); maxX = Math.max(maxX, n.x + r);
+        minY = Math.min(minY, n.y - r); maxY = Math.max(maxY, n.y + r);
+        minZ = Math.min(minZ, n.z - r); maxZ = Math.max(maxZ, n.z + r);
+      }
+      result.push({ center: [cx, cy, cz], radiusOfGyration: Math.sqrt(gyration / mass),
+        mass, nodeIds: ids, bounds: [maxX - minX, maxY - minY, maxZ - minZ] });
+    }
+    return result;
   }
 
   /**

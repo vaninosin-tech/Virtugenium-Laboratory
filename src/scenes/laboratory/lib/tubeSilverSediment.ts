@@ -1,22 +1,28 @@
 import * as THREE from "three";
 import { silverSedimentThickness } from "./night/render/silverOptics";
+import { tubeVessel } from "./vesselGeometry";
 
-/** Working chemistry assumption: 0.01 mol/L in the fixed 1 mL NaCl delivery. */
+/** Legacy stages retain their historical virtual concentration. */
 export const AGCL_MOLARITY_MOL_L = 0.01;
 export const AGCL_SOLID_M3_PER_UNIT = AGCL_MOLARITY_MOL_L * 1e-3 * 0.14332 / 5560;
+/** Stage 3: 0.1 mmol AgCl from equal 1 mL portions at 0.1 mol/L. */
+export const STAGE3_AGCL_MOLARITY_MOL_L = 0.1;
+export const STAGE3_AGCL_SOLID_M3_PER_UNIT = STAGE3_AGCL_MOLARITY_MOL_L * 1e-3 * 0.14332 / 5560;
 
 /** Conserved bottom reservoir, indexed by the liquid field's x/z columns. */
 export class SilverSedimentField {
   readonly values: Float64Array;
   private readonly moved: Float64Array;
   compaction = 0;
-  constructor(readonly nx: number, readonly nz: number) {
+  constructor(readonly nx: number, readonly nz: number,
+    readonly solidM3PerUnit = AGCL_SOLID_M3_PER_UNIT) {
     this.values = new Float64Array(nx * nz);
     this.moved = new Float64Array(nx * nz);
   }
   get mass() { let sum = 0; for (const value of this.values) sum += value; return sum; }
   get porosity() { return 0.90 - 0.35 * this.compaction; }
-  bulkVolumeM3(mass: number) { return mass * AGCL_SOLID_M3_PER_UNIT / (1 - this.porosity); }
+  bulkVolumeM3(mass: number) { return mass * this.solidM3PerUnit / (1 - this.porosity); }
+  get equivalentFillHeight() { return tubeVessel.heightFromVolume(this.bulkVolumeM3(this.mass) * 1e6); }
   deposit(column: number, amount: number) { this.values[column] += amount; }
   release(column: number, fraction: number) {
     const amount = this.values[column] * fraction;
@@ -67,8 +73,8 @@ export class SilverSedimentField {
     }
     this.values.set(moved);
     // The largest local overburden controls this field-wide packing proxy. No load means no change.
-    const columnArea = 4 * 0.007 ** 2 / (this.nx * this.nz);
-    const pressurePa = loaded * AGCL_MOLARITY_MOL_L * 1e-3 * 0.14332 / columnArea * 9.81;
+    const columnArea = 4 * tubeVessel.innerRadius ** 2 / (this.nx * this.nz);
+    const pressurePa = loaded * this.solidM3PerUnit * 5560 / columnArea * 9.81;
     this.compaction = Math.min(1, this.compaction + dt / 10 * pressurePa / (pressurePa + 0.5));
   }
 }

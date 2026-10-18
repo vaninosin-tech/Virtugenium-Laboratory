@@ -116,7 +116,14 @@ describe('wave 16 conserved aggregation', () => {
       }
       const config = { ...f.flocSystem.config, eddyDiffusivity: 0, allowBreakage: false };
       const moving = new FlocSystem(config), still = new FlocSystem(config);
-      const source = f.flocSystem.nodes.slice(0, 8);
+      // The sectional model need not promote a visible node by 2 s. Probe the resolved
+      // mechanics with a mass-derived 0.5 mm radius pair in the recorded carrier flow.
+      const probeMass = config.quantum * (.0005 / config.quantumRadius) ** config.fractalDimension;
+      const source = f.flocSystem.nodes.length >= 2 ? f.flocSystem.nodes.slice(0, 8) : [
+        { x: 0, y: levelForProbe(), z: 0, mass: probeMass },
+        { x: .001, y: levelForProbe(), z: 0, mass: probeMass },
+      ];
+      function levelForProbe() { return tubeLiquidHeight(2, silverEffectiveRadius) * .6; }
       for (const n of source) { moving.addMass(n.x, n.y, n.z, n.mass); still.addMass(n.x, n.y, n.z, n.mass); }
       const m = f.mask, flow = f.solver.flow;
       const sampled = (x: number, y: number, z: number, out: [number, number, number]) => {
