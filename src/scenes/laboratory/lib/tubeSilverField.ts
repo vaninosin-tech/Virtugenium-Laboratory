@@ -519,7 +519,12 @@ export class TubeSilverField {
         const fine = formed - aggregate;
         for (let k = 0; k < 3; k++) this.suspension[k][i] += fine * [0.58, 0.28, 0.14][k];
       }
-      if (this.flocMode) { this.advanceFlocSystem(step); this.dissolveSmoke(step); }
+      if (this.flocMode) {
+        this.advanceFlocSystem(step);
+        // The legacy smoke layer moved fine solid into an unrendered "tint" class (suspension[1]); with the smoke layer off that parked
+        // up to a quarter of the precipitate where nothing draws it and AgCl does not dissolve. Off in stage 3 unless asked for.
+        if ((globalThis as { __silverSmokeToTint?: unknown }).__silverSmokeToTint) this.dissolveSmoke(step);
+      }
       if (!this.stageOne) this.advanceFlocs(step, agitation);
       // Redispersion moves an actual fraction of the bottom reservoir into liquid.
       if (agitation > 0.02) for (let z = 0; z < m.nz; z++) for (let x = 0; x < m.nx; x++) {
