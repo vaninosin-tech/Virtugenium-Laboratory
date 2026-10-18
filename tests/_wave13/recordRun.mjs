@@ -73,7 +73,8 @@ try {
   if (!click.accepted) throw new Error("NaCl refused");
   await page.waitForFunction(() => window.__wave13.next>14000, null, { timeout: 60000 });
   await page.evaluate(() => window.__diag.pauseSimulation());
-  const data=await page.evaluate(() => ({ ...window.__wave13, capture:undefined }));
+  const data=await page.evaluate(() => ({ ...window.__wave13, capture:undefined,
+    events: window.__diag.events(window.__wave13.id) }));
   let prior=null;
   for(const dump of data.dumps) {
     dump.structure=spatialMetrics(dump.fields.fine,dump.fields.mask,dump.fields);
@@ -81,6 +82,7 @@ try {
   }
   await writeFile(`${out}/${name}-run.json`,JSON.stringify({ config:name, init:configuredInit, diag:process.env.DIAG??"", clickSim:click.clickSim,
     receiverBefore:data.receiverBefore, sourceBefore:data.sourceBefore,firstChloride:data.firstChloride,firstSource:data.firstSource,
+    events:data.events,
     samples:data.samples.map(s=>{const {fields,...rest}=s;return rest;}), dumps:data.dumps },null,2));
   console.log(`${data.samples.length} samples, ${data.dumps.length} field dumps`);
 } catch(e) { console.error(e); process.exitCode=1; } finally { if(browser) await browser.close(); }
