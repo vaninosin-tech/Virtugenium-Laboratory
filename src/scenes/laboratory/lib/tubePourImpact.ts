@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { deliver, STANDARD_POUR_ML, tubeAmount, TUBE_CAPACITY_ML } from "./tubeAmounts";
 import { onSimulationTick, POUR_MS, useStandMotionStore } from "./useStandMotionStore";
 import { recordDelivery, validateImpact, type DeliveryEvent, type ImpactContext } from "./tubeDelivery";
-import { tubeEffectiveRadius, tubeLiquidHeight } from "./tubeLiquidLevel";
+import { tubeVessel } from "./vesselGeometry";
 import { silverStage } from "./silverStage";
 import { silverRuntime } from "./tubeSilverRuntime";
 import { useReagentStorageStore } from "./useReagentStorageStore";
@@ -20,6 +20,19 @@ export interface TubePourImpact {
 const impacts = new Map<string, TubePourImpact>();
 const legacySteps = new Map<string, number>();
 const pourProgress = new Map<string, number>();
+type OutletSample = { serial: number; atMs: number; point: THREE.Vector3; velocity?: THREE.Vector3 };
+const outletSamples = new Map<string, OutletSample>();
+/** The actual rendered lip pose, sampled in the same stand-clock frame as PourStream. */
+export function samplePourOutlet(sourceId: string, serial: number, now: number, lip: THREE.Vector3) {
+  const key = sourceId;
+  const atMs = now - serial;
+  const sampled = outletSamples.get(key);
+  const previous = sampled?.serial === serial ? sampled : undefined;
+  const velocity = previous && atMs > previous.atMs
+    ? lip.clone().sub(previous.point).multiplyScalar(1000 / (atMs - previous.atMs))
+    : previous?.velocity?.clone();
+  outletSamples.set(key, { serial, atMs, point: lip.clone(), velocity });
+}
 export const tubePourImpact = (id: string) => impacts.get(id);
 /** A validated event is the only route from a simulation step to receiving chemistry. */
 export function publishDeliveryEvent(input: Omit<DeliveryEvent, "valid" | "reason">,
@@ -92,18 +105,22 @@ export function stepTubePour(input: TubePourStep): DeliveryEvent | undefined {
   pourProgress.set(key, total);
   const requestedMl = total - previous;
   const volume = tubeAmount(input.tubeId).volumeMl;
-  const effectiveRadius = tubeEffectiveRadius(0.055);
-  const surfaceY = new THREE.Vector3(0, tubeLiquidHeight(volume, effectiveRadius), 0)
+  const surfaceY = new THREE.Vector3(0, tubeVessel.heightFromVolume(volume), 0)
     .applyMatrix4(input.root).y;
   const point = input.mouth.clone().addScaledVector(input.side, 0.0065);
   point.y = Math.min(input.mouth.y, surfaceY);
-  const axis = new THREE.Vector3(0, tubeLiquidHeight(volume, effectiveRadius), 0)
+  const axis = new THREE.Vector3(0, tubeVessel.heightFromVolume(volume), 0)
     .applyMatrix4(input.root);
-  const context: ImpactContext = { axis, radius: input.radius ?? 0.007,
+  const context: ImpactContext = { axis, radius: input.radius ?? tubeVessel.innerRadius,
     surfaceY, hasLiquid: input.mouthValid && (volume > 0 || input.allowEmpty === true) };
   const ml = Math.max(0, Math.min(requestedMl, TUBE_CAPACITY_ML - volume));
+  const sourceId = useStandMotionStore.getState().pour?.instanceId;
+  const sampled = sourceId ? outletSamples.get(sourceId) : undefined;
+  const outlet = sampled?.serial === input.serial && Math.abs(sampled.atMs - atMs) <= 50
+    ? sampled : undefined;
   return publishDeliveryEvent({ tubeId: input.tubeId, reagentId: input.reagentId,
-    serial: input.serial, step: Math.round(atMs), ml, requestedMl, point,
+    sourceId, serial: input.serial, step: Math.round(atMs), ml, requestedMl, point,
+    sourceOutlet: outlet?.point, sourceOutletVelocity: outlet?.velocity,
     surfaceY, atMs }, context, new THREE.Vector3().subVectors(point, input.mouth).normalize(),
   pourFlowMlPerSecond(atMs / POUR_MS));
 }
@@ -129,6 +146,53 @@ export function pouredMl(k: number) {
 /** Instantaneous rate corresponding to pouredMl, in actual millilitres per second. */
 export function pourFlowMlPerSecond(k: number) {
   return STANDARD_POUR_ML * pourFraction(k) ** 2 / (integral[1024] * (POUR_MS / 1000));
+}
+/** Ring zero of the drawn mesh is the outlet; ring twelve is downstream. */
+export function pourOutletRadius(k: number): number {
+  return 0.00115 * (0.42 + 0.58 * pourFraction(k));
+}
+export interface PourJetState {
+  q: number; lipArea: number; lipSpeed: number; impactSpeed: number;
+  impactArea: number; impactRadius: number; force: number;
+  /** World m/s. Horizontal outlet motion is added separately to the relative jet velocity. */
+  impactVelocity: THREE.Vector3;
+}
+/** Instantaneous, unbinned flow; `q` may instead be supplied from an exact ledger interval. */
+export function pourJetState(atMs: number, outlet: THREE.Vector3, impact: THREE.Vector3,
+  outletVelocity = new THREE.Vector3(), q = pourFlowMlPerSecond(atMs / POUR_MS) * 1e-6): PourJetState {
+  const lipArea = Math.PI * pourOutletRadius(atMs / POUR_MS) ** 2;
+  const lipSpeed = q / lipArea;
+  const fall = Math.max(0, outlet.y - impact.y);
+  const relativeImpactSpeed = Math.sqrt(lipSpeed ** 2 + 2 * 9.81 * fall);
+  const impactVelocity = new THREE.Vector3(outletVelocity.x, outletVelocity.y - relativeImpactSpeed,
+    outletVelocity.z);
+  const impactSpeed = relativeImpactSpeed;
+  const impactArea = impactSpeed > 0 ? q / impactSpeed : 0;
+  return { q, lipArea, lipSpeed, impactSpeed, impactArea,
+    impactRadius: Math.sqrt(impactArea / Math.PI), force: 1000 * q * impactSpeed, impactVelocity };
+}
+/** Reconstruct jet physics from a valid ledger increment with a measured lip.
+ * The supplied interval must be the interval that produced event.ml; it is
+ * intentionally not inferred from the display or fluid-step clock.
+ */
+export function eventJetState(event: DeliveryEvent, intervalMs: number): PourJetState | undefined {
+  if (!event.valid || !event.sourceOutlet || !(intervalMs > 0)) return undefined;
+  const lip = new THREE.Vector3(event.sourceOutlet.x, event.sourceOutlet.y, event.sourceOutlet.z);
+  const hit = new THREE.Vector3(event.point.x, event.point.y, event.point.z);
+  const v = event.sourceOutletVelocity;
+  return pourJetState(event.atMs, lip, hit,
+    v ? new THREE.Vector3(v.x, v.y, v.z) : undefined, event.ml * 1e-6 / (intervalMs / 1000));
+}
+/** Exact cumulative differences in fixed bins: sum(q * binSeconds) equals the portion. */
+export function pourFlowBins(binMs: number): { atMs: number; ml: number; q: number }[] {
+  if (!(Number.isFinite(binMs) && binMs > 0)) throw new RangeError("binMs must be positive");
+  const bins: { atMs: number; ml: number; q: number }[] = [];
+  for (let end = binMs; end < POUR_MS + binMs; end += binMs) {
+    const start = end - binMs;
+    const ml = pouredMl(Math.min(end, POUR_MS) / POUR_MS) - pouredMl(start / POUR_MS);
+    bins.push({ atMs: Math.min(end, POUR_MS), ml, q: ml * 1e-6 / (binMs / 1000) });
+  }
+  return bins;
 }
 export function clearTubePourImpact(tubeId: string) {
   impacts.delete(tubeId);

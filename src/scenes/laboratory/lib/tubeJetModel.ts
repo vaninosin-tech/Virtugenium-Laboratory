@@ -1,8 +1,13 @@
 import * as THREE from "three";
 import type { LiquidMask } from "./tubeVolumeField";
 import type { SurfaceSpread } from "./tubeFlowSolver";
+import type { DeliveryEvent } from "./tubeDelivery";
+import { eventJetState } from "./tubePourImpact";
 
 export interface SilverJetOptions {
+  /** Optional authoritative event and its exact emission interval. */
+  event?: DeliveryEvent;
+  intervalMs?: number;
   flow?: number;
   speed?: number;
   radius?: number;
@@ -38,18 +43,20 @@ export class TubeJetModel {
     this.source.fill(0); this.momentum.fill(0); this.appliedMomentum.fill(0);
     this.blockedMomentum.fill(0); this.faceCount.fill(0);
     const m = this.mask;
-    // PourStream's downstream ring (t=1) is 0.75 mm at full visual flow.
-    // The ledger has no lip point or visual flow fraction, so the impact ring
-    // is the reproducible stream-area convention, not a free-fall estimate.
+    const eventState = options.event && options.intervalMs
+      ? eventJetState(options.event, options.intervalMs) : undefined;
+    // A measured event takes precedence. Legacy options retain their old
+    // convention for existing replay callers and flag-off compatibility.
     const legacy = options.distribution === "legacy";
-    const radius = Math.max(0.0003, Math.min(0.003, options.radius ?? (legacy ? 0.00115 : 0.00075)));
+    const radius = eventState?.impactRadius ?? Math.max(0.0003,
+      Math.min(0.003, options.radius ?? (legacy ? 0.00115 : 0.00075)));
     const entrainment = Math.max(0, Math.min(0.2, options.entrainment ?? 0.08));
-    const flow = Math.max(0, options.flow ?? surface.flow);
+    const flow = Math.max(0, eventState?.q ?? options.flow ?? surface.flow);
     this.radius = radius; this.area = Math.PI * radius * radius; this.flow = flow;
     // Q [m3/s] / A [m2] = U [m/s]; rho Q U is force [N].
-    this.speed = Math.max(0, options.speed ?? (legacy
+    this.speed = Math.max(0, eventState?.impactSpeed ?? options.speed ?? (legacy
       ? Math.max(0.25, Math.min(1.5, flow / this.area)) : flow / this.area));
-    const d = direction.clone().normalize();
+    const d = eventState ? eventState.impactVelocity.clone().normalize() : direction.clone().normalize();
     const axis = [d.x, d.y, d.z];
     for (let k = 0; k < 3; k++) this.momentum[k] = 1000 * flow * this.speed * axis[k];
     // Find the bowl floor along this jet, rather than using the global bottom.

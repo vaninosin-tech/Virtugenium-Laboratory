@@ -6,9 +6,9 @@ import { CLAMP_TUBE_MOUTH, POUR_MS, simNowMs, useStandMotionStore } from "../lib
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
 import { useTestTubeStorageStore } from "../lib/useTestTubeStorageStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
-import { pourFraction, pouredMl } from "../lib/tubePourImpact";
+import { pourFraction, pouredMl, pourOutletRadius, samplePourOutlet } from "../lib/tubePourImpact";
 import { tubeAmount } from "../lib/tubeAmounts";
-import { tubeEffectiveRadius, tubeLiquidHeight } from "../lib/tubeLiquidLevel";
+import { tubeVessel } from "../lib/vesselGeometry";
 import { silverStage } from "../lib/silverStage";
 
 const RINGS = 13;
@@ -120,7 +120,7 @@ export function streamDeliveredMl(k: number, length: number, silver: boolean) {
 /** The wet surface is measured from the tube's 150 mm mouth, in its own frame. */
 export function silverStreamEnd(mouth: THREE.Vector3, tubeRoot: THREE.Matrix4, volumeMl: number) {
   const surface = new THREE.Vector3(0,
-    tubeLiquidHeight(volumeMl, tubeEffectiveRadius(0.055)), 0).applyMatrix4(tubeRoot);
+    tubeVessel.heightFromVolume(volumeMl), 0).applyMatrix4(tubeRoot);
   return surface.y < mouth.y ? new THREE.Vector3(mouth.x, surface.y, mouth.z) : mouth.clone();
 }
 
@@ -171,7 +171,8 @@ export function PourStream({
     const bottle = bottleRef.current;
     const measure = mouth.current;
     const pour = useStandMotionStore.getState().pour;
-    const k = pour?.instanceId === instanceId ? (simNowMs() - pour.at) / POUR_MS : -1;
+    const now = pour?.instanceId === instanceId ? simNowMs() : 0;
+    const k = pour?.instanceId === instanceId ? (now - pour.at) / POUR_MS : -1;
     if (!bottle || !measure || !measure.cap || !CLAMP_TUBE_MOUTH.valid || k < STREAM_START || k > 1) {
       geometry.setDrawRange(0, 0);
       if (lipDrop.current) lipDrop.current.visible = false;
@@ -190,6 +191,7 @@ export function PourStream({
     scratch.side.normalize();
     // The lowest point of the tilted rim is where liquid leaves the bottle.
     scratch.lip.copy(scratch.centre).addScaledVector(UP, -measure.neckRadius * 0.999);
+    if (pour) samplePourOutlet(instanceId, pour.at, now, scratch.lip);
     const stand = useBunsenStandStorageStore.getState();
     const tubes = useTestTubeStorageStore.getState();
     const targetTube = stand.attachedTubeSlotIndex === null ? undefined
@@ -235,7 +237,7 @@ export function PourStream({
         scratch.point.x += 0.00032 * Math.sin(clock.elapsedTime * 24 - t * 6) * Math.sin(Math.PI * t);
         scratch.local.copy(scratch.point);
         bottle.worldToLocal(scratch.local);
-        const radius = (0.00115 - 0.0004 * t) * (0.42 + 0.58 * flow);
+        const radius = pourOutletRadius(k) * (1 - (0.0004 / 0.00115) * t);
         for (let side = 0; side < SIDES; side++) {
           const angle = 2 * Math.PI * side / SIDES;
           positions.setXYZ(ring * SIDES + side,

@@ -15,6 +15,10 @@ export interface DeliveryEvent {
   tubeId: string;
   reagentId: string;
   sourceId?: string;
+  /** Measured bottle lip in world metres, when the render pose is available. */
+  sourceOutlet?: DeliveryPoint;
+  /** Finite-difference velocity of that lip in world m/s; separate from liquid exit speed. */
+  sourceOutletVelocity?: DeliveryPoint;
   /** The pour action this event belongs to (`startPour` timestamp). */
   serial: number;
   /** Monotonic step inside the pour; (serial, step) identifies an event. */
@@ -23,10 +27,11 @@ export interface DeliveryEvent {
   ml: number;
   /** Volume consumed from the source, including a miss or capacity overflow. */
   requestedMl?: number;
+  /** Liquid impact in world metres. `tubeId` is the receiving vessel identifier. */
   point: DeliveryPoint;
   /** Height of the receiving free surface at the moment of impact (world metres). */
   surfaceY: number;
-  /** Milliseconds since the pour started, for the event log. */
+  /** Milliseconds since the pour started; absolute stand-clock time is serial + atMs. */
   atMs: number;
   valid: boolean;
   reason: "ok" | "above-surface" | "outside-tube" | "no-liquid" | "duplicate" | "invalid-volume";
@@ -76,7 +81,12 @@ export function recordDelivery(input: Omit<DeliveryEvent, "valid" | "reason">, c
   return event;
 }
 
-export function deliveryEvents(tubeId: string): readonly DeliveryEvent[] { return ledger.get(tubeId) ?? []; }
+/** A detached snapshot: callers cannot mutate the authoritative ledger through nested points. */
+export function deliveryEvents(tubeId: string): readonly DeliveryEvent[] {
+  return (ledger.get(tubeId) ?? []).map(e => ({ ...e, point: { ...e.point },
+    sourceOutlet: e.sourceOutlet && { ...e.sourceOutlet },
+    sourceOutletVelocity: e.sourceOutletVelocity && { ...e.sourceOutletVelocity } }));
+}
 
 /** Millilitres that really entered the receiving tube (valid events only), optionally for one reagent/serial. */
 export function deliveredMl(tubeId: string, reagentId?: string, serial?: number): number {

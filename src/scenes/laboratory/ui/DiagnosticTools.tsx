@@ -3,6 +3,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { simNowMs, setSimulationPaused, useStandMotionStore, CLAMP_TUBE_MOUTH } from "../lib/useStandMotionStore";
 import { useReagentStorageStore } from "../lib/useReagentStorageStore";
+import { deliveryEvents, type DeliveryEvent } from "../lib/tubeDelivery";
 
 export type DiagnosticBackground = "lab" | "black" | "gray";
 export type DiagnosticCameraSettings = { dist?: number; lateral?: number; height?: number; targetY?: number; targetSide?: number; fov?: number };
@@ -15,6 +16,8 @@ type DiagnosticApi = {
   frozen(): { paused: boolean; simMs: number };
   /** The app's own source-container accounting (a dynamically imported copy of the store would be another instance). */
   sourceAccounting(): { sourceMl: Record<string, number>; debitedEvents: number };
+  /** Detached copy of the app's authoritative event ledger. */
+  events(tubeId: string): readonly DeliveryEvent[];
 };
 
 declare global {
@@ -48,6 +51,7 @@ export function DiagnosticTools() {
       setCamera: (settings) => { window.__diagCamera = { ...settings }; },
       frozen: () => ({ paused: useStandMotionStore.getState().simulationPaused, simMs: simNowMs() }),
       sourceAccounting: () => { const st = useReagentStorageStore.getState(); return { sourceMl: { ...st.sourceMl }, debitedEvents: st.debitedEvents.size }; },
+      events: (tubeId) => deliveryEvents(tubeId),
     };
     window.__diag = api;
     const update = () => {
