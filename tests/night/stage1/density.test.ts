@@ -39,10 +39,10 @@ describe("stage-one cotton density mapping", () => {
     });
     expect(Math.min(...samples)).toBeGreaterThan(8);
   });
-  it("defaults to stage one and reads a numeric window override", () => {
+  it("defaults to stage three in the page, stage one without a window, and reads a numeric window override", () => {
     expect(silverStage()).toBe(1);
     vi.stubGlobal("window", { __silverStage: "2" });
-    expect(silverStage()).toBe(1);
+    expect(silverStage()).toBe(3);
     vi.stubGlobal("window", { __silverStage: 2 });
     expect(silverStage()).toBe(2);
     vi.unstubAllGlobals();

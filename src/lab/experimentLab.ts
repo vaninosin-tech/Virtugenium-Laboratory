@@ -31,7 +31,8 @@ const RATES = [1, 0.5, 2, 5];
 // Diagnostic views (?view=): material (default), tracer (fluid + passive tracer + velocity vectors), source (where AgCl forms),
 // nodes (aggregate nodes, links and component counts). The debug layers are drawn on a 2D canvas over the left pane.
 const VIEW = params.get("view") ?? "material";
-if (VIEW === "cloud") (window as unknown as { __silverAgg?: number }).__silverAgg = 0;
+// Aggregation is off by default in the game; this viewer keeps showing it except in the fine-cloud view.
+(window as unknown as { __silverAgg?: number }).__silverAgg = VIEW === "cloud" ? 0 : 1;
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("view"), hud = $<HTMLDivElement>("hud");
 const video = $<HTMLVideoElement>("ref"), scrub = $<HTMLInputElement>("scrub"), clock = $<HTMLSpanElement>("clock");

@@ -67,7 +67,7 @@ describe('wave 18 sectional AgCl population', () => {
   });
 
   it('uses equimolar stage-3 silver and checks the exact solid ledger every step', () => {
-    vi.stubGlobal('window', { __silverStage: 3, location: { search: '' } });
+    vi.stubGlobal('window', { __silverStage: 3, __silverAgg: 1, location: { search: '' } });
     const up = new THREE.Vector3(0, 1, 0), inlet = new THREE.Vector3(.0065, 0, 0);
     const f = new TubeSilverField('LOW', SILVER_TUBE_RADIUS, 0, silverFieldHeight);
     try {

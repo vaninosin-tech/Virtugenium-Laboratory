@@ -6,7 +6,7 @@ afterAll(() => { delete (globalThis as { window?: unknown }).window; });
 
 describe("stage 3 floc performance and conservation", () => {
   it("profiles owned floc work over the first 4 s at HIGH", async () => {
-    (globalThis as { window?: unknown }).window = { __silverStage: 3 };
+    (globalThis as { window?: unknown }).window = { __silverStage: 3, __silverAgg: 1 };
     const { TubeSilverField } = await import("../../../src/scenes/laboratory/lib/tubeSilverField");
     const { FlocSystem } = await import("../../../src/scenes/laboratory/lib/night/stage1/flocSystem");
     const names = ["addMass", "erode", "step", "rasterize"] as const;
@@ -43,7 +43,7 @@ describe("stage 3 floc performance and conservation", () => {
   }, 120000);
   for (const quality of ["LOW", "HIGH"] as const) {
     it(`${quality}: 3 s pour and 14 s total`, async () => {
-      (globalThis as { window?: unknown }).window = { __silverStage: 3 };
+      (globalThis as { window?: unknown }).window = { __silverStage: 3, __silverAgg: 1 };
       const { TubeSilverField } = await import("../../../src/scenes/laboratory/lib/tubeSilverField");
       const f = new TubeSilverField(quality, 0.007, 0, 0.034);
       const up = new THREE.Vector3(0, 1, 0), down = new THREE.Vector3(0, -1, 0);

@@ -6,7 +6,7 @@ const config = { ...DEFAULT_FLOC_CONFIG, radius: 0.007, bottom: 0, height: 0.034
 const quiet = (_x: number, _y: number, _z: number, out: [number, number, number]) => { out[0] = out[1] = out[2] = 0; return true; };
 
 async function silverField() {
-  (globalThis as { window?: unknown }).window = { __silverStage: 3 };
+  (globalThis as { window?: unknown }).window = { __silverStage: 3, __silverAgg: 1 };
   const { TubeSilverField } = await import("../../../src/scenes/laboratory/lib/tubeSilverField");
   return TubeSilverField;
 }

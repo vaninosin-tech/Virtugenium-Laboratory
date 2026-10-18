@@ -5,7 +5,7 @@ import { STAGE3_AGCL_SOLID_M3_PER_UNIT, SilverSedimentField } from "./tubeSilver
 import { tubeVessel } from "./vesselGeometry";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
-import { silverStage, silverTracerOnly } from "./silverStage";
+import { silverAggregationEnabled, silverStage, silverTracerOnly } from "./silverStage";
 import { DEFAULT_FLOC_CONFIG, FlocSystem } from "./night/stage1/flocSystem";
 import { SectionalPopulation } from "./night/stage1/sectionalPopulation";
 
@@ -185,7 +185,7 @@ export class TubeSilverField {
   }
 
   constructor(quality: "LOW" | "MEDIUM" | "HIGH", radius: number, bottom: number, height: number,
-    readonly silverAmount = silverStage() === 3 && (globalThis as { __silverAgg?: unknown }).__silverAgg !== 0 ? 1 : 1.15,
+    readonly silverAmount = silverStage() === 3 && silverAggregationEnabled() ? 1 : 1.15,
     readonly fineTransport: { diffusivity?: number; eddyScale?: number } = {}) {
     this.flocMode = silverStage() === 3;
     // Live handle for the real-game diagnostics (event logs); read-only use.
@@ -234,7 +234,7 @@ export class TubeSilverField {
       texture.needsUpdate = true;
     }
     this.sedimentField = new SilverSedimentField(this.mask.nx, this.mask.nz,
-      this.flocMode && (globalThis as { __silverAgg?: unknown }).__silverAgg !== 0
+      this.flocMode && silverAggregationEnabled()
         ? STAGE3_AGCL_SOLID_M3_PER_UNIT : undefined);
     this.chipPixels = new Float32Array(this.mask.data.length);
     this.chipTexture = new THREE.Data3DTexture(this.chipPixels, this.mask.nx, this.mask.ny, this.mask.nz);
@@ -491,7 +491,7 @@ export class TubeSilverField {
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
       const targetBoost = calm ? TUBE_SIMULATION.silver.settlingAcceleration : 1;
       this.settlingBoost += (targetBoost - this.settlingBoost) * (1 - Math.exp(-step / 0.8));
-      if (this.flocMode && (globalThis as { __silverAgg?: unknown }).__silverAgg !== 0)
+      if (this.flocMode && silverAggregationEnabled())
         this.sedimentField.settleCurd(step);
       else this.sedimentField.settle(step);
       for (let k = 0; k < 3; k++) {
@@ -919,7 +919,7 @@ export class TubeSilverField {
     const brownianKernel = 8 * BOLTZMANN * TEMPERATURE_K / (3 * WATER_VISCOSITY_PA_S);
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a], fine = smoothing[i];
-      if ((globalThis as { __silverAgg?: unknown }).__silverAgg === 0) continue;
+      if (!silverAggregationEnabled()) continue;
       // Local primary-primary collision balance. The game unit is the solid made by a 1 mL
       // chloride portion; the assumed molarity is declared in tubeSilverSediment.ts.
       const electrolyte = (this.species['Ag+'].values[i] + this.species['Cl-'].values[i]
