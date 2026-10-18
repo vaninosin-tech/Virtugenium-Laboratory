@@ -35,7 +35,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
-      uAggregate: { value: dense ?? emptyHaze() }, uSolidMode: { value: 2 },
+      uAggregate: { value: dense ?? emptyHaze() }, uSolidMode: { value: 0 },
       uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 9.0 }, uSteps: { value: optics.steps }, uNoise: { value: noiseVolume() },
       uTintStrength: { value: 6.0 }, uSmokeOn: { value: 0 }, uDiag: { value: 0 }, uCloudOn: { value: 0 },
       uCloudK: { value: optics.kappa }, uAlbedo: { value: optics.albedo },
@@ -157,7 +157,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           vec3 p = uCameraLocal+direction*(entry+(float(step)+jitter)*stepLength);
           if (!wet(p)) continue;
           vec3 grid = uvw(p);
-          vec4 field = texture(uAggregate,grid);
+          vec4 field = uSolidMode != 1 && uFlocOn > 0.5 ? texture(uAggregate,grid) : vec4(0.0);
           float source = uDiag > 0.5 ? texture(uOverlap,grid).r : 0.0;
           if (uDiag > 1.5) {
             // Occupied-cell diagnostic: reads the concentration texture cell by cell, no optics, no normalization.
@@ -175,7 +175,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             continue;
           }
           // Fine solid shed by the cotton tints the water: bluish white, built up gently.
-          float smokeValue = texture(uHaze,grid).r;
+          float smokeValue = uSolidMode != 2 ? texture(uHaze,grid).r : 0.0;
           float tintValue = uSmokeOn > 0.5 ? texture(uTint,grid).r : 0.0;
           float smokeDensity = 0.0, ribbon = 0.0;
           if (uSmokeOn > 0.5 && smokeValue > 0.0004) {
@@ -201,7 +201,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             accumulated += (1.0-alpha)*chipAlpha*vec3(0.96,0.97,0.98);
             alpha += (1.0-alpha)*chipAlpha;
           }
-          if (uSolidMode != 1 && uSolidMode != 3 && uCloudOn > 0.5 && smokeValue > 0.0) {
+          if (uSolidMode != 2 && uCloudOn > 0.5 && smokeValue > 0.0) {
             if (uOpticsMode == 1) {
               // Raw concentration colormap; no grain or light transport.
               float a3 = 1.0-exp(-min(1.0,smokeValue)*${glf(optics.rawScale)}*stepLength/uRadius);
@@ -215,7 +215,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
               alpha += (1.0-alpha)*a3;
             }
           }
-          if (uSolidMode != 0 && uSolidMode != 3 && uFlocOn > 0.5 && field.r > 0.0) {
+          if (uSolidMode != 1 && uFlocOn > 0.5 && field.r > 0.0) {
             float porous = (1.0-${glf(agg.loosePorosity)}*clamp(field.g,0.0,1.0))
               * (0.85+0.15*clamp(field.b,0.0,1.0));
             float c = field.r*porous*aggregateGrain(grid,field);

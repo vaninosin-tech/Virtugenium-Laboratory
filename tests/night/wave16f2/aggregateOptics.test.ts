@@ -19,7 +19,7 @@ function dump(density = 0.25, loose = 0.3, fine = 0): SilverAggregateDump {
   return { nx, ny, nz, radius: 0.007, bottom: 0, height: 0.055,
     mask: new Array(count).fill(1), fine: suspension, aggregate, sedimentHeight: new Array(nx * nz).fill(0) };
 }
-const ray = (d: SilverAggregateDump, mode: 0 | 1 | 2 | 3 = 0, layer: 0 | 1 | 2 | 3 = 1) =>
+const ray = (d: SilverAggregateDump, mode: 0 | 1 | 2 | 3 = 0, layer: 0 | 1 | 2 | 3 = 2) =>
   marchSilverLayers(d, [0, 0.025, 0.021], [0, 0, -1], mode, layer);
 
 describe("field-driven AgCl aggregate optics", () => {
@@ -35,13 +35,13 @@ describe("field-driven AgCl aggregate optics", () => {
   });
   it("uses separate fine and aggregate mass, with no alpha in an empty column", () => {
     const d = dump(0.2, 0.3, 0.2);
-    const fine = ray(d, 0, 0), aggregate = ray(d, 0, 1), combined = ray(d, 0, 2);
+    const fine = ray(d, 0, 1), aggregate = ray(d, 0, 2), combined = ray(d, 0, 0);
     expect(combined[3]).toBeGreaterThan(fine[3]);
     expect(combined[3]).toBeGreaterThan(aggregate[3]);
     expect(combined[0] * combined[3]).toBeGreaterThan(fine[0] * fine[3]);
     expect(combined[0] * combined[3]).toBeGreaterThan(aggregate[0] * aggregate[3]);
     expect(combined[0]).toBeLessThanOrEqual(SILVER_FINE_OPTICS.lightStrength + SILVER_FINE_OPTICS.ambient + SILVER_FINE_OPTICS.ambientBoost);
-    expect(ray(dump(0, 0, 0), 0, 2)[3]).toBe(0);
+    expect(ray(dump(0, 0, 0), 0, 0)[3]).toBe(0);
   });
   it("makes loose material more translucent at equal aggregate mass", () => {
     expect(ray(dump(0.15, 1))[3]).toBeLessThan(ray(dump(0.15, 0))[3]);
@@ -67,11 +67,11 @@ describe("field-driven AgCl aggregate optics", () => {
   it("samples separate textures in generated GLSL and keeps float literals valid", () => {
     const material = makeSilverVolumeMaterial(0.007, 0, 0.055).material;
     const glsl = material.fragmentShader;
-    expect(glsl).toMatch(/smokeValue\s*=\s*texture\(uHaze,grid\)\.r/);
-    expect(glsl).toMatch(/field\s*=\s*texture\(uAggregate,grid\)/);
+    expect(glsl).toMatch(/smokeValue\s*=.*texture\(uHaze,grid\)\.r/);
+    expect(glsl).toMatch(/field\s*=.*texture\(uAggregate,grid\)/);
     expect(glsl).toMatch(/depth\s*\+=\s*texture\(uAggregate,uvw\(q\)\)\.r/);
     expect(glsl).not.toMatch(/(?:\*|\/)\s*[1-9]\d*(?![.\dA-Za-z_])/);
-    expect(material.uniforms.uSolidMode.value).toBe(2);
+    expect(material.uniforms.uSolidMode.value).toBe(0);
     material.dispose();
   });
   it("builds a bowl-following deposit only where height exists", () => {

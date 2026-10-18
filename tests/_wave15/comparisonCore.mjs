@@ -46,8 +46,33 @@ export function stageMarkers(trace, threshold=1e-6) {
   const firstImpact=rec.find(r=>(r.A?.valid??r.A?.events??0)>0);
   const dumps=trace.dumps??[];const visible=dumps.find(d=>fieldMetrics(d).fineMass>threshold);
   const half=dumps.find(d=>fieldMetrics(d).occupiedDepthFraction>=.5);
+  const after=rec.filter(r=>r.sim>=click&&r.B),elapsed=r=>r?.sim-click??null;
+  const firstAggregate=after.find(r=>r.B.largestNodeMass>=0.001);
+  const firstSediment=after.find(r=>r.B.sedimentMass>1e-8);
+  const peak=after.reduce((best,r)=>r.B.aggregateCount>(best?.B.aggregateCount??-1)?r:best,null);
   return {impact:firstImpact?.sim-click??null,visibleCloud:visible?.simElapsedMs??visible?.sim-click??null,
-    halfDepth:half?.simElapsedMs??half?.sim-click??null,late:14000};
+    halfDepth:half?.simElapsedMs??half?.sim-click??null,firstAggregateAboveMass:elapsed(firstAggregate),
+    aggregateMassThreshold:0.001,firstSedimentDeposit:elapsed(firstSediment),
+    aggregateMaximumCount:peak?{simElapsedMs:elapsed(peak),count:peak.B.aggregateCount}:null,
+    late:trace.durationMs??22000};
+}
+
+export const PROGRESSION_STAGES=[
+  "A transparent receiving liquid", "B transparent NaCl reaching the surface",
+  "C local fine suspension", "D irregular cloud", "E larger fluffy structures",
+  "F deformation and partial separation", "G milkiness persisting",
+  "H sediment beginning to accumulate", "I late evolution after pouring ends",
+];
+export function progressionStage(simMs,markers) {
+  if(simMs<(markers.impact??600))return PROGRESSION_STAGES[0];
+  if(simMs<(markers.visibleCloud??1200))return PROGRESSION_STAGES[1];
+  if(simMs<(markers.halfDepth??3000))return PROGRESSION_STAGES[2];
+  if(simMs<(markers.firstAggregateAboveMass??4500))return PROGRESSION_STAGES[3];
+  if(simMs<6000)return PROGRESSION_STAGES[4];
+  if(simMs<9000)return PROGRESSION_STAGES[5];
+  if(simMs<(markers.firstSedimentDeposit??14000))return PROGRESSION_STAGES[6];
+  if(simMs<17000)return PROGRESSION_STAGES[7];
+  return PROGRESSION_STAGES[8];
 }
 
 export function alignStages(reference, game) {

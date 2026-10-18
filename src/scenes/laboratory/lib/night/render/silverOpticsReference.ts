@@ -20,10 +20,10 @@ export const SILVER_FINE_OPTICS = {
 
 /** Shared aggregate coefficients; density is supplied only by the aggregate field. */
 export const SILVER_AGGREGATE_OPTICS = {
-  kappa: 17.0, albedo: 0.96, loosePorosity: 0.55,
+  kappa: 17.0, albedo: 0.96, loosePorosity: 0.25,
   grainAmount: 0.08, grainCyclesPerCell: 3.5,
   rimStrength: 0.12, lightTaps: 2, lightTapDistance: 0.18,
-  multipleScatter: 0.18, sedimentAlphaScale: 0.00035,
+  multipleScatter: 0.5, sedimentAlphaScale: 0.00035,
 } as const;
 
 export type SilverOpticsMode = 0 | 1 | 2 | 3;
@@ -144,6 +144,21 @@ export interface SilverAggregateDump extends SilverFineDump {
   sedimentHeight: number[];
 }
 
+/** Converts the simulation's conserved-mass dump to the two texture conventions. */
+export function silverAggregateDumpFromState(raw: {
+  dimensions: number[]; mask: number[]; fine: number[]; aggregate: number[];
+  sedimentHeights: number[];
+}, radius = 0.007, bottom = 0, height = 0.055): SilverAggregateDump {
+  const [nx, ny, nz] = raw.dimensions;
+  const count = nx * ny * nz;
+  if (raw.mask.length !== count || raw.fine.length !== count || raw.aggregate.length !== count * 4
+    || raw.sedimentHeights.length !== nx * nz) throw new RangeError("silver state dimensions");
+  const activeCount = raw.mask.reduce((sum, active) => sum + (active ? 1 : 0), 0);
+  return { nx, ny, nz, radius, bottom, height, mask: raw.mask,
+    fine: raw.fine.map((value, i) => raw.mask[i] ? value * activeCount : 0),
+    aggregate: raw.aggregate, sedimentHeight: raw.sedimentHeights };
+}
+
 export function aggregateAt(d: SilverAggregateDump, grid: Vec3): [number, number, number, number] {
   const p = [grid[0] * d.nx - 0.5, grid[1] * d.ny - 0.5, grid[2] * d.nz - 0.5]
     .map((v, i) => clamp(v, 0, [d.nx - 1, d.ny - 1, d.nz - 1][i]));
@@ -200,7 +215,7 @@ export function sedimentHeightAt(d: SilverAggregateDump, x: number, z: number): 
 
 /** Numerical twin of the field-driven single ray march. Sediment uses the same height surface as the mesh. */
 export function marchSilverLayers(d: SilverAggregateDump, origin: Vec3, directionInput: Vec3,
-  mode: SilverOpticsMode = 0, solidMode: SilverSolidMode = 2, level = d.level ?? d.bottom + d.height): Rgba {
+  mode: SilverOpticsMode = 0, solidMode: SilverSolidMode = 0, level = d.level ?? d.bottom + d.height): Rgba {
   const direction = unit(directionInput);
   const min: Vec3 = [-d.radius * 1.2, d.bottom - d.radius * 0.15, -d.radius * 1.2];
   const max: Vec3 = [d.radius * 1.2, d.bottom + d.height + d.radius * 0.6, d.radius * 1.2];
@@ -231,7 +246,7 @@ export function marchSilverLayers(d: SilverAggregateDump, origin: Vec3, directio
       }
       continue;
     }
-    if (solidMode !== 1) {
+    if (solidMode !== 2) {
       const raw = fineAt(d, g);
       if (raw > 0) {
         if (mode === 1) {
@@ -244,7 +259,7 @@ export function marchSilverLayers(d: SilverAggregateDump, origin: Vec3, directio
         }
       }
     }
-    if (solidMode !== 0) {
+    if (solidMode !== 1) {
       const field = aggregateAt(d, g);
       if (field[0] > 0) {
         if (mode === 1) {
@@ -265,14 +280,14 @@ export function marchSilverLayers(d: SilverAggregateDump, origin: Vec3, directio
 }
 
 export function renderSilverLayers(d: SilverAggregateDump, mode: SilverOpticsMode,
-  solidMode: SilverSolidMode, width = 120, height = 280): Uint8Array {
+  solidMode: SilverSolidMode, width = 120, height = 280, background?: number): Uint8Array {
   const header = new TextEncoder().encode(`P6\n${width} ${height}\n255\n`);
   const pixels = new Uint8Array(width * height * 3);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const px = (x + 0.5) / width * 2.4 - 1.2;
     const py = d.bottom + (1 - (y + 0.5) / height) * (d.height + 0.75 * d.radius) - 0.15 * d.radius;
     const rgba = marchSilverLayers(d, [px * d.radius, py, 3 * d.radius], [0, 0, -1], mode, solidMode);
-    const bg = mode === 1 || mode === 3 ? 0 : 1;
+    const bg = background ?? (mode === 1 || mode === 3 ? 0 : 1);
     for (let k = 0; k < 3; k++) pixels[3 * (y * width + x) + k] = Math.round(255 * clamp(rgba[k] * rgba[3] + bg * (1 - rgba[3]), 0, 1));
   }
   const result = new Uint8Array(header.length + pixels.length); result.set(header); result.set(pixels, header.length);
