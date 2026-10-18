@@ -69,3 +69,16 @@ See `docs/night/WINDOWS_VERIFICATION.md` section 5: measured lip (`sourceOutlet`
 
 ## 8. Known limits of the model
 Momentum flux conserved (pressure and weight neglected); free surface treated with the baseline mask (the added volume enters as new rows, the surface suction in the top row is the only inconsistency, below 2 1/s mean divergence); no air entrainment or foam; no stream breakup above the surface; entrainment from the surface layer is not distinguished from the side; the jet is straight; only upright tubes; wall friction on a stream against the glass is approximated only through the open share of the perimeter; LOW-grid jet column is one or two cells wide (HIGH agrees within the quoted spread).
+
+## 9. Correction: the real game starts with 1 mL of AgNO3, not 2.5 mL
+The first AgNO3 portion that the game pours into the tube is the standard 1 mL (read in the Windows game: `tubeAmount(...).volumeMl = 1` after the AgNO3 pour); 2.5 mL is only the seed for contents that predate a pour. The tables above, the Task A profile and the lip-height / coefficient brackets were computed with a 2.5 mL start. The comparison was rerun with the real 1 mL start (`INITIAL_ML=1`, same pour curve, LOW grid):
+
+| t (s) | A baseline AgCl | B stream | C legacy jet |
+| ---: | ---: | ---: | ---: |
+| 1.00 | 0.092 | 0.455 | 0.177 |
+| 1.35 | 0.183 | 0.706 | 0.462 |
+| 2.50 | 0.410 | 0.896 | 0.823 |
+| 4.00 | 0.585 | 0.969 | 0.966 |
+Stream penetration 10.9 mm (the bowl; the liquid is 8.7 mm deep before the pour and 17.4 mm after), entrained 2.4 mL/s, impact speed 1.63 m/s. The conclusions of section 6 hold: the physical stream gives entrainment-limited bulk overlap, not localized near-surface overlap. The pinned baseline numbers in `compare.test.ts` are for the 2.5 mL start (default); run with `INITIAL_ML=1` to reproduce this table (that run fails the pinned-baseline assertion on purpose).
+
+Review aid for judging the liquid: `?agnoMl=3.9` or `window.__silverAgnoMl = 3.9` scales the live AgNO3 pour to that volume (0.5 to 3.9 mL); off by default.

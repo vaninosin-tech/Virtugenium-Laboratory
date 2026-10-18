@@ -22,6 +22,18 @@ describe('review aid: more AgNO3 volume (off by default)', () => {
     vi.stubGlobal('window', { location: { search: '?agnoMl=0.1' } }); expect(seedMl('agno3')).toBe(0.5);
     vi.stubGlobal('window', { location: { search: '' }, __silverAgnoMl: 'x' }); expect(seedMl('agno3')).toBe(2.5);
   });
+  it('scales the live AgNO3 pour: a 1 mL pour in 20 steps adds 3.9 mL with the flag and 1 mL without', async () => {
+    const { deliver } = await import('../../../src/scenes/laboratory/lib/tubeAmounts');
+    for (const [flag, expected] of [[undefined, 1], [3.9, 3.9], [10.9, 3.9]] as const) {
+      resetTubeAmounts();
+      vi.stubGlobal('window', { location: { search: '' }, ...(flag !== undefined ? { __silverAgnoMl: flag } : {}) });
+      let admitted = 0; for (let k = 0; k < 20; k++) admitted += deliver(tubeId, 'agno3', 0.05);
+      expect(admitted).toBeCloseTo(expected, 9); expect(tubeAmount(tubeId).volumeMl).toBeCloseTo(expected, 9);
+      expect(tubeAmount(tubeId).species['Ag+']).toBeCloseTo(1.15 * expected, 9);
+      // NaCl is never scaled.
+      expect(deliver(tubeId, 'nacl', 0.05)).toBeCloseTo(0.05, 12);
+    }
+  });
   it('seeds the volume only (species amounts unchanged) and the standard 1 mL pour still fits and reacts at 3.9 mL', () => {
     vi.stubGlobal('window', { location: { search: '' }, __silverAgnoMl: 3.9 });
     useLaboratoryStore.setState({ selectedExperimentId: 'experiment-silver-nitrate-sodium-chloride' });

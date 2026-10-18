@@ -9,6 +9,7 @@ interface Snap { t: number; level: number; extent: number; delivered: number; ag
   formedByMm: Map<number, number>; formedTotal: number; topShareFormed: number; aboveOldSurface: number; fineTop3: number; tracerTop3: number;
   agTop3: number; near: number; occupied: number; maxSpeed: number; meanSpeed: number; maxDown: number; maxUp: number;
   courant: number; substeps: number; outsideSpeed: number; fineMax: number; fineMean: number; layerHeightMm: number }
+const INITIAL_ML = Number(process.env.INITIAL_ML ?? 2.5);   // the real game pours the first AgNO3 portion as 1 mL; the first tables used 2.5 mL
 const MARKS = [700, 850, 1000, 1350, 1700, 2500, 4000, 6000];
 
 async function run(config: Config, flags: Record<string, unknown> = {}, opts: { endMs?: number; fall?: number; quality?: 'LOW' | 'HIGH' } = {}) {
@@ -29,7 +30,7 @@ async function run(config: Config, flags: Record<string, unknown> = {}, opts: { 
   const cum = new Float64Array(m.ny);
   const snaps = new Map<number, Snap>();
   const timing = { advance: [] as number[], solver: [] as number[], projection: [] as number[], substeps: [] as number[], prepare: [] as number[], forcing: [] as number[] };
-  let previousMl = 0, delivered = 0, mlTotal = 2.5, started = false, penetration = 0, entrained = 0, endSpeed = 0, momentum = 0, impact = 0;
+  let previousMl = 0, delivered = 0, mlTotal = INITIAL_ML, started = false, penetration = 0, entrained = 0, endSpeed = 0, momentum = 0, impact = 0;
   for (let atMs = 0; atMs <= (opts.endMs ?? 6000); atMs += 50) {
     const total = pouredMl(Math.min(1, atMs / 1700)), ml = total - previousMl;
     let rate = 0;
@@ -84,7 +85,7 @@ async function run(config: Config, flags: Record<string, unknown> = {}, opts: { 
       courant: priv.solver.lastMaxCourant, substeps: priv.solver.substeps, outsideSpeed: outside, fineMax, fineMean: fineTotal / m.activeCount,
       layerHeightMm: (topRow + 1) * dy * 1000 });
   }
-  const summary = { ledgerDelivered: delivered, gain: mlTotal - 2.5, silverAmount: f.silverAmount, extent: f.extent, penetration, entrained, endSpeed, momentum, impact };
+  const summary = { ledgerDelivered: delivered, gain: mlTotal - INITIAL_ML, silverAmount: f.silverAmount, extent: f.extent, penetration, entrained, endSpeed, momentum, impact };
   f.dispose(); vi.unstubAllGlobals();
   for (const name of set) delete g[name];
   return { snaps, timing, summary };

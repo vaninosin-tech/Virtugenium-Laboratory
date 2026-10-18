@@ -34,18 +34,22 @@ export const initial: Record<string, { ml: number; species?: Record<string, numb
   kmno4: { ml: 1, species: { "MnO4-": 2 } },
 };
 /**
- * Review aid, off by default: window.__silverAgnoMl or ?agnoMl= (0.5 to 3.9 mL) fills the tube with that much AgNO3 instead
- * of 2.5 mL so the liquid is easier to judge. Only the volume changes (liquid height, cell count, jet depth); the species
- * amounts, the chloride portion and the geometry are untouched, and 3.9 mL leaves room for the standard 1 mL pour.
+ * Review aid, off by default: window.__silverAgnoMl or ?agnoMl= (0.5 to 3.9 mL) makes the AgNO3 portion that goes into the
+ * tube that many millilitres instead of the standard 1 mL pour (and 2.5 mL for contents that predate the pour), so the
+ * liquid is easier to judge. The species amounts follow the volume (same concentration); the chloride portion, the
+ * geometry and the stoichiometry of the stage-3 field are untouched. 3.9 mL leaves room for the standard 1 mL NaCl pour.
  */
 export const MAX_AGNO_REVIEW_ML = TUBE_CAPACITY_ML - STANDARD_POUR_ML - 0.1;
-export function seedMl(reagentId: string): number {
-  const base = initial[reagentId]?.ml ?? 0;
-  if (reagentId !== "agno3" || typeof window === "undefined") return base;
+export function agnoReviewMl(): number | undefined {
+  if (typeof window === "undefined") return undefined;
   const fromUrl = Number(new URLSearchParams(currentSearch()).get("agnoMl"));
   const override = Number.isFinite(fromUrl) && fromUrl > 0 ? fromUrl : (window as Window & { __silverAgnoMl?: unknown }).__silverAgnoMl;
   return typeof override === "number" && Number.isFinite(override)
-    ? Math.min(MAX_AGNO_REVIEW_ML, Math.max(0.5, override)) : base;
+    ? Math.min(MAX_AGNO_REVIEW_ML, Math.max(0.5, override)) : undefined;
+}
+export function seedMl(reagentId: string): number {
+  const base = initial[reagentId]?.ml ?? 0;
+  return reagentId === "agno3" ? agnoReviewMl() ?? base : base;
 }
 export function tubeAmount(tubeId: string): TubeAmount {
   let state = tubes.get(tubeId);
@@ -78,7 +82,9 @@ export function deliver(tubeId: string, reagentId: string, ml: number, seed = fa
     if (seed || ml > 0) state.copper = Math.max(state.copper, recipe.copper);
     return 0;
   }
-  const accepted = Math.min(ml, TUBE_CAPACITY_ML - state.volumeMl);
+  // Review aid: the poured AgNO3 portion is scaled so the whole pour adds agnoReviewMl() instead of 1 mL.
+  const portion = !seed && reagentId === "agno3" && agnoReviewMl() !== undefined ? ml * agnoReviewMl()! / STANDARD_POUR_ML : ml;
+  const accepted = Math.min(portion, TUBE_CAPACITY_ML - state.volumeMl);
   const fraction = seed ? (seedMl(reagentId) > 0 ? accepted / seedMl(reagentId) : 1)
     : accepted / STANDARD_POUR_ML;
   state.volumeMl += accepted;
