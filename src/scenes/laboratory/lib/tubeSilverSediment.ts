@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { silverSedimentThickness } from "./night/render/silverOptics";
 
+/** Working chemistry assumption: 0.01 mol/L in the fixed 1 mL NaCl delivery. */
+export const AGCL_MOLARITY_MOL_L = 0.01;
+export const AGCL_SOLID_M3_PER_UNIT = AGCL_MOLARITY_MOL_L * 1e-3 * 0.14332 / 5560;
+
 /** Conserved bottom reservoir, indexed by the liquid field's x/z columns. */
 export class SilverSedimentField {
   readonly values: Float64Array;
@@ -11,6 +15,8 @@ export class SilverSedimentField {
     this.moved = new Float64Array(nx * nz);
   }
   get mass() { let sum = 0; for (const value of this.values) sum += value; return sum; }
+  get porosity() { return 0.90 - 0.35 * this.compaction; }
+  bulkVolumeM3(mass: number) { return mass * AGCL_SOLID_M3_PER_UNIT / (1 - this.porosity); }
   deposit(column: number, amount: number) { this.values[column] += amount; }
   release(column: number, fraction: number) {
     const amount = this.values[column] * fraction;
@@ -60,8 +66,10 @@ export class SilverSedimentField {
       moved[i] -= transfer; moved[target] += transfer;
     }
     this.values.set(moved);
-    // Pressure from deposited mass closes pores; with no deposit there is no compaction.
-    this.compaction = Math.min(1, this.compaction + dt * loaded / (loaded + 0.02) * 0.1);
+    // The largest local overburden controls this field-wide packing proxy. No load means no change.
+    const columnArea = 4 * 0.007 ** 2 / (this.nx * this.nz);
+    const pressurePa = loaded * AGCL_MOLARITY_MOL_L * 1e-3 * 0.14332 / columnArea * 9.81;
+    this.compaction = Math.min(1, this.compaction + dt / 10 * pressurePa / (pressurePa + 0.5));
   }
 }
 

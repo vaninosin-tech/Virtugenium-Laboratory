@@ -25,6 +25,8 @@ export interface FlocConfig {
   solidFraction: number;
   liquidDensity: number; solidDensity: number;
   dragCoefficient: number;
+  dynamicViscosity?: number;
+  primaryRadius?: number;
   /** Velocity relaxation time (s) of a node towards fluid velocity plus slip. */
   relaxation: number;
   linkRange: number;
@@ -53,13 +55,14 @@ export const DEFAULT_FLOC_CONFIG: Omit<FlocConfig, "radius" | "bottom" | "height
   solidFraction: 0.00018,
   liquidDensity: 1000, solidDensity: 5560,
   dragCoefficient: 1.1,
+  dynamicViscosity: 1.002e-3, primaryRadius: 0.2e-6,
   relaxation: 0.12,
   linkRange: 0.0034,
   maxLinksPerNode: 3,
   /** Turbulent dispersion of a node (m^2/s): eddies of the stream scatter the pieces sideways. */
   eddyDiffusivity: 6e-6,
-  erosionRate: 0.3, erosionRef: 0.003,
-  compactionLoad: 0.05, compactionRate: 0.9, compactionSlip: 2.5,
+  erosionRate: 0.02, erosionRef: 0.003,
+  compactionLoad: 0.05, compactionRate: 0.9, compactionSlip: 0,
   contact: 0.75,
   linkStiffness: 0.35,
   yieldStretch: 1.25, plasticShare: 0.5,
@@ -86,8 +89,7 @@ const G = 9.81;
 
 /** Radius of a node of mass m: aggregates grow as m^(1/Df). */
 export function nodeRadius(mass: number, c: Pick<FlocConfig, "quantum" | "quantumRadius" | "fractalDimension">) {
-  // A node never looks smaller than 60 % of the quantum radius: a sub-cluster is a visible piece, not a speck.
-  return c.quantumRadius * Math.max(0.6, Math.pow(Math.max(mass, 1e-12) / c.quantum, 1 / c.fractalDimension));
+  return c.quantumRadius * Math.pow(Math.max(mass, 1e-15) / c.quantum, 1 / c.fractalDimension);
 }
 
 /** Solid fraction of a node: bigger flocs are more porous (phi ~ r^(Df-3)). */
@@ -95,14 +97,22 @@ export function nodeSolidFraction(radius: number, c: Pick<FlocConfig, "quantumRa
   return Math.min(0.5, c.solidFraction * Math.pow(radius / c.quantumRadius, c.fractalDimension - 3));
 }
 
-/**
- * Terminal slip speed of a porous aggregate in the intermediate/turbulent drag regime:
- * v = sqrt( (4/3) g d (effective density excess / liquid density) / Cd ).  Depends on size and porosity only.
- */
+/** Brinkman-screened Stokes drag with Schiller-Naumann correction, solved for 0 < Re < 1000. */
 export function slipSpeed(radius: number, c: FlocConfig) {
   const phi = nodeSolidFraction(radius, c);
-  const excess = phi * (c.solidDensity - c.liquidDensity) / c.liquidDensity;
-  return Math.sqrt((4 / 3) * G * 2 * radius * excess / c.dragCoefficient);
+  const mu = c.dynamicViscosity ?? 1.002e-3;
+  const primary = c.primaryRadius ?? 0.2e-6;
+  const permeability = primary * primary * (1 - phi) ** 3 / (45 * phi * phi);
+  const beta = radius / Math.sqrt(permeability);
+  const screenedDrag = beta > 1e-6 ? 1 - Math.tanh(beta) / beta : beta * beta / 3;
+  const buoyancy = 4 * Math.PI / 3 * radius ** 3 * phi * (c.solidDensity - c.liquidDensity) * G;
+  const stokes = buoyancy / (6 * Math.PI * mu * radius * Math.max(screenedDrag, 1e-8));
+  let speed = stokes;
+  for (let iteration = 0; iteration < 12; iteration++) {
+    const reynolds = 2 * radius * speed * c.liquidDensity / mu;
+    speed = stokes / (1 + 0.15 * Math.pow(Math.min(1000, reynolds), 0.687));
+  }
+  return speed;
 }
 
 export class FlocSystem {
@@ -206,6 +216,7 @@ export class FlocSystem {
   }
 
   get totalMass() { let sum = 0; for (const n of this.nodes) sum += n.mass; for (const q of this.pending) sum += q.mass; return sum; }
+  get pendingMass() { let sum = 0; for (const q of this.pending) sum += q.mass; return sum; }
   /** Mass waiting for a free node slot (it still counts as floc mass; no mass is lost or piled on one node). */
   private readonly pending: { x: number; y: number; z: number; mass: number }[] = [];
 
@@ -220,26 +231,24 @@ export class FlocSystem {
    * Fine solid joins the flocs at a point. It grows a node that is close enough (cluster growth) or
    * spawns a new node that is linked to its neighbours, so the structure stays connected.
    */
-  addMass(x: number, y: number, z: number, mass: number) {
+  addMass(x: number, y: number, z: number, mass: number): boolean {
     const c = this.config;
     let best = -1, bestD = Infinity;
-    for (const i of this.nearbyPoint(x, y, z, Math.max(this.maxRadius, c.quantumRadius) * 1.3)) {
+    for (const i of this.nearbyPoint(x, y, z, Math.max(this.maxRadius, nodeRadius(mass, c)) * 1.3)) {
       const n = this.nodes[i], d = Math.hypot(n.x - x, n.y - y, n.z - z);
       // Fine solid joins a floc that is within about one quantum radius of it (cluster growth).
-      const reach = Math.max(nodeRadius(n.mass, c), c.quantumRadius) * 1.3;
+      const reach = (nodeRadius(n.mass, c) + nodeRadius(mass, c)) * 1.3;
       if (d < reach && d < bestD) { bestD = d; best = i; }
     }
     if (best >= 0 && this.nodes[best].mass < c.quantum * 3) {
       this.nodes[best].mass += mass;
       const radius = nodeRadius(this.nodes[best].mass, c);
       if (radius > this.maxRadius) this.maxRadius = radius;
-      return;
+      return true;
     }
     if (this.nodes.length >= c.maxNodes) {
-      // Node budget exhausted: keep the mass in the pending list (merged into a nearby node only if it stays small),
-      // and let step() free a slot by merging the two lightest neighbouring nodes. A node never grows without bound.
-      this.pending.push({ x, y, z, mass });
-      return;
+      // The caller leaves rejected material fine; there is no hidden, immobile parcel queue.
+      return false;
     }
     const index = this.nodes.length;
     this.nodes.push({ x, y, z, vx: 0, vy: 0, vz: 0, mass, ux: 0, uy: 0, uz: 0, resting: false });
@@ -256,6 +265,7 @@ export class FlocSystem {
     this.insertCell(index);
     const radius = nodeRadius(mass, c);
     if (radius > this.maxRadius) this.maxRadius = radius;
+    return true;
   }
 
   private link(a: number, b: number, rest: number) {
@@ -283,7 +293,7 @@ export class FlocSystem {
       // At the free surface the vertical carrier flow is blocked: a raft is only swept sideways there.
       n.vx += (ux - n.vx) * k; n.vy += (uy + slip - n.vy) * k; n.vz += (uz - n.vz) * k;
       // Eddy dispersion grows with the local flow speed; the draw is a deterministic hash of node and step.
-      const flowSpeed = Math.hypot(ux, uy, uz), eddy = Math.sqrt(2 * c.eddyDiffusivity * dt) * (0.3 + Math.min(1, flowSpeed / 0.01));
+      const flowSpeed = Math.hypot(ux, uy, uz), eddy = Math.sqrt(2 * c.eddyDiffusivity * dt) * Math.min(1, flowSpeed / 0.01);
       const hid = i * 12.9898 + this.tick * 78.233;
       const hx = Math.sin(hid + 37.719) * 43758.5453;
       const hy = Math.sin(hid + 2 * 37.719) * 43758.5453;
@@ -435,13 +445,17 @@ export class FlocSystem {
    * velocity of the node relative to the surrounding liquid (shear) and with how open the structure is; dense
    * compacted cores are left alone. The stripped mass is returned to the caller (it becomes fine suspension).
    */
-  erode(dt: number, emit: (x: number, y: number, z: number, mass: number) => void) {
+  erode(dt: number, emit: (x: number, y: number, z: number, mass: number) => void,
+    strainAt: (x: number, y: number, z: number) => number = () => 0) {
     const c = this.config;
     for (let i = 0; i < this.nodes.length; i++) {
       const n = this.nodes[i];
-      const rel = Math.hypot(n.vx - n.ux, n.vy - n.uy, n.vz - n.uz);
-      const open = 1 - this.compactionOf(i);
-      const rate = c.erosionRate * open * Math.min(1, rel / c.erosionRef);
+      const strain = strainAt(n.x, n.y, n.z);
+      const stress = (c.dynamicViscosity ?? 1.002e-3) * strain;
+      const strength = 0.03 * Math.pow(Math.max(0.1, nodeRadius(n.mass, c) / c.quantumRadius), -0.8)
+        * (1 + this.compactionOf(i));
+      if (stress <= strength) continue;
+      const rate = c.erosionRate * strain * (stress - strength) / stress;
       const moved = Math.min(n.mass * 0.5, n.mass * rate * dt);
       if (moved <= 1e-12) continue;
       n.mass -= moved; emit(n.x, n.y, n.z, moved);

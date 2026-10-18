@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { LiquidMask, SpeciesField, VelocityField } from "./tubeVolumeField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
-import { SilverSedimentField } from "./tubeSilverSediment";
+import { AGCL_SOLID_M3_PER_UNIT, SilverSedimentField } from "./tubeSilverSediment";
+import { tubeVessel } from "./vesselGeometry";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
 import { silverStage, silverTracerOnly } from "./silverStage";
@@ -33,11 +34,11 @@ const RAFT_ROWS = 3, RAFT_HOLD = 0.04;
 /** Settling law: speed of a unit aggregate (m/s), upper bound, growth time (s) and the flow speed that halves the size. */
 const AGG_V0 = 0.0011, AGG_MAX_SPEED = 0.008, AGG_GROWTH_TIME = 6, AGG_BREAK_SHEAR = 0.05;
 /** Rate (per unit relative concentration per second) at which fine solid joins flocs (Smoluchowski-like, ~ c). */
-const FLOC_SOLID_FRACTION = () => { const v = (globalThis as { __silverPhi?: unknown }).__silverPhi; return typeof v === "number" ? v : 0.00003; };
-const FLOC_MIN_PARCEL = 5e-6;
-const FLOC_AGGREGATION = 14, FLOC_C0 = 0.25;
-/** 1 M NaCl, 1 mL yields 0.14332 g AgCl; at 5.56 g/mL and 90% void, loose bulk is 0.2578 mL. */
-export const SILVER_SEDIMENT_BULK_M3_PER_UNIT = 0.14332 / 5.56 / 0.1 * 1e-6;
+const PRIMARY_RADIUS_M = 0.2e-6, BOLTZMANN = 1.380649e-23, TEMPERATURE_K = 293.15;
+const WATER_VISCOSITY_PA_S = 1.002e-3;
+/** The quantum's solid volume divided by its spherical envelope; both derive from the same assumed molarity. */
+const FLOC_SOLID_FRACTION = AGCL_SOLID_M3_PER_UNIT * 0.03 / (4 * Math.PI / 3 * 0.0021 ** 3);
+export const SILVER_SEDIMENT_BULK_M3_PER_UNIT = AGCL_SOLID_M3_PER_UNIT / 0.1;
 const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
 /** Fine AgCl particles have negligible Brownian spreading on a millimetre grid. The bounded
  * subgrid term represents unresolved stirring; the solver's measured face velocity handles advection. */
@@ -78,7 +79,7 @@ export class TubeSilverField {
   readonly aggregatePixels: Float32Array;
   readonly sedimentHeightTexture: THREE.DataTexture;
   readonly sedimentHeightPixels: Float32Array;
-  readonly sedimentHeightScale = SILVER_SEDIMENT_BULK_M3_PER_UNIT;
+  get sedimentHeightScale() { return this.sedimentField.bulkVolumeM3(1); }
   readonly overlapPixels: Float32Array;
   readonly overlapTexture: THREE.Data3DTexture;
   readonly sedimentField: SilverSedimentField;
@@ -116,10 +117,15 @@ export class TubeSilverField {
   flocSystem!: FlocSystem;
   private liquidLevel = Infinity;
   private flocMass = new Float32Array(0);
+  /** Sub-resolution aggregate section; advected until a local parcel can be represented by a node. */
+  readonly aggregateSeeds: Float64Array;
   flocVisual = new Float32Array(0);
   private aggregateCompaction = new Float32Array(0);
   private aggregateLooseness = new Float32Array(0);
   private aggregationTransferred = 0;
+  /** Amounts transferred during the most recent fixed simulation step. */
+  readonly transferStep = { fineToAggregate: 0, aggregateToSediment: 0, aggregateToFine: 0,
+    fineToSediment: 0, sedimentToFine: 0 };
   private readonly down = new THREE.Vector3();
   /** Surface-spreading closure of the plunging jet (alpha, delta are tunable, see the hydrodynamic note). */
   private get surfaceClosure() { return (globalThis as { __silverSpread?: unknown }).__silverSpread !== 0; }
@@ -178,6 +184,7 @@ export class TubeSilverField {
       "Cl-": new SpeciesField("Cl-", this.mask) };
     this.suspension = [0, 1, 2].map(() => new Float64Array(this.mask.data.length));
     this.coarse = new Float64Array(this.mask.data.length);
+    this.aggregateSeeds = new Float64Array(this.mask.data.length);
     this.tracer = new Float64Array(this.mask.data.length);
     this.productSource = new Float64Array(this.mask.data.length);
     this.dense = new Float64Array(this.mask.data.length);
@@ -242,7 +249,8 @@ export class TubeSilverField {
   get sedimentMass() { return this.sedimentField.mass; }
   get coarseMass() { return this.flocs.reduce((sum, floc) => sum + floc.mass, 0)
     + this.coarse.reduce((sum, amount) => sum + amount, 0); }
-  get denseMass() { return this.flocMode ? (this.flocSystem?.totalMass ?? 0) : this.dense.reduce((sum, amount) => sum + amount, 0); }
+  get denseMass() { return this.flocMode ? (this.flocSystem?.totalMass ?? 0)
+    + this.aggregateSeeds.reduce((sum, amount) => sum + amount, 0) : this.dense.reduce((sum, amount) => sum + amount, 0); }
   get totalSolidMass() { return this.denseMass + this.suspensionMass + this.coarseMass + this.sedimentMass; }
   get massBalanceError() { return this.totalSolidMass - this.extent; }
 
@@ -348,6 +356,9 @@ export class TubeSilverField {
     this.accumulator = Math.min(this.flocMode ? 0.15 : 0.5, this.accumulator + Math.max(0, dt));
     while (this.accumulator >= TUBE_SIMULATION.field.stepSeconds - 1e-10) {
       const step = TUBE_SIMULATION.field.stepSeconds;
+      this.transferStep.fineToAggregate = this.transferStep.aggregateToSediment =
+        this.transferStep.aggregateToFine = this.transferStep.fineToSediment =
+        this.transferStep.sedimentToFine = 0;
       this.accumulator -= step; this.age += step;
       if (this.priorUp.distanceToSquared(up) > 0.0004 ||
         Math.abs(this.priorLevel - level) > m.height / m.ny * 0.5) {
@@ -356,7 +367,7 @@ export class TubeSilverField {
         this.solver.refreshMask();
         this.priorUp.copy(up); this.priorLevel = level;
         // Keep amounts in the closed liquid when a moving meniscus vacates cells.
-        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension, this.coarse, this.tracer, this.dense, ...this.denseCoordinates]) {
+        for (const values of [...Object.values(this.species).map(s => s.values), ...this.suspension, this.coarse, this.tracer, this.dense, this.aggregateSeeds, ...this.denseCoordinates]) {
           for (let i = 0; i < old.length; i++) {
             if (!old[i] || m.data[i] || values[i] === 0) continue;
             let nearest = -1, distance = Infinity;
@@ -468,6 +479,9 @@ export class TubeSilverField {
         if (!this.stageOne) this.settle(this.suspension[k], step,
           TUBE_SIMULATION.silver.settlingSpeeds[k] * this.settlingBoost);
       }
+      if (this.flocMode) this.solver.transport(this.aggregateSeeds, step,
+        this.fineTransport.diffusivity ?? FINE_DIFFUSIVITY,
+        this.fineTransport.eddyScale ?? FINE_EDDY_SCALE);
       this.solver.transport(this.coarse, step, this.stageOne ? 0.000004 : 0.000003, this.stageOne ? 0.8 : undefined);
       const ba = this.species["Ag+"].values, so = this.species["Cl-"].values;
       if (this.flocMode && (globalThis as { __silverSubgrid?: unknown }).__silverSubgrid) {
@@ -516,6 +530,7 @@ export class TubeSilverField {
           const release = this.sedimentField.release(column,
             Math.min(0.3, agitation * step * 1.5));
           this.suspension[0][i] += release;
+          this.transferStep.sedimentToFine += release;
           break;
         }
       }
@@ -570,7 +585,7 @@ export class TubeSilverField {
       if (this.flocMode) {
         const columnArea = 4 * m.radius * m.radius / (m.nx * m.nz);
         for (let i = 0; i < this.sedimentHeightPixels.length; i++)
-          this.sedimentHeightPixels[i] = this.sedimentField.values[i] * this.sedimentHeightScale / columnArea;
+          this.sedimentHeightPixels[i] = this.sedimentField.bulkVolumeM3(this.sedimentField.values[i]) / columnArea;
         this.sedimentHeightTexture.needsUpdate = true;
       }
     }
@@ -856,10 +871,8 @@ export class TubeSilverField {
     const m = this.mask, smoothing = this.suspension[0];
     if (!this.flocSystem) {
       this.flocSystem = new FlocSystem({ ...DEFAULT_FLOC_CONFIG, radius: m.radius, bottom: m.bottom, height: m.height,
-        // Test C runs with fragmentation disabled; test D enables it (window.__silverBreak = 1).
         allowBreakage: (globalThis as { __silverBreak?: unknown }).__silverBreak === 1,
-        // Porosity of the flocs sets how fast they settle (v ~ sqrt(solid fraction)); calibrated on the reference.
-        solidFraction: FLOC_SOLID_FRACTION() });
+        solidFraction: FLOC_SOLID_FRACTION });
       this.flocMass = new Float32Array(m.data.length); this.flocVisual = new Float32Array(m.data.length);
       this.aggregateCompaction = new Float32Array(m.data.length);
       this.aggregateLooseness = new Float32Array(m.data.length);
@@ -868,20 +881,39 @@ export class TubeSilverField {
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a], fine = smoothing[i];
       if (fine <= 1e-12) continue;
-      // Smoluchowski: collisions of primary particles scale with concentration squared, so dilute regions stay a
-      // fine suspension and only concentrated parts (the mixing zone) flocculate.
-      // Diagnostic C (window.__silverAgg = 0): aggregation disabled, the fine suspension alone must make the cloud.
       if ((globalThis as { __silverAgg?: unknown }).__silverAgg === 0) continue;
-      const concentration = fine * m.activeCount;
-      const rate = Math.min(0.6, FLOC_AGGREGATION * concentration * (concentration / (concentration + FLOC_C0)) * dt);
-      const moved = fine * rate;
-      // Tiny amounts stay in the suspension until more accumulates: one floc update per significant parcel, not per cell.
-      if (moved <= FLOC_MIN_PARCEL) continue;
-      smoothing[i] -= moved;
-      this.aggregationTransferred += moved;
+      // Local primary-primary collision balance. The game unit is the solid made by a 1 mL
+      // chloride portion; the assumed molarity is declared in tubeSilverSediment.ts.
+      const liquidM3 = Math.max(1e-12, tubeVessel.volumeFromHeight(this.liquidLevel) * 1e-6);
+      const cellM3 = liquidM3 / m.activeCount;
+      const primaryVolume = 4 * Math.PI / 3 * PRIMARY_RADIUS_M ** 3;
+      const numberDensity = fine * AGCL_SOLID_M3_PER_UNIT / (primaryVolume * cellM3);
+      const brownianKernel = 8 * BOLTZMANN * TEMPERATURE_K / (3 * WATER_VISCOSITY_PA_S);
+      const shearKernel = this.solver.lastStrain[i] * (2 * PRIMARY_RADIUS_M) ** 3 / 3;
+      const electrolyte = (this.species['Ag+'].values[i] + this.species['Cl-'].values[i]
+        + this.tracer[i] + this.silverAmount / m.activeCount) * m.activeCount
+        * 0.01 / (liquidM3 * 1e6);
+      const excessChloride = Math.max(0, this.species['Cl-'].values[i]
+        - this.species['Ag+'].values[i]) * m.activeCount * 0.01 / (liquidM3 * 1e6);
+      const sticking = (0.05 + 0.9 * electrolyte / (electrolyte + 0.005))
+        * (0.8 + 0.2 * excessChloride / (excessChloride + 0.001));
+      const moved = fine * -Math.expm1(-sticking * (brownianKernel + shearKernel) * numberDensity * dt);
+      if (moved <= 0) continue;
       const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
       m.point(x, y, z, point);
-      this.flocSystem.addMass(point.x, point.y, point.z, moved);
+      smoothing[i] -= moved;
+      this.aggregateSeeds[i] += moved;
+      this.aggregationTransferred += moved;
+      this.transferStep.fineToAggregate += moved;
+    }
+    // A cell's unresolved aggregate section is material, not a pending node queue.
+    // It continues to advect and contributes to aggregate density at the node limit.
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], parcel = this.aggregateSeeds[i];
+      if (parcel < 1e-4) continue;
+      const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
+      m.point(x, y, z, point);
+      if (this.flocSystem.addMass(point.x, point.y, point.z, parcel)) this.aggregateSeeds[i] = 0;
     }
     this.flocSystem.erode(dt, (x, y, z, mass) => {
       const gx = Math.min(m.nx - 1, Math.max(0, Math.floor((x + m.radius) / (2 * m.radius) * m.nx)));
@@ -889,20 +921,35 @@ export class TubeSilverField {
       const gz = Math.min(m.nz - 1, Math.max(0, Math.floor((z + m.radius) / (2 * m.radius) * m.nz)));
       let cell = m.index(gx, gy, gz);
       if (!m.data[cell]) { let best = -1, d = Infinity; for (let a = 0; a < m.activeCount; a++) { const j = m.active[a]; const dx = j % m.nx - gx, dy = Math.floor(j / m.nx) % m.ny - gy, dz = Math.floor(j / (m.nx * m.ny)) - gz; const q = dx * dx + dy * dy + dz * dz; if (q < d) { d = q; best = j; } } cell = best; }
-      if (cell >= 0) this.suspension[0][cell] += mass;
-    });
+      if (cell >= 0) { this.suspension[0][cell] += mass; this.transferStep.aggregateToFine += mass; }
+    }, (x, y, z) => this.sampleStrain(x, y, z));
     this.flocSystem.surfaceY = this.liquidLevel;
     this.flocSystem.step(dt, (x, y, z, out) => this.sampleFlow(x, y, z, out), this.velocity.gravityUp.y);
     this.flocSystem.depositAtFloor(dt, (x, z, mass) => {
       const gx = Math.min(m.nx - 1, Math.max(0, Math.floor((x + m.radius) / (2 * m.radius) * m.nx)));
       const gz = Math.min(m.nz - 1, Math.max(0, Math.floor((z + m.radius) / (2 * m.radius) * m.nz)));
       this.sedimentField.deposit(gz * m.nx + gx, mass);
+      this.transferStep.aggregateToSediment += mass;
     });
     this.flocSystem.rasterize(this.flocMass, this.flocVisual, m.nx, m.ny, m.nz, m.activeCount,
       this.aggregateLooseness, this.aggregateCompaction);
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a], unresolved = this.aggregateSeeds[i] * m.activeCount;
+      this.flocMass[i] += unresolved;
+      this.flocVisual[i] += unresolved;
+      this.aggregateLooseness[i] += unresolved;
+    }
   }
 
   /** Trilinear carrier velocity at a point, weighted by wet cells; false when no wet cell is near. */
+  private sampleStrain(x: number, y: number, z: number) {
+    const m = this.mask;
+    const ix = Math.min(m.nx - 1, Math.max(0, Math.floor((x + m.radius) * m.nx / (2 * m.radius))));
+    const iy = Math.min(m.ny - 1, Math.max(0, Math.floor((y - m.bottom) * m.ny / m.height)));
+    const iz = Math.min(m.nz - 1, Math.max(0, Math.floor((z + m.radius) * m.nz / (2 * m.radius))));
+    return this.solver.lastStrain[m.index(ix, iy, iz)];
+  }
+
   private sampleFlow(x: number, y: number, z: number, out: [number, number, number]): boolean {
     const m = this.mask, R = m.radius;
     const gx = (x + R) / (2 * R) * m.nx - 0.5, gy = (y - m.bottom) / m.height * m.ny - 0.5, gz = (z + R) / (2 * R) * m.nz - 0.5;
@@ -1268,7 +1315,7 @@ export class TubeSilverField {
 
   private settle(values: Float64Array, dt: number, settling: number) {
     settleParticleClass(this.mask, values, this.next, this.velocity.gravityUp, dt, settling,
-      (column, mass) => this.sedimentField.deposit(column, mass));
+      (column, mass) => { this.sedimentField.deposit(column, mass); this.transferStep.fineToSediment += mass; });
   }
 
   dumpAggregateState() {
@@ -1276,7 +1323,8 @@ export class TubeSilverField {
       fine: Array.from(this.suspension[0]), aggregate: Array.from(this.aggregatePixels),
       sedimentHeights: Array.from(this.sedimentHeightPixels), sedimentValues: Array.from(this.sedimentField.values),
       masses: { fine: this.suspensionMass + this.coarseMass, aggregate: this.denseMass,
-        sediment: this.sedimentMass, extent: this.extent }, aggregationTransferred: this.aggregationTransferred };
+      sediment: this.sedimentMass, extent: this.extent }, aggregationTransferred: this.aggregationTransferred,
+      aggregateSeedMass: this.aggregateSeeds.reduce((sum, amount) => sum + amount, 0) };
   }
 
   dispose() { this.chipTexture.dispose(); this.tintTexture.dispose(); this.texture.dispose(); this.denseTexture.dispose(); this.overlapTexture.dispose(); this.aggregateTexture.dispose(); this.sedimentHeightTexture.dispose(); }
