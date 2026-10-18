@@ -147,3 +147,46 @@ Reading:
 
 ## 10.7 How to try the corrected configuration (experimental, off by default)
 In the console before the pour: `window.__silverStream = { surfaceRise: true }; window.__silverStreamCoupling = 8;`. For the recording scripts: `INIT="window.__silverStream={surfaceRise:true};window.__silverStreamCoupling=8;"`. For the as-built stream: `window.__silverStream = true`. Nothing else changes.
+
+---
+
+# 11. Final stream validation gate: items 1 and 2 (cloud CPU), tooling for items 3 and 4
+Final configuration: `window.__silverStream = { surfaceRise: true }; window.__silverStreamCoupling = 8;`, scenario 1 mL AgNO3 + 1 mL NaCl, game pour curve. Still experimental, off by default; baseline, pouring envelope and legacy jet untouched. Not visually accepted.
+
+## 11.1 Numerical stability of the scalar advection (`tests/night/stream/stability.test.ts`)
+The solver now counts, for every 50 ms step, the largest Courant number of any explicit donor-cell sub-step that was actually executed (`maxTransportCourant`), the number of passes, and how often the fast-face sub-step limit was reached (`capHits`). The limit was raised from 64 to 512; nothing in the game comes near it. Reaction sub-steps (the coupling) and transport (CFL) sub-steps are separate:
+| configuration | reaction sub-steps per 50 ms | CFL sub-steps of the fast faces per reaction sub-step | Courant of the faces at their reaction dt | max executed-sub-step Courant | cap hits |
+| --- | --- | --- | --- | ---: | ---: |
+| FINAL, LOW | 8 (6.25 ms) | 20 | 17.1 | **0.899** | 0 |
+| FINAL, HIGH | 8 (6.25 ms) | 16 | 13.8 | **0.899** | 0 |
+| stream as built (no coupling), LOW / HIGH | 1 (50 ms) | 153 / 124 | 136.9 / 110.5 | 0.900 / 0.900 | 0 |
+| coupling 1, 2, 4, LOW | 1, 2, 4 | 153, 77, 39 | 136.9, 68.4, 34.2 | 0.900 | 0 |
+| coupling auto, LOW | 58 (0.9 ms) | 1 | 0.9 | 0.899 | 0 |
+- The peak face Courant number at the 50 ms step is 137 (LOW) and 110 (HIGH). In the final configuration every explicit transport sub-step is at or below 0.9, with the old limit of 64 as well; the earlier alarm applied to the as-built stream, coupling 1 and coupling 2, which needed 153, 153 and 77 sub-steps and had been capped at 64 (Courant 2.1 and 1.1 per sub-step). With the limit at 512 all of them are stable.
+- Rerunning the convergence study with the stable transport gives **the same numbers to four decimals** (extent, centroid, near-surface share, L1 for every n, including the non-monotone values at n=1, 2). So the earlier convergence conclusions stand, and my explanation that n=1 and 2 were pre-asymptotic because of the Courant number was wrong: the CFL clipping did not change the result (the jet flushes the scalar to the bowl in either case); the coarse-end behavior comes from the reaction splitting itself.
+- Convergence of the reaction extent is not offered as proof of stability; the executed-sub-step Courant numbers above are.
+- Cost: unchanged order (final configuration about 4 ms more per pouring step than the baseline in the mean, see section 10.5).
+
+## 11.2 Free-surface conservation of the corrected treatment (`tests/night/stream/surface.test.ts`, all 14 pouring steps)
+| check | as built | with the surface-rise correction |
+| --- | --- | --- |
+| liquid volume in the grid against the authoritative ledger (max error) | 4.8e-14 mL | 4.8e-14 mL |
+| Ag+ / Cl- ledger (Ag+ + AgCl, Cl- + AgCl against delivered), max error | 2.6e-14 | 2.1e-14 |
+| passive tracer total against delivered volume, max error | 2.2e-15 | 1.6e-15 |
+| net surface source (source minus sink) | 0 | 2.6e-13 m3/s, 2e-7 of Q: float32 round-off |
+| lateral entrainment realised by the grid / prescribed by the integral model, over the pour | min 0.65, mean 1.93, **max 3.19** (duplicate entrainment) | min 0.48, mean 0.85, **max 0.99** (never above 1) |
+| inward surface speed near the stream, max | 113 mm/s | 29.5 mm/s |
+| top-two-row residual divergence, max | 24.8 1/s | 34.7 1/s |
+- Source and sink are equal, so no reagent and no liquid is created or removed by the correction; the vessel volume and the volume-to-height mapping are not touched (the mask still follows the ledger level; its wet volume matches the ledger to 1e-13 mL).
+- **Duplicate entrainment:** removed (ratio never above 0.99). The correction can leave entrainment under-realised (minimum 0.48 in the worst step, mean 0.85): where the stream runs along the glass some footprint cells have no free neighbour cell to draw from, so the prescribed inflow cannot be delivered; the pressure solve takes up the difference. This is a limit of the grid, not a source of reagent.
+- **Suction:** the unphysical inward surface flow of the as-built model (up to 113 mm/s) falls to 29.5 mm/s, about the speed expected for entrainment from the surface layer. **Residual divergence is not removed:** in the top two rows it is up to 34.7 1/s with the correction (3.6% of the stream flux over one cell volume, 963 1/s) and was 24.8 1/s without it; it comes from the per-cell imbalance of the imposed faces and the 120 Gauss-Seidel iterations, and it is the main open numerical issue of the surface treatment.
+- The correction therefore stays experimental. Its effect on the result (1.5 mm shift of the formation centroid, -9% to -18% in AgCl) is in section 10.3.
+
+## 11.3 Other changes in this iteration
+- Stage 3: the field's extent now feeds the amount ledger and the reaction-progress readout (the panel showed 0% because that sync was skipped for the runtime field). Default behavior of the simulation is unchanged.
+
+## 11.4 Items 3 and 4: Windows (not done in the cloud)
+`tests/_stream/runGate.mjs` runs, with identical delivery and camera, for A (baseline), B (corrected stream) and C (legacy jet): the pouring-input trace (`tracePourInputs.mjs`), the pouring FPS / worst-frame / solver-cost measurement (`measureFpsPour.mjs`) and the continuous recording (`baselineRecord.mjs`, wide and close camera). Start the dev server from the branch copy, then `node tests/_stream/runGate.mjs` (all three) or `ONLY=A,B` / `STEPS=trace,fps`. Output under `docs/night/stream/gate/`. Required confirmations from the trace: `sourceOutlet` measured or reconstructed (`measuredShare`), real fall and impact speed, Q(t), delivered volume and receiving height, pouring duration. Do not use the 13 cm fall as measured.
+
+## 11.5 Status against the gate
+Item 1 (stability): done, passes. Item 2 (free-surface conservation): done; volume, reagent and net-source conservation pass; duplicate entrainment removed; residual divergence in the top rows is open. Items 3 and 4: pending the Windows run. Item 5 (decision) waits for the visual review; no further fluid feature was added.

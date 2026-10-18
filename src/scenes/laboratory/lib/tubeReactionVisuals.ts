@@ -1132,6 +1132,8 @@ diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(${silverAggregateOptics.sedimentAlp
   let bariumImpactSerial = -1;
   let bariumImpactMl = 0;
   const runtimeSilver = kind === "silver-chloride" && silverStage() === 3;
+  // Stage 3 advances its field in silverRuntime; the extent seen at the previous frame gives the rate for the progress readout.
+  let lastRuntimeExtent = 0;
   let silverField = kind === "silver-chloride" && hasLiquid && !runtimeSilver
     ? new TubeSilverField(useRuntimeQualityStore.getState().quality === "LOW" ? "LOW" : "HIGH",
       radius, box.min.y, fieldHeight) : null;
@@ -1505,8 +1507,9 @@ diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(${silverAggregateOptics.sedimentAlp
             "Cl-": silverField.species["Cl-"].values,
             "product source": silverField.productSource,
             suspension: silverField.suspension[0], aggregates: silverField.coarse });
-        if (attachedNow && !runtimeSilver) syncSilverExtent(attachedNow.instanceId, silverField.extent);
-        if (options.activeSurface && !runtimeSilver) {
+        // Both the legacy field and the stage-3 runtime field feed the amount ledger and the progress readout.
+        if (attachedNow) syncSilverExtent(attachedNow.instanceId, silverField.extent);
+        if (options.activeSurface) {
           const stand = useBunsenStandStorageStore.getState();
           const tubes = useTestTubeStorageStore.getState();
           const index = stand.attachedTubeSlotIndex;
@@ -1516,7 +1519,7 @@ diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(${silverAggregateOptics.sedimentAlp
             const store = useTubeReactionStore.getState();
             const current = store.chemistryById[attached.instanceId];
             const fieldProgress = silverField.progress;
-            const fieldRate = dt > 0 ? (silverField.extent - previousExtent) / dt : 0;
+            const fieldRate = dt > 0 ? (silverField.extent - (runtimeSilver ? lastRuntimeExtent : previousExtent)) / dt : 0;
             if (current && (Math.abs(current.progress - fieldProgress) > 1e-4
               || Math.abs(current.rate - fieldRate) > 1e-3
               || Date.now() - (current.fieldUpdatedAt ?? 0) > 300))
@@ -1524,6 +1527,7 @@ diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(${silverAggregateOptics.sedimentAlp
                 rate: fieldRate, fieldUpdatedAt: Date.now() });
           }
         }
+        lastRuntimeExtent = silverField.extent;
       }
       if (backdrop && backdropWall && backdropCap) {
         backdrop.up.value.copy(up.value);

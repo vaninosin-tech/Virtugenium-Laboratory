@@ -9,11 +9,11 @@ import { describe, expect, it, vi } from 'vitest';
 const INITIAL_ML = Number(process.env.INITIAL_ML ?? 1);
 const SNAPS = [1000, 1350, 2500, 4000];
 
-interface Surf { lateralRatio: number; sourceNet: number; meanAbsDiv: number; topRowDiv: number; belowDiv: number; qOverV: number; inward: number; riseMm: number; maxSpeed: number }
+interface Surf { sourcePos: number; sinkNeg: number; lateralRatio: number; sourceNet: number; meanAbsDiv: number; topRowDiv: number; belowDiv: number; qOverV: number; inward: number; riseMm: number; maxSpeed: number }
 interface Result { n: number; label: string; extent: Map<number, number>; formedByY: Float64Array; level: number; dy: number;
   conserved: number; minSpecies: number; advanceMs: number[]; substeps: number; courant: number }
 
-async function run(coupling: number | undefined, stream: unknown = true): Promise<Result & { surf: Map<number, Surf> }> {
+async function run(coupling: number | undefined, stream: unknown = true): Promise<Result & { surf: Map<number, Surf>; volumeErr: number; tracerErr: number }> {
   vi.stubGlobal('window', { location: { search: '' } });
   const g = globalThis as Record<string, unknown>;
   g.__silverStream = stream; g.__silverBuoy = 0;
@@ -27,7 +27,7 @@ async function run(coupling: number | undefined, stream: unknown = true): Promis
   const priv = f as unknown as { productSource: Float64Array; solver: { substeps: number; lastMaxCourant: number } };
   const m = f.mask, dy = m.height / m.ny, up = new THREE.Vector3(0, 1, 0), inlet = new THREE.Vector3(0.0065, 0, 0);
   const formedByY = new Float64Array(m.ny), extent = new Map<number, number>(), advanceMs: number[] = [], surf = new Map<number, Surf>();
-  let previousMl = 0, delivered = 0, mlTotal = INITIAL_ML, started = false, conserved = 0, minSpecies = 0, level = 0, substeps = 0, courant = 0;
+  let previousMl = 0, delivered = 0, mlTotal = INITIAL_ML, started = false, conserved = 0, minSpecies = 0, level = 0, substeps = 0, courant = 0, volumeErr = 0, tracerErr = 0;
   for (let atMs = 0; atMs <= 4000; atMs += 50) {
     const total = pouredMl(Math.min(1, atMs / 1700)), ml = total - previousMl;
     let rate = 0;
@@ -52,7 +52,14 @@ async function run(coupling: number | undefined, stream: unknown = true): Promis
     minSpecies = Math.min(minSpecies, ...f.species['Ag+'].values, ...f.species['Cl-'].values, ...f.suspension[0]);
     for (let a = 0; a < m.activeCount; a++) { const i = m.active[a]; formedByY[Math.floor(i / m.nx) % m.ny] += priv.productSource[i]; }
     if (SNAPS.includes(atMs)) extent.set(atMs, f.extent);
-    if ([850, 1000, 1150].includes(atMs) && f.streamModel) {
+    // Volume and reagent bookkeeping at every step.
+    {
+      let wet = 0; for (let a = 0; a < m.activeCount; a++) wet += m.cellVolumeMl[m.active[a]];
+      volumeErr = Math.max(volumeErr, Math.abs(wet - mlTotal));
+      let tr = 0; for (let a = 0; a < m.activeCount; a++) tr += f.tracer[m.active[a]];
+      tracerErr = Math.max(tracerErr, Math.abs(tr - f.delivered));
+    }
+    if (ml > 1e-12 && atMs <= 1700 && f.streamModel?.active) {
       // Residual divergence of the final faces (the prescribed surface sources are part of the target), per row group.
       const faces = (f as unknown as { solver: { faces: Float32Array[]; flow: Float32Array } }).solver;
       const extra = f.streamModel.surfaceRise ? f.streamModel.extraDivergence : null;
@@ -98,15 +105,15 @@ async function run(coupling: number | undefined, stream: unknown = true): Promis
           }
         realised += inflow;
       }
-      let sourceNet = 0; if (extra) for (let a = 0; a < m.activeCount; a++) sourceNet += extra[m.active[a]] * cellV;
+      let sourceNet = 0, sourcePos = 0, sinkNeg = 0; if (extra) for (let a = 0; a < m.activeCount; a++) { const e = extra[m.active[a]] * cellV; sourceNet += e; if (e > 0) sourcePos += e; else sinkNeg += e; }
       const q = f.streamModel.state?.q ?? 0;
-      surf.set(atMs, { lateralRatio: planned > 0 ? realised / planned : NaN, sourceNet,  meanAbsDiv: all / cellsAll, topRowDiv: topSum / Math.max(1, topCells), belowDiv: belowSum / Math.max(1, cellsAll - topCells),
+      surf.set(atMs, { sourcePos, sinkNeg, lateralRatio: planned > 0 ? realised / planned : NaN, sourceNet,  meanAbsDiv: all / cellsAll, topRowDiv: topSum / Math.max(1, topCells), belowDiv: belowSum / Math.max(1, cellsAll - topCells),
         qOverV: q / cellV, inward: inward / Math.max(1, inwardCells), riseMm: 1000 * rise / Math.max(1, topCells), maxSpeed });
     }
   }
   f.dispose(); vi.unstubAllGlobals();
   for (const k of ['__silverStream', '__silverBuoy', '__silverStreamCoupling']) delete g[k];
-  return { surf, n: coupling ?? 0, label: coupling === undefined ? 'split (accepted)' : `coupled n=${coupling}`, extent, formedByY, level, dy, conserved, minSpecies,
+  return { surf, volumeErr, tracerErr, n: coupling ?? 0, label: coupling === undefined ? 'split (accepted)' : `coupled n=${coupling}`, extent, formedByY, level, dy, conserved, minSpecies,
     advanceMs, substeps, courant };
 }
 
@@ -127,10 +134,22 @@ describe('Priority 3: free-surface consistency of the stream (coupled n = 8, ide
         lines.push(`  t=${t} ms: mean|div| all ${s.meanAbsDiv.toFixed(2)}  top two rows ${s.topRowDiv.toFixed(2)}  below ${s.belowDiv.toFixed(2)}  (Q/V ${s.qOverV.toFixed(0)})  lateral inflow realised/planned ${s.lateralRatio.toFixed(2)}  net surface source ${s.sourceNet.toExponential(1)} m3/s  inward surface speed near the stream ${(1000 * s.inward).toFixed(2)} mm/s  mean vertical speed of the top two rows ${s.riseMm.toFixed(2)} mm/s  max |u| ${s.maxSpeed.toFixed(3)} m/s`); }
       lines.push(`  extent @1.0/1.35/2.5/4.0 s: ${SNAPS.map(t => r.extent.get(t)!.toFixed(4)).join(' / ')}  centroid ${centroidMm(r).toFixed(2)} mm  near-surface(3 mm) ${(100 * nearSurface(r)).toFixed(1)}%  conservation ${r.conserved.toExponential(1)}  min ${r.minSpecies.toExponential(1)}`);
     }
+    for (const [label, r] of [['as built (no correction)', plain], ['surface-rise correction', rise]] as const) {
+      const all = [...r.surf.values()], ratios = all.map(v => v.lateralRatio).filter(Number.isFinite);
+      lines.push(`ALL POURING STEPS (${all.length}) ${label}: realised/planned lateral entrainment min ${Math.min(...ratios).toFixed(2)} mean ${(ratios.reduce((a, b) => a + b, 0) / ratios.length).toFixed(2)} max ${Math.max(...ratios).toFixed(2)};`
+        + ` inward surface speed near the stream max ${(1000 * Math.max(...all.map(v => v.inward))).toFixed(1)} mm/s; top-two-row mean |div| max ${Math.max(...all.map(v => v.topRowDiv)).toFixed(1)} 1/s;`
+        + ` surface source sum / sink sum relative to Q: ${all.length && all[0].qOverV ? '' : ''}${Math.max(...all.map(v => Math.abs(v.sourcePos + v.sinkNeg))).toExponential(1)} m3/s net;`
+        + ` liquid volume vs ledger max error ${r.volumeErr.toExponential(1)} mL; tracer vs delivered max error ${r.tracerErr.toExponential(1)}; Ag+/Cl- ledger error ${r.conserved.toExponential(1)}`);
+    }
     const d = (t: number) => (100 * (rise.extent.get(t)! - plain.extent.get(t)!) / plain.extent.get(t)!).toFixed(2);
     lines.push(`Effect of the correction: extent @1.35 ${d(1350)}%, @2.5 ${d(2500)}%; centroid ${(centroidMm(rise) - centroidMm(plain)).toFixed(2)} mm (cell ${(plain.dy * 1000).toFixed(2)}); near-surface ${(100 * (nearSurface(rise) - nearSurface(plain))).toFixed(1)} pp; L1 of the formation profile ${l1(rise, plain).toFixed(3)}`);
     console.log(lines.join('\n'));
     for (const t of [850, 1000, 1150]) expect(Math.abs(rise.surf.get(t)!.sourceNet)).toBeLessThan(1e-6 * (rise.surf.get(t)!.qOverV * 0 + 1.5e-6));   // no liquid is created by the correction (float32 roundoff)
+    for (const r of [plain, rise]) { expect(r.volumeErr).toBeLessThan(1e-9); expect(r.tracerErr).toBeLessThan(1e-9); }
+    const riseRatios = [...rise.surf.values()].map(v => v.lateralRatio).filter(Number.isFinite);
+    // No duplicate entrainment: the grid never carries more lateral inflow into the jet layers than the integral model prescribes.
+    // (It can carry less where the glass leaves no free neighbour cell; the minimum is reported above.)
+    for (const q of riseRatios) expect(q).toBeLessThan(1.1);
     for (const r of [plain, rise]) { expect(r.conserved).toBeLessThan(1e-9); expect(r.minSpecies).toBeGreaterThanOrEqual(-1e-12); }
   }, 900000);
 });

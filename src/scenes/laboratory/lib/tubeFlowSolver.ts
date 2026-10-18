@@ -8,6 +8,9 @@ import type { TubeStreamModel } from "./tubeStreamModel";
 /** Parameters of the surface-spreading closure of a plunging jet (SI units). */
 export interface SurfaceSpread { x: number; z: number; level: number; flow: number; alpha: number; delta: number; r0: number; relaxation: number; }
 
+/** Upper limit of the sub-steps of the fast faces (Courant above 0.9). 512 is far above anything the game produces. */
+const MAX_FAST_SUBSTEPS = 512;
+
 export class TubeFlowSolver {
   readonly flow: Float32Array;
   lastStepMs = 0;
@@ -48,6 +51,15 @@ export class TubeFlowSolver {
   lastProjectionMs = 0;
   lastForcingMs = 0;
   lastResidualDivergence = 0;
+  /**
+   * Stability accounting of the scalar transport (physical stream): the largest Courant number of any explicit donor-cell
+   * sub-step executed since resetTransportStats(), the number of such sub-passes, and how often the fast-face sub-step
+   * limit was reached (a hit means the Courant number of those faces exceeded 0.9 even after subdividing).
+   */
+  maxTransportCourant = 0;
+  transportPasses = 0;
+  capHits = 0;
+  resetTransportStats() { this.maxTransportCourant = 0; this.transportPasses = 0; this.capHits = 0; }
   constructor(readonly mask: LiquidMask, readonly options: { lowDiffusion?: boolean; pressureIterations?: number; eddyFraction?: number; ambientStrength?: number } = {}) {
     const n = mask.data.length;
     for (let axis = 0; axis < 3; axis++) this.faces[axis] = new Float32Array(n);
@@ -112,6 +124,7 @@ export class TubeFlowSolver {
     surface?: SurfaceSpread, stream?: TubeStreamModel, streamDissipation = 0) {
     const started = typeof performance !== "undefined" ? performance.now() : 0;
     const m = this.mask, old = this.previousFaces;
+    this.resetTransportStats();
     const flag = (globalThis as { __silverJetModel?: boolean | SilverJetOptions }).__silverJetModel;
     const jet = flag && surface ? (this.jetModel ??= new TubeJetModel(m)) : undefined;
     this.lastJetMomentumSource = [0, 0, 0];
@@ -242,7 +255,9 @@ export class TubeFlowSolver {
       }
     }
     this.lastMaxCourant = maxC;
-    this.substeps = Math.max(1, Math.min(64, Math.ceil(maxC / 0.9)));
+    const wanted = Math.ceil(maxC / 0.9);
+    if (wanted > MAX_FAST_SUBSTEPS) this.capHits++;
+    this.substeps = Math.max(1, Math.min(MAX_FAST_SUBSTEPS, wanted));
   }
   private totalFaceMomentum(dt: number) {
     const result = [0, 0, 0], m = this.mask;
@@ -346,10 +361,12 @@ export class TubeFlowSolver {
   private advectFast(values: Float64Array, dt: number) {
     const n = this.substeps, h = dt / n, list = this.fastList, count = this.fastCount;
     this.outgoing.fill(0); this.flux.fill(0);        // the slow pass leaves its scratch behind
+    this.transportPasses += n;
     for (let sub = 0; sub < n; sub++) {
       for (let k = 0; k < count; k++) {
         const id = list[k], i = (id / 3) | 0, axis = id - 3 * i, j = this.neighbor(i, axis, 1);
         const f = this.faces[axis][i] * h / this.spacing[axis];
+        if (Math.abs(f) > this.maxTransportCourant) this.maxTransportCourant = Math.abs(f);
         const raw = (f >= 0 ? values[i] : values[j]) * f;
         this.flux[id] = raw; this.outgoing[raw >= 0 ? i : j] += Math.abs(raw);
       }
@@ -372,6 +389,7 @@ export class TubeFlowSolver {
   }
   private transportCore(values: Float64Array, dt: number, diffusivity: number, eddyScale: number | undefined, skipFast: boolean) {
     const m = this.mask;
+    this.transportPasses++;
     this.next.set(values); this.outgoing.fill(0); this.flux.fill(0);
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
@@ -379,6 +397,7 @@ export class TubeFlowSolver {
         const j = this.neighbor(i, axis, 1);
         if (j < 0) continue;
         const f = skipFast && this.fastFlag[3 * i + axis] ? 0 : this.faces[axis][i] * dt / this.spacing[axis];
+        if (Math.abs(f) > this.maxTransportCourant) this.maxTransportCourant = Math.abs(f);
         // Six wet faces may export from one cell; keep explicit diffusion below its CFL limit.
         const mixing = Math.min(0.12, (diffusivity
           + this.eddy[i] * (eddyScale ?? this.options.eddyFraction ?? (this.options.lowDiffusion ? 0.02 : 1))) * dt / this.spacing[axis] ** 2);

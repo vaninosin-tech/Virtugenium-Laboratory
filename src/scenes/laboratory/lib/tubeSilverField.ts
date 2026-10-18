@@ -138,6 +138,8 @@ export class TubeSilverField {
   }
   /** Stream of the current ledger step in tube-local axes (set by the runtime; consumed by the experimental stream model). */
   streamState?: StreamState;
+  /** Last coupled step: reaction sub-steps, the fast-face (CFL) sub-steps used inside each, and the Courant number they started from. */
+  coupledStats?: { reactionSubsteps: number; reactionDt: number; fastSubsteps: number; courantAtReactionDt: number };
   streamModel?: TubeStreamModel;
   /** Individually represented floc components for the renderer. */
   visibleFlocs: ReturnType<FlocSystem['componentSummaries']> = [];
@@ -940,6 +942,8 @@ export class TubeSilverField {
     const dt = step / n, m = this.mask;
     this.productSource.fill(0);
     this.solver.classifyFast(dt);
+    // Accounting for the stability report: reaction sub-steps versus transport (CFL) sub-steps of the fast faces.
+    this.coupledStats = { reactionSubsteps: n, reactionDt: dt, fastSubsteps: this.solver.substeps, courantAtReactionDt: this.solver.lastMaxCourant };
     const fine = this.fineTransport;
     for (let sub = 0; sub < n; sub++) {
       for (const field of Object.values(this.species)) this.solver.transport(field.values, dt, ionMixing, ionEddy);
