@@ -1,8 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { openSilverPage, prepareSilver, waitSimulationElapsed, tubeCrop } from "../_wave11/browserCommon.mjs";
+import { luminanceContrast, sedimentMoireMetric } from "./imageMetrics.mjs";
 
 process.env.INIT = `${process.env.INIT ?? ""};window.__silverAgg=true;`;
-const output = process.env.OUT ?? "docs/night/wave16f2/browser";
+const output = process.env.OUT ?? "docs/night/wave17f2/browser";
 await mkdir(output, { recursive: true });
 const targets = (process.env.TIMES_MS ?? "1500,3000,6000,9000").split(",").map(Number);
 const manifest = { clickSimMs: null, captures: [] };
@@ -32,12 +33,22 @@ try {
           if (!state.paused || state.simMs !== frozen.simMs) throw new Error("Frozen state changed during matrix");
           await page.waitForTimeout(120);
           const file = `silver-t${target}-sim${Math.round(frozen.simMs)}-layer${layer}-optics${optics}-bg${background}.png`;
-          await page.screenshot({ path: `${output}/${file}`, clip: crop });
-          manifest.captures.push({ file, target, state, crop });
+          const png=await page.screenshot({ path: `${output}/${file}`, clip: crop });
+          let metrics;
+          if(optics===0){
+            const decoded=await page.evaluate(async base64=>{const image=new Image();image.src=`data:image/png;base64,${base64}`;await image.decode();
+              const canvas=document.createElement("canvas");canvas.width=image.width;canvas.height=image.height;
+              const context=canvas.getContext("2d");context.drawImage(image,0,0);
+              return {width:image.width,height:image.height,rgba:Array.from(context.getImageData(0,0,image.width,image.height).data)};
+            },png.toString("base64"));
+            metrics={luminance:luminanceContrast(decoded.rgba,decoded.width,decoded.height)};
+            if(layer===3)metrics.moire=sedimentMoireMetric(decoded.rgba,decoded.width,decoded.height);
+          }
+          manifest.captures.push({ file, target, state, crop, metrics });
         }
     await page.evaluate(() => {
       window.__diag.setBackground("lab"); window.__diag.setOpticsMode(0);
-      window.__three.scene.traverse(object => { if (object.name === "TubeSilverDenseField") object.material.uniforms.uSolidMode.value = 2; });
+      window.__three.scene.traverse(object => { if (object.name === "TubeSilverDenseField") object.material.uniforms.uSolidMode.value = 0; });
       window.__diag.resumeSimulation();
     });
   }

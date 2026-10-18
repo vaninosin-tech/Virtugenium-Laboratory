@@ -976,13 +976,12 @@ uniform sampler2D uSedimentHeight;
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         `#include <clipping_planes_fragment>
 if (vSedimentThickness < 0.000018) discard;`)
-        .replace("#include <opaque_fragment>", `float curd = 0.94 + 0.06 * sin(vSedimentUv.x * 183.0) * sin(vSedimentUv.y * 197.0);
+        .replace("#include <opaque_fragment>", `
 float deposited = texture2D(uSedimentHeight, vSedimentUv).r;
-outgoingLight *= curd;
 diffuseColor.a *= smoothstep(0.000018, 0.00035, min(vSedimentThickness, deposited));
 #include <opaque_fragment>`);
     };
-    bedMaterial.customProgramCacheKey = () => "silver-curd-bed-v1";
+    bedMaterial.customProgramCacheKey = () => "silver-curd-bed-v2";
   }
   const bed = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(bedGeometry, bedMaterial);
   bed.renderOrder = 5;
@@ -1795,9 +1794,9 @@ diffuseColor.a *= smoothstep(0.000018, 0.00035, min(vSedimentThickness, deposite
       }
       // AgCl's deposit is made by the same settling flocs, never a smooth cap.
       const silverSolidMode = kind === "silver-chloride"
-        ? (silverVolume.material.uniforms.uSolidMode?.value as number | undefined) ?? 2 : 2;
+        ? (silverVolume.material.uniforms.uSolidMode?.value as number | undefined) ?? 0 : 0;
       bed.visible = !!bariumField && bariumField.sedimentMass > 0.02
-        || !!silverField && (stageOneSilver ? runtimeSilver && silverField.sedimentMass > 0 && (silverSolidMode === 2 || silverSolidMode === 3)
+        || !!silverField && (stageOneSilver ? runtimeSilver && silverField.sedimentMass > 0 && (silverSolidMode === 0 || silverSolidMode === 3)
           : silverField.sedimentMass > 0.0002);
       if (bed.visible && bariumField) bedGeometry.update(bariumField.sedimentField);
       if (bed.visible && silverField) {

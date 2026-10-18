@@ -132,13 +132,9 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
           local += Math.max(0, Number.isFinite(amount) ? amount : 0) * w;
           weight += w;
         }
-        // Fixed, broad curd variation modulates deposited mass; it does not
-        // move or create any layer when a column contains no sediment.
-        const grain = 0.91 + 0.055 * Math.sin(5 * angle + u * 11)
-          + 0.035 * Math.sin(9 * angle - u * 17);
         const suppliedHeight = sampleHeight(x, z);
         const height = (suppliedHeight ?? silverSedimentThickness(local / Math.max(weight, 1e-8),
-          this.radius, field.compaction)) * taper * grain;
+          this.radius, field.compaction)) * taper;
         const i = ring === 0 ? 0 : 1 + (ring - 1) * this.sectors + sector;
         this.position.set([x, floor + height, z], i * 3);
         this.position.set([x, floor, z], (count + i) * 3);
