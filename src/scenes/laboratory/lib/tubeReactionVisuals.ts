@@ -937,12 +937,15 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
   // the top, preserving the bowl profile instead of flattening the hemisphere.
   const bedGeometry = new BariumSedimentGeometry(radius, box.min.y);
   const silverBedGeometry = new SilverSedimentGeometry(radius, box.min.y);
+  const silverSedimentFallbackTexture = new THREE.DataTexture(new Float32Array([1]), 1, 1,
+    THREE.RedFormat, THREE.FloatType);
+  silverSedimentFallbackTexture.needsUpdate = true;
   const bedMaterial = kind === "barium-sulfate"
     ? new THREE.MeshStandardMaterial({ color: "#c7ccc9", roughness: 1,
       metalness: 0, side: THREE.DoubleSide, transparent: true,
       opacity: 0.38, depthWrite: false })
     : new THREE.MeshBasicMaterial({ color: "#f8f9f7", toneMapped: false,
-      side: THREE.DoubleSide, depthWrite: true,
+      side: THREE.DoubleSide, transparent: kind === "silver-chloride", depthWrite: false,
       depthTest: kind !== "silver-chloride" });
   if (kind === "barium-sulfate") {
     bedMaterial.onBeforeCompile = shader => {
@@ -959,13 +962,25 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
     bedMaterial.customProgramCacheKey = () => "barium-sediment-film-v1";
   } else if (kind === "silver-chloride") {
     bedMaterial.onBeforeCompile = shader => {
+      shader.uniforms.uSedimentHeight = { value: bedMaterial.userData.sedimentHeightTexture ?? silverSedimentFallbackTexture };
+      bedMaterial.userData.sedimentShader = shader;
       shader.vertexShader = `attribute float sedimentThickness;
 varying float vSedimentThickness;
+varying vec2 vSedimentUv;
 ${shader.vertexShader}`.replace("#include <begin_vertex>",
-        "#include <begin_vertex>\nvSedimentThickness = sedimentThickness;");
+        `#include <begin_vertex>\nvSedimentThickness = sedimentThickness;
+vSedimentUv = position.xz / ${radius.toFixed(8)} * 0.5 + 0.5;`);
       shader.fragmentShader = `varying float vSedimentThickness;
+varying vec2 vSedimentUv;
+uniform sampler2D uSedimentHeight;
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
-        "#include <clipping_planes_fragment>\nif (vSedimentThickness < 0.000018) discard;");
+        `#include <clipping_planes_fragment>
+if (vSedimentThickness < 0.000018) discard;`)
+        .replace("#include <opaque_fragment>", `float curd = 0.94 + 0.06 * sin(vSedimentUv.x * 183.0) * sin(vSedimentUv.y * 197.0);
+float deposited = texture2D(uSedimentHeight, vSedimentUv).r;
+outgoingLight *= curd;
+diffuseColor.a *= smoothstep(0.000018, 0.00035, min(vSedimentThickness, deposited));
+#include <opaque_fragment>`);
     };
     bedMaterial.customProgramCacheKey = () => "silver-curd-bed-v1";
   }
@@ -1110,6 +1125,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
     silverDenseMesh.name = "TubeSilverDenseField";
     silverDenseMesh.onBeforeRender = updateSilverVolumeCamera;
     silverVolume.material.uniforms.uDense.value = silverField?.denseTexture ?? null;
+    silverVolume.material.uniforms.uAggregate.value = (silverField as (TubeSilverField & { aggregateTexture?: THREE.Data3DTexture }) | null)?.aggregateTexture ?? silverField?.denseTexture ?? null;
     silverVolume.material.uniforms.uOverlap.value = silverField?.overlapTexture ?? null;
     silverVolume.material.uniforms.uDiag.value = silverDiagnostic() === "cells" ? 2 : silverDiagnostic() === "tracer" ? 1 : 0;
     silverVolume.material.uniforms.uHaze.value = (silverField as (TubeSilverField & { fineTexture?: THREE.Data3DTexture }) | null)?.fineTexture ?? silverField?.texture ?? null;
@@ -1157,6 +1173,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         if (silverDenseMesh) {
           silverDenseMesh.visible = !!silverField;
           silverVolume.material.uniforms.uDense.value = silverField?.denseTexture ?? null;
+          silverVolume.material.uniforms.uAggregate.value = (silverField as (TubeSilverField & { aggregateTexture?: THREE.Data3DTexture }) | null)?.aggregateTexture ?? silverField?.denseTexture ?? null;
           silverVolume.material.uniforms.uOverlap.value = silverField?.overlapTexture ?? null;
           silverVolume.material.uniforms.uHaze.value = (silverField as (TubeSilverField & { fineTexture?: THREE.Data3DTexture }) | null)?.fineTexture ?? silverField?.texture ?? null;
           silverVolume.material.uniforms.uTint.value = silverField?.tintTexture ?? null;
@@ -1777,12 +1794,19 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         material.uniforms.uTime.value = time;
       }
       // AgCl's deposit is made by the same settling flocs, never a smooth cap.
+      const silverSolidMode = kind === "silver-chloride"
+        ? (silverVolume.material.uniforms.uSolidMode?.value as number | undefined) ?? 2 : 2;
       bed.visible = !!bariumField && bariumField.sedimentMass > 0.02
-        || !!silverField && !stageOneSilver && silverField.sedimentMass > 0.0002;
+        || !!silverField && (stageOneSilver ? runtimeSilver && silverField.sedimentMass > 0 && (silverSolidMode === 2 || silverSolidMode === 3)
+          : silverField.sedimentMass > 0.0002);
       if (bed.visible && bariumField) bedGeometry.update(bariumField.sedimentField);
       if (bed.visible && silverField) {
         bed.geometry = silverBedGeometry;
-        silverBedGeometry.update(silverField.sedimentField);
+        const heightTexture = (silverField as TubeSilverField & { sedimentHeightTexture?: THREE.DataTexture }).sedimentHeightTexture;
+        bedMaterial.userData.sedimentHeightTexture = heightTexture;
+        if (bedMaterial.userData.sedimentShader) bedMaterial.userData.sedimentShader.uniforms.uSedimentHeight.value = heightTexture ?? silverSedimentFallbackTexture;
+        silverBedGeometry.update(silverField.sedimentField,
+          heightTexture);
       }
       let bedCurdCount = 0;
       if (bed.visible && silverField && !stageOneSilver && p > 0) {
@@ -2076,7 +2100,7 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         geometry.dispose(); foamGeometry.dispose(); foamMaterial.dispose();
         wallGeometry.dispose(); capGeometry.dispose(); headGeometry.dispose(); headMaterial.dispose(); dropletMaterial.dispose(); splashMaterial.dispose();
         filmGeometry.dispose(); filmMaterial.dispose(); transport?.dispose();
-        gasGeometry.dispose(); bedGeometry.dispose(); silverBedGeometry.dispose(); coarseGeometry.dispose(); coarseMaterial.dispose(); bedMaterial.dispose(); bottomCausticGeometry.dispose(); standCausticGeometry.dispose();
+        gasGeometry.dispose(); bedGeometry.dispose(); silverBedGeometry.dispose(); silverSedimentFallbackTexture.dispose(); coarseGeometry.dispose(); coarseMaterial.dispose(); bedMaterial.dispose(); bottomCausticGeometry.dispose(); standCausticGeometry.dispose();
         bottomCausticMaterial.dispose(); standCausticMaterial.dispose();
         curdGeometry.dispose(); silverDenseGeometry?.dispose();
         white.dispose(); flocMaterial.dispose(); silverVolume.material.dispose(); bubbleMaterial.dispose(); pourAirMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
