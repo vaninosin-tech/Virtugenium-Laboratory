@@ -464,6 +464,19 @@ export class FlocSystem {
     }
   }
 
+  /** Move floor-contact mass into the bottom reservoir at the node's drag-limited slip rate. */
+  depositAtFloor(dt: number, emit: (x: number, z: number, mass: number) => void) {
+    for (const n of this.nodes) {
+      if (!n.resting || n.mass <= 0) continue;
+      const radius = nodeRadius(n.mass, this.config);
+      const share = Math.min(1, slipSpeed(radius, this.config) * dt / Math.max(radius, 1e-9));
+      const moved = n.mass * share;
+      n.mass -= moved;
+      this.settledMass += moved;
+      emit(n.x, n.z, moved);
+    }
+  }
+
   /** Connected component sizes (nodes), largest first. */
   componentSizes() {
     const seen = new Uint8Array(this.nodes.length), sizes: number[] = [];
@@ -481,7 +494,8 @@ export class FlocSystem {
    * and, optionally, a visual-only bridge density along links so connected parts read as one body.
    */
   private splat(x: number, y: number, z: number, radius: number, amountA: number,
-    targetA: Float32Array | null, amountB: number, targetB: Float32Array) {
+    targetA: Float32Array | null, amountB: number, targetB: Float32Array,
+    looseness?: Float32Array, looseAmount = 0, compaction?: Float32Array, compactAmount = 0) {
       const c = this.config, R = c.radius;
       const nx = this.rasterNx, ny = this.rasterNy, nz = this.rasterNz;
       const cx = this.rasterCx, cy = this.rasterCy, cz = this.rasterCz, scratch = this.scratch;
@@ -504,12 +518,16 @@ export class FlocSystem {
         const w = scratch[n++] / total, at = (k * ny + j) * nx + i;
         if (targetA) targetA[at] += amountA * w;
         targetB[at] += amountB * w;
+        if (looseness) looseness[at] += looseAmount * w;
+        if (compaction) compaction[at] += compactAmount * w;
       }
   }
 
-  rasterize(mass: Float32Array, visual: Float32Array, nx: number, ny: number, nz: number, scale: number) {
+  rasterize(mass: Float32Array, visual: Float32Array, nx: number, ny: number, nz: number, scale: number,
+    looseness?: Float32Array, compaction?: Float32Array) {
     const c = this.config, R = c.radius;
     mass.fill(0); visual.fill(0);
+    looseness?.fill(0); compaction?.fill(0);
     this.rasterNx = nx; this.rasterNy = ny; this.rasterNz = nz;
     this.rasterCx = nx / (2 * R); this.rasterCy = ny / c.height; this.rasterCz = nz / (2 * R);
     for (let index = 0; index < this.nodes.length; index++) {
@@ -517,7 +535,9 @@ export class FlocSystem {
       // Deterministic irregularity: every node is a slightly different lump, so no two are alike and the raft is ragged.
       const h = Math.sin(index * 12.9898) * 43758.5453, j = h - Math.floor(h);
       const lump = 0.8 + 0.5 * j;
-      this.splat(n.x, n.y, n.z, r * lump, n.mass * scale, mass, n.mass * scale, visual);
+      this.splat(n.x, n.y, n.z, r * lump, n.mass * scale, mass, n.mass * scale, visual,
+        looseness, n.mass * scale * (1 - nodeSolidFraction(r, c)),
+        compaction, n.mass * scale * this.compactionOf(index));
       // Wet cotton has hanging lobes: a lighter tuft below and to the side that follows the node's own motion.
       const tuftMass = n.mass * 0.18, speed = Math.hypot(n.vx, n.vy, n.vz) + 1e-9;
       const tx = n.x - n.vx / speed * r * 0.9 + (j - 0.5) * r, ty = n.y - Math.abs(n.vy) / speed * r * 0.9 - r * 0.4, tz = n.z - n.vz / speed * r * 0.9 + (0.5 - j) * r;

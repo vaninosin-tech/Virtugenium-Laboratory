@@ -4,9 +4,11 @@ import { silverSedimentThickness } from "./night/render/silverOptics";
 /** Conserved bottom reservoir, indexed by the liquid field's x/z columns. */
 export class SilverSedimentField {
   readonly values: Float64Array;
+  private readonly moved: Float64Array;
   compaction = 0;
   constructor(readonly nx: number, readonly nz: number) {
     this.values = new Float64Array(nx * nz);
+    this.moved = new Float64Array(nx * nz);
   }
   get mass() { let sum = 0; for (const value of this.values) sum += value; return sum; }
   deposit(column: number, amount: number) { this.values[column] += amount; }
@@ -18,7 +20,8 @@ export class SilverSedimentField {
   settle(dt: number) {
     this.compaction = Math.min(1, this.compaction + dt / 35);
     // Loose curds slide down the hemispherical floor toward its low point.
-    const moved = new Float64Array(this.values.length);
+    const moved = this.moved;
+    moved.fill(0);
     const fraction = 1 - Math.exp(-dt * 2.5);
     for (let z = 0; z < this.nz; z++) for (let x = 0; x < this.nx; x++) {
       const source = z * this.nx + x, mass = this.values[source];
@@ -30,6 +33,35 @@ export class SilverSedimentField {
       moved[destination] += mass * fraction;
     }
     this.values.set(moved);
+  }
+
+  /** Cohesive curd slumps only when its local column load exceeds a neighbour's. */
+  settleCurd(dt: number) {
+    const moved = this.moved;
+    moved.set(this.values);
+    let loaded = 0;
+    for (let z = 0; z < this.nz; z++) for (let x = 0; x < this.nx; x++) {
+      const i = z * this.nx + x, mass = this.values[i];
+      loaded = Math.max(loaded, mass);
+      if (mass <= 0) continue;
+      let target = -1, low = mass;
+      for (let side = 0; side < 4; side++) {
+        const j = side === 0 ? (x > 0 ? i - 1 : -1)
+          : side === 1 ? (x + 1 < this.nx ? i + 1 : -1)
+          : side === 2 ? (z > 0 ? i - this.nx : -1)
+          : z + 1 < this.nz ? i + this.nx : -1;
+        if (j < 0) continue;
+        const xx = (j % this.nx + .5) * 2 / this.nx - 1;
+        const zz = (Math.floor(j / this.nx) + .5) * 2 / this.nz - 1;
+        if (xx * xx + zz * zz < 1 && this.values[j] < low) { low = this.values[j]; target = j; }
+      }
+      if (target < 0 || mass <= low * 1.8) continue;
+      const transfer = Math.min((mass - low * 1.8) * 0.15 * dt, mass * 0.1);
+      moved[i] -= transfer; moved[target] += transfer;
+    }
+    this.values.set(moved);
+    // Pressure from deposited mass closes pores; with no deposit there is no compaction.
+    this.compaction = Math.min(1, this.compaction + dt * loaded / (loaded + 0.02) * 0.1);
   }
 }
 

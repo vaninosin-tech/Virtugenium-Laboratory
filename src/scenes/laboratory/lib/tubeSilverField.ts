@@ -36,6 +36,8 @@ const AGG_V0 = 0.0011, AGG_MAX_SPEED = 0.008, AGG_GROWTH_TIME = 6, AGG_BREAK_SHE
 const FLOC_SOLID_FRACTION = () => { const v = (globalThis as { __silverPhi?: unknown }).__silverPhi; return typeof v === "number" ? v : 0.00003; };
 const FLOC_MIN_PARCEL = 5e-6;
 const FLOC_AGGREGATION = 14, FLOC_C0 = 0.25;
+/** 1 M NaCl, 1 mL yields 0.14332 g AgCl; at 5.56 g/mL and 90% void, loose bulk is 0.2578 mL. */
+export const SILVER_SEDIMENT_BULK_M3_PER_UNIT = 0.14332 / 5.56 / 0.1 * 1e-6;
 const HARDEN_FROM = 2.5, HARDEN_TO = 9, HARDEN_LOAD = 2;
 /** Fine AgCl particles have negligible Brownian spreading on a millimetre grid. The bounded
  * subgrid term represents unresolved stirring; the solver's measured face velocity handles advection. */
@@ -72,6 +74,11 @@ export class TubeSilverField {
   readonly denseCoordinates: Float64Array[];
   readonly densePixels: Float32Array;
   readonly denseTexture: THREE.Data3DTexture;
+  readonly aggregateTexture: THREE.Data3DTexture;
+  readonly aggregatePixels: Float32Array;
+  readonly sedimentHeightTexture: THREE.DataTexture;
+  readonly sedimentHeightPixels: Float32Array;
+  readonly sedimentHeightScale = SILVER_SEDIMENT_BULK_M3_PER_UNIT;
   readonly overlapPixels: Float32Array;
   readonly overlapTexture: THREE.Data3DTexture;
   readonly sedimentField: SilverSedimentField;
@@ -109,7 +116,10 @@ export class TubeSilverField {
   flocSystem!: FlocSystem;
   private liquidLevel = Infinity;
   private flocMass = new Float32Array(0);
-  private flocVisual = new Float32Array(0);
+  flocVisual = new Float32Array(0);
+  private aggregateCompaction = new Float32Array(0);
+  private aggregateLooseness = new Float32Array(0);
+  private aggregationTransferred = 0;
   private readonly down = new THREE.Vector3();
   /** Surface-spreading closure of the plunging jet (alpha, delta are tunable, see the hydrodynamic note). */
   private get surfaceClosure() { return (globalThis as { __silverSpread?: unknown }).__silverSpread !== 0; }
@@ -174,6 +184,17 @@ export class TubeSilverField {
     this.loadWeight = new Float64Array(this.mask.data.length);
     this.denseCoordinates = [0, 1, 2, 3, 4].map(() => new Float64Array(this.mask.data.length));
     this.densePixels = new Float32Array(this.mask.data.length * 4);
+    this.aggregatePixels = new Float32Array(this.mask.data.length * 4);
+    this.aggregateTexture = new THREE.Data3DTexture(this.aggregatePixels, this.mask.nx, this.mask.ny, this.mask.nz);
+    this.aggregateTexture.format = THREE.RGBAFormat; this.aggregateTexture.type = THREE.FloatType;
+    this.aggregateTexture.minFilter = this.aggregateTexture.magFilter = THREE.LinearFilter;
+    this.aggregateTexture.wrapS = this.aggregateTexture.wrapT = this.aggregateTexture.wrapR = THREE.ClampToEdgeWrapping;
+    this.aggregateTexture.unpackAlignment = 1; this.aggregateTexture.needsUpdate = true;
+    this.sedimentHeightPixels = new Float32Array(this.mask.nx * this.mask.nz);
+    this.sedimentHeightTexture = new THREE.DataTexture(this.sedimentHeightPixels, this.mask.nx, this.mask.nz,
+      THREE.RedFormat, THREE.FloatType);
+    this.sedimentHeightTexture.minFilter = this.sedimentHeightTexture.magFilter = THREE.LinearFilter;
+    this.sedimentHeightTexture.needsUpdate = true;
     this.overlapPixels = new Float32Array(this.mask.data.length);
     this.denseTexture = new THREE.Data3DTexture(this.densePixels, this.mask.nx, this.mask.ny, this.mask.nz);
     this.overlapTexture = new THREE.Data3DTexture(this.overlapPixels, this.mask.nx, this.mask.ny, this.mask.nz);
@@ -435,7 +456,9 @@ export class TubeSilverField {
         && kinetic / Math.max(1, m.activeCount) < 0.00004;
       const targetBoost = calm ? TUBE_SIMULATION.silver.settlingAcceleration : 1;
       this.settlingBoost += (targetBoost - this.settlingBoost) * (1 - Math.exp(-step / 0.8));
-      this.sedimentField.settle(step);
+      if (this.flocMode && (globalThis as { __silverAgg?: unknown }).__silverAgg !== 0)
+        this.sedimentField.settleCurd(step);
+      else this.sedimentField.settle(step);
       for (let k = 0; k < 3; k++) {
         if (this.stageOne && k === 1) this.solver.transport(this.suspension[k], step, 0.00003, 1);
         else if (this.stageOne && k === 0) this.solver.transport(this.suspension[k], step,
@@ -522,8 +545,14 @@ export class TubeSilverField {
           this.densePixels[offset + 2] = (Math.floor(i / m.nx) % m.ny + 0.5) / m.ny;
           this.densePixels[offset + 3] = (Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz;
           this.overlapPixels[i] = (silverTracerOnly() ? this.tracer[i] * 6 : this.productSource[i]) * m.activeCount;
+          const offsetA = i * 4, mass = this.flocMass[i];
+          this.aggregatePixels[offsetA] = mass;
+          this.aggregatePixels[offsetA + 1] = mass > 0 ? this.aggregateLooseness[i] / mass : 0;
+          this.aggregatePixels[offsetA + 2] = mass > 0 ? this.aggregateCompaction[i] / mass : 0;
+          this.aggregatePixels[offsetA + 3] = 0;
         }
         this.denseTexture.needsUpdate = true;
+        this.aggregateTexture.needsUpdate = true;
         this.overlapTexture.needsUpdate = true;
       } else if (this.stageOne) {
         for (let i = 0; i < this.dense.length; i++) {
@@ -537,6 +566,12 @@ export class TubeSilverField {
         }
         this.denseTexture.needsUpdate = true;
         this.overlapTexture.needsUpdate = true;
+      }
+      if (this.flocMode) {
+        const columnArea = 4 * m.radius * m.radius / (m.nx * m.nz);
+        for (let i = 0; i < this.sedimentHeightPixels.length; i++)
+          this.sedimentHeightPixels[i] = this.sedimentField.values[i] * this.sedimentHeightScale / columnArea;
+        this.sedimentHeightTexture.needsUpdate = true;
       }
     }
   }
@@ -826,6 +861,8 @@ export class TubeSilverField {
         // Porosity of the flocs sets how fast they settle (v ~ sqrt(solid fraction)); calibrated on the reference.
         solidFraction: FLOC_SOLID_FRACTION() });
       this.flocMass = new Float32Array(m.data.length); this.flocVisual = new Float32Array(m.data.length);
+      this.aggregateCompaction = new Float32Array(m.data.length);
+      this.aggregateLooseness = new Float32Array(m.data.length);
     }
     const point = this.scratch;
     for (let a = 0; a < m.activeCount; a++) {
@@ -841,6 +878,7 @@ export class TubeSilverField {
       // Tiny amounts stay in the suspension until more accumulates: one floc update per significant parcel, not per cell.
       if (moved <= FLOC_MIN_PARCEL) continue;
       smoothing[i] -= moved;
+      this.aggregationTransferred += moved;
       const x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / (m.nx * m.ny));
       m.point(x, y, z, point);
       this.flocSystem.addMass(point.x, point.y, point.z, moved);
@@ -855,7 +893,13 @@ export class TubeSilverField {
     });
     this.flocSystem.surfaceY = this.liquidLevel;
     this.flocSystem.step(dt, (x, y, z, out) => this.sampleFlow(x, y, z, out), this.velocity.gravityUp.y);
-    this.flocSystem.rasterize(this.flocMass, this.flocVisual, m.nx, m.ny, m.nz, m.activeCount);
+    this.flocSystem.depositAtFloor(dt, (x, z, mass) => {
+      const gx = Math.min(m.nx - 1, Math.max(0, Math.floor((x + m.radius) / (2 * m.radius) * m.nx)));
+      const gz = Math.min(m.nz - 1, Math.max(0, Math.floor((z + m.radius) / (2 * m.radius) * m.nz)));
+      this.sedimentField.deposit(gz * m.nx + gx, mass);
+    });
+    this.flocSystem.rasterize(this.flocMass, this.flocVisual, m.nx, m.ny, m.nz, m.activeCount,
+      this.aggregateLooseness, this.aggregateCompaction);
   }
 
   /** Trilinear carrier velocity at a point, weighted by wet cells; false when no wet cell is near. */
@@ -1227,5 +1271,13 @@ export class TubeSilverField {
       (column, mass) => this.sedimentField.deposit(column, mass));
   }
 
-  dispose() { this.chipTexture.dispose(); this.tintTexture.dispose(); this.texture.dispose(); this.denseTexture.dispose(); this.overlapTexture.dispose(); }
+  dumpAggregateState() {
+    return { dimensions: [this.mask.nx, this.mask.ny, this.mask.nz], mask: Array.from(this.mask.data),
+      fine: Array.from(this.suspension[0]), aggregate: Array.from(this.aggregatePixels),
+      sedimentHeights: Array.from(this.sedimentHeightPixels), sedimentValues: Array.from(this.sedimentField.values),
+      masses: { fine: this.suspensionMass + this.coarseMass, aggregate: this.denseMass,
+        sediment: this.sedimentMass, extent: this.extent }, aggregationTransferred: this.aggregationTransferred };
+  }
+
+  dispose() { this.chipTexture.dispose(); this.tintTexture.dispose(); this.texture.dispose(); this.denseTexture.dispose(); this.overlapTexture.dispose(); this.aggregateTexture.dispose(); this.sedimentHeightTexture.dispose(); }
 }

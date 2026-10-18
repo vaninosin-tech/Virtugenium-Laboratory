@@ -1,0 +1,618 @@
+{
+  "lowOn": {
+    "quality": "LOW",
+    "enabled": true,
+    "rows": [
+      {
+        "t": 1,
+        "extent": 0.17195771210825408,
+        "fine": 0.035549846224148675,
+        "aggregate": 0.12447059326513658,
+        "sediment": 0.011937272618969371,
+        "nodes": 11,
+        "error": 5.551115123125783e-16,
+        "transferredFromFine": 0.1519880215199657,
+        "massBins": [
+          1,
+          3,
+          4,
+          3
+        ],
+        "radiusBins": [
+          0,
+          10,
+          1,
+          0
+        ],
+        "meanSlip": 0.0026633819494520043,
+        "meanY": 0.0070933366020758445
+      },
+      {
+        "t": 2,
+        "extent": 0.33358539207677534,
+        "fine": 0.058707799343677036,
+        "aggregate": 0.23238080157604044,
+        "sediment": 0.04249679115705924,
+        "nodes": 20,
+        "error": 1.3322676295501878e-15,
+        "transferredFromFine": 0.33339798385816605,
+        "massBins": [
+          2,
+          4,
+          12,
+          2
+        ],
+        "radiusBins": [
+          0,
+          18,
+          2,
+          0
+        ],
+        "meanSlip": 0.0026672727943640438,
+        "meanY": 0.00659021920791103
+      },
+      {
+        "t": 3,
+        "extent": 0.4675174882397142,
+        "fine": 0.08431252798605572,
+        "aggregate": 0.31471092319140925,
+        "sediment": 0.06849403706225134,
+        "nodes": 34,
+        "error": 2.1094237467877974e-15,
+        "transferredFromFine": 0.5080540466677568,
+        "massBins": [
+          7,
+          8,
+          16,
+          3
+        ],
+        "radiusBins": [
+          0,
+          32,
+          2,
+          0
+        ],
+        "meanSlip": 0.002671519646838527,
+        "meanY": 0.006438570581303711
+      },
+      {
+        "t": 4.5,
+        "extent": 0.627493076668445,
+        "fine": 0.11288987648301411,
+        "aggregate": 0.35167633798683323,
+        "sediment": 0.16292686219859948,
+        "nodes": 57,
+        "error": 1.7763568394002505e-15,
+        "transferredFromFine": 0.7575839415939928,
+        "massBins": [
+          12,
+          18,
+          26,
+          1
+        ],
+        "radiusBins": [
+          0,
+          56,
+          1,
+          0
+        ],
+        "meanSlip": 0.002678265116141679,
+        "meanY": 0.0060547017652315994
+      },
+      {
+        "t": 6,
+        "extent": 0.7443172325133834,
+        "fine": 0.13110852059444453,
+        "aggregate": 0.3436854657932191,
+        "sediment": 0.26952324612572476,
+        "nodes": 82,
+        "error": 4.9960036108132044e-15,
+        "transferredFromFine": 0.9752030451237624,
+        "massBins": [
+          6,
+          60,
+          15,
+          1
+        ],
+        "radiusBins": [
+          0,
+          81,
+          1,
+          0
+        ],
+        "meanSlip": 0.0026794639659832938,
+        "meanY": 0.0053355671890367735
+      },
+      {
+        "t": 9,
+        "extent": 0.8807698248990716,
+        "fine": 0.15452394599755606,
+        "aggregate": 0.2793873335839351,
+        "sediment": 0.44685854531758407,
+        "nodes": 144,
+        "error": 3.552713678800501e-15,
+        "transferredFromFine": 1.3074095223618232,
+        "massBins": [
+          64,
+          75,
+          4,
+          1
+        ],
+        "radiusBins": [
+          0,
+          143,
+          1,
+          0
+        ],
+        "meanSlip": 0.002680678606769601,
+        "meanY": 0.005215446469315537
+      },
+      {
+        "t": 12,
+        "extent": 0.9467908916451105,
+        "fine": 0.1701128618159793,
+        "aggregate": 0.21065427562681877,
+        "sediment": 0.5660237542023181,
+        "nodes": 197,
+        "error": 5.662137425588298e-15,
+        "transferredFromFine": 1.5485368000237982,
+        "massBins": [
+          126,
+          69,
+          1,
+          1
+        ],
+        "radiusBins": [
+          0,
+          196,
+          1,
+          0
+        ],
+        "meanSlip": 0.0026809189916581436,
+        "meanY": 0.0055463604012534196
+      },
+      {
+        "t": 14,
+        "extent": 0.9711148026822302,
+        "fine": 0.17798738391673327,
+        "aggregate": 0.1555322592801724,
+        "sediment": 0.6375951594853445,
+        "nodes": 229,
+        "error": 1.9984014443252818e-14,
+        "transferredFromFine": 1.66453742770837,
+        "massBins": [
+          183,
+          44,
+          1,
+          1
+        ],
+        "radiusBins": [
+          0,
+          229,
+          0,
+          0
+        ],
+        "meanSlip": 0.0026811835101693306,
+        "meanY": 0.005800614343005656
+      }
+    ],
+    "maxError": 1.9984014443252818e-14,
+    "minimum": 0,
+    "maxNodes": 229,
+    "cpuMs": {
+      "p50": 11.586700000000292,
+      "p95": 31.617700000000696,
+      "peak": 56.26060000000052
+    },
+    "sedimentHeightMm": 4.292793571949005,
+    "textureBytes": 55872
+  },
+  "lowOff": {
+    "quality": "LOW",
+    "enabled": false,
+    "rows": [
+      {
+        "t": 1,
+        "extent": 0.16464404395938476,
+        "fine": 0.16464404395938464,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 1.1102230246251565e-16,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      },
+      {
+        "t": 2,
+        "extent": 0.30051672983460437,
+        "fine": 0.30051672983460326,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 1.1102230246251565e-15,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      },
+      {
+        "t": 3,
+        "extent": 0.4178669073029513,
+        "fine": 0.4178669073029522,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 8.881784197001252e-16,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      },
+      {
+        "t": 4.5,
+        "extent": 0.554432413251258,
+        "fine": 0.5544324132512529,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 5.10702591327572e-15,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      },
+      {
+        "t": 6,
+        "extent": 0.6584087931175535,
+        "fine": 0.6584087931175483,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 5.218048215738236e-15,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      }
+    ],
+    "maxError": 1.0880185641326534e-14,
+    "minimum": 0,
+    "maxNodes": 0,
+    "cpuMs": {
+      "p50": 2.593300000000454,
+      "p95": 3.945600000000013,
+      "peak": 9.244899999999689
+    },
+    "sedimentHeightMm": 0,
+    "textureBytes": 55872
+  },
+  "highOn": {
+    "quality": "HIGH",
+    "enabled": true,
+    "rows": [
+      {
+        "t": 1,
+        "extent": 0.13885122353221502,
+        "fine": 0.030153600042517978,
+        "aggregate": 0.10869762348969696,
+        "sediment": 0,
+        "nodes": 11,
+        "error": 8.326672684688674e-17,
+        "transferredFromFine": 0.12223953537473378,
+        "massBins": [
+          2,
+          4,
+          3,
+          2
+        ],
+        "radiusBins": [
+          0,
+          10,
+          1,
+          0
+        ],
+        "meanSlip": 0.0026666902800554382,
+        "meanY": 0.007210502980780489
+      },
+      {
+        "t": 2,
+        "extent": 0.2669019186029241,
+        "fine": 0.05187029231282702,
+        "aggregate": 0.19046653722255805,
+        "sediment": 0.02456508906753729,
+        "nodes": 20,
+        "error": 1.7763568394002505e-15,
+        "transferredFromFine": 0.2620400069769936,
+        "massBins": [
+          4,
+          3,
+          11,
+          2
+        ],
+        "radiusBins": [
+          0,
+          20,
+          0,
+          0
+        ],
+        "meanSlip": 0.0026692209231684917,
+        "meanY": 0.006456605980196049
+      },
+      {
+        "t": 3,
+        "extent": 0.3753457522627587,
+        "fine": 0.07585410038906766,
+        "aggregate": 0.22932495926810095,
+        "sediment": 0.07016669260558472,
+        "nodes": 31,
+        "error": 5.329070518200751e-15,
+        "transferredFromFine": 0.3966468480101734,
+        "massBins": [
+          5,
+          8,
+          17,
+          1
+        ],
+        "radiusBins": [
+          0,
+          31,
+          0,
+          0
+        ],
+        "meanSlip": 0.002676102639710701,
+        "meanY": 0.006158592064427787
+      },
+      {
+        "t": 4.5,
+        "extent": 0.5171569008264274,
+        "fine": 0.1060507590628123,
+        "aggregate": 0.2270882781799953,
+        "sediment": 0.18401786358361227,
+        "nodes": 54,
+        "error": 7.549516567451064e-15,
+        "transferredFromFine": 0.591859152457805,
+        "massBins": [
+          6,
+          28,
+          20,
+          0
+        ],
+        "radiusBins": [
+          0,
+          54,
+          0,
+          0
+        ],
+        "meanSlip": 0.002680722836972191,
+        "meanY": 0.005979233613647068
+      },
+      {
+        "t": 6,
+        "extent": 0.6346479807008163,
+        "fine": 0.1342233198662938,
+        "aggregate": 0.23203002671418654,
+        "sediment": 0.268394634120315,
+        "nodes": 76,
+        "error": 2.0872192862952943e-14,
+        "transferredFromFine": 0.7630942443962244,
+        "massBins": [
+          15,
+          48,
+          13,
+          0
+        ],
+        "radiusBins": [
+          0,
+          76,
+          0,
+          0
+        ],
+        "meanSlip": 0.0026812413951608576,
+        "meanY": 0.005200088652718032
+      }
+    ],
+    "maxError": 2.353672812205332e-14,
+    "minimum": 0,
+    "maxNodes": 76,
+    "cpuMs": {
+      "p50": 9.078999999999724,
+      "p95": 11.884399999999914,
+      "peak": 14.79279999999926
+    },
+    "sedimentHeightMm": 3.993723075836897,
+    "textureBytes": 132096
+  },
+  "highOff": {
+    "quality": "HIGH",
+    "enabled": false,
+    "rows": [
+      {
+        "t": 1,
+        "extent": 0.1378014266232859,
+        "fine": 0.1378014266232863,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 3.885780586188048e-16,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      },
+      {
+        "t": 2,
+        "extent": 0.2572979794075272,
+        "fine": 0.25729797940752686,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 3.3306690738754696e-16,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      },
+      {
+        "t": 3,
+        "extent": 0.3528355199300466,
+        "fine": 0.35283551993004764,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 1.0547118733938987e-15,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      },
+      {
+        "t": 4.5,
+        "extent": 0.47935799962807435,
+        "fine": 0.4793579996280781,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 3.774758283725532e-15,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      },
+      {
+        "t": 6,
+        "extent": 0.5977992969053411,
+        "fine": 0.5977992969053525,
+        "aggregate": 0,
+        "sediment": 0,
+        "nodes": 0,
+        "error": 1.1435297153639112e-14,
+        "transferredFromFine": 0,
+        "massBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "radiusBins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "meanSlip": 0,
+        "meanY": 0
+      }
+    ],
+    "maxError": 1.2323475573339238e-14,
+    "minimum": 0,
+    "maxNodes": 0,
+    "cpuMs": {
+      "p50": 5.7621000000017375,
+      "p95": 7.656399999999849,
+      "peak": 8.366700000000492
+    },
+    "sedimentHeightMm": 0,
+    "textureBytes": 132096
+  }
+}
