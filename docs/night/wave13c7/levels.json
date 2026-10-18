@@ -1,38 +1,38 @@
 [
   {
     "ml": 1,
-    "level": 0.008829453459533142,
-    "penetration": 0.0064557761437832074,
+    "level": 0.02276978436020096,
+    "penetration": 0.020259170131420673,
     "force": -0.00036216591494689067,
-    "appliedForce": -0.0003621659149468906,
+    "appliedForce": -0.0003621659149468894,
     "blockedForce": 0,
-    "activeCells": 3092
+    "activeCells": 3100
   },
   {
     "ml": 1.4,
-    "level": 0.011427901510013067,
-    "penetration": 0.009054224194263133,
+    "level": 0.031364508530814135,
+    "penetration": 0.028853894302033847,
     "force": -0.00036216591494689067,
-    "appliedForce": -0.00036216591494689094,
+    "appliedForce": -0.0003621659149468926,
     "blockedForce": 0,
-    "activeCells": 4244
+    "activeCells": 4252
   },
   {
     "ml": 1.8,
-    "level": 0.01402634956049299,
-    "penetration": 0.011652672244743055,
+    "level": 0.03995923270142731,
+    "penetration": 0.03744861847264702,
     "force": -0.00036216591494689067,
-    "appliedForce": -0.00036216591494689,
+    "appliedForce": -0.0003621659149468912,
     "blockedForce": 0,
-    "activeCells": 5780
+    "activeCells": 5788
   },
   {
     "ml": 2,
-    "level": 0.01532557358573295,
-    "penetration": 0.012951896269983016,
+    "level": 0.0442565947867339,
+    "penetration": 0.03775381815783875,
     "force": -0.00036216591494689067,
-    "appliedForce": -0.00036216591494689013,
+    "appliedForce": -0.0003621659149468916,
     "blockedForce": 0,
-    "activeCells": 6164
+    "activeCells": 6556
   }
 ]
