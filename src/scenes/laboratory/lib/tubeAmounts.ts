@@ -34,18 +34,19 @@ export const initial: Record<string, { ml: number; species?: Record<string, numb
   kmno4: { ml: 1, species: { "MnO4-": 2 } },
 };
 /**
- * Review aid, off by default: window.__silverAgnoMl or ?agnoMl= (0.5 to 3.9 mL) makes the AgNO3 portion that goes into the
- * tube that many millilitres instead of the standard 1 mL pour (and 2.5 mL for contents that predate the pour), so the
- * liquid is easier to judge. The species amounts follow the volume (same concentration); the chloride portion, the
+ * The AgNO3 portion that goes into the tube is 2.5 mL by default (the liquid level of experiment 1) instead of the standard
+ * 1 mL pour. window.__silverAgnoMl or ?agnoMl= (0.5 to 3.9 mL) overrides it; __silverAgnoMl = 1 restores the old 1 mL. The species amounts follow the volume (same concentration); the chloride portion, the
  * geometry and the stoichiometry of the stage-3 field are untouched. 3.9 mL leaves room for the standard 1 mL NaCl pour.
  */
 export const MAX_AGNO_REVIEW_ML = TUBE_CAPACITY_ML - STANDARD_POUR_ML - 0.1;
+/** Experiment 2 starts with the same liquid level as experiment 1 (2.5 mL of HNO3): the AgNO3 portion is 2.5 mL. */
+export const EXPERIMENT2_AGNO_ML = initial.hno3.ml;
 export function agnoReviewMl(): number | undefined {
   if (typeof window === "undefined") return undefined;
   const fromUrl = Number(new URLSearchParams(currentSearch()).get("agnoMl"));
   const override = Number.isFinite(fromUrl) && fromUrl > 0 ? fromUrl : (window as Window & { __silverAgnoMl?: unknown }).__silverAgnoMl;
-  return typeof override === "number" && Number.isFinite(override)
-    ? Math.min(MAX_AGNO_REVIEW_ML, Math.max(0.5, override)) : undefined;
+  const wanted = typeof override === "number" && Number.isFinite(override) ? override : EXPERIMENT2_AGNO_ML;
+  return Math.min(MAX_AGNO_REVIEW_ML, Math.max(0.5, wanted));
 }
 export function seedMl(reagentId: string): number {
   const base = initial[reagentId]?.ml ?? 0;

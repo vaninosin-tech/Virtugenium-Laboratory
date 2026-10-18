@@ -13,7 +13,7 @@ const tubeId = 'agno-ml-tube';
 beforeEach(() => { clearDeliveries(); resetTubeAmounts(); clearTubePourImpact(tubeId); useReagentStorageStore.setState({ sourceMl: {}, debitedEvents: new Set() }); });
 afterEach(() => { silverRuntime.reset(); vi.unstubAllGlobals(); useLaboratoryStore.setState({ selectedExperimentId: null }); });
 
-describe('review aid: more AgNO3 volume (off by default)', () => {
+describe('AgNO3 portion: 2.5 mL by default (the experiment 1 level), overridable', () => {
   it('is 2.5 mL by default; the flag and the URL parameter clamp to 0.5 to 3.9 mL and only AgNO3 is affected', () => {
     vi.stubGlobal('window', { location: { search: '' } });
     expect(seedMl('agno3')).toBe(2.5); expect(seedMl('nacl')).toBe(1);
@@ -22,9 +22,9 @@ describe('review aid: more AgNO3 volume (off by default)', () => {
     vi.stubGlobal('window', { location: { search: '?agnoMl=0.1' } }); expect(seedMl('agno3')).toBe(0.5);
     vi.stubGlobal('window', { location: { search: '' }, __silverAgnoMl: 'x' }); expect(seedMl('agno3')).toBe(2.5);
   });
-  it('scales the live AgNO3 pour: a 1 mL pour in 20 steps adds 3.9 mL with the flag and 1 mL without', async () => {
+  it('scales the live AgNO3 pour: a 1 mL pour in 20 steps adds 2.5 mL by default (experiment 1 level), 1 mL with __silverAgnoMl=1, 3.9 mL at the cap', async () => {
     const { deliver } = await import('../../../src/scenes/laboratory/lib/tubeAmounts');
-    for (const [flag, expected] of [[undefined, 1], [3.9, 3.9], [10.9, 3.9]] as const) {
+    for (const [flag, expected] of [[undefined, 2.5], [1, 1], [3.9, 3.9], [10.9, 3.9]] as const) {
       resetTubeAmounts();
       vi.stubGlobal('window', { location: { search: '' }, ...(flag !== undefined ? { __silverAgnoMl: flag } : {}) });
       let admitted = 0; for (let k = 0; k < 20; k++) admitted += deliver(tubeId, 'agno3', 0.05);

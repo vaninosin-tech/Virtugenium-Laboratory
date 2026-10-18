@@ -52,6 +52,15 @@ const HEAT_DOLLY_DAMPING = 6;
  * out — with the flame below and a few centimetres of gas above the mouth.
  */
 const TUBE_CLOSE_UP_DISTANCE = 0.26;
+/**
+ * The close-up views the tube from the side: the offset from the tube is made horizontal, so the gaze is
+ * perpendicular to the (vertical) tube and the liquid column is not foreshortened. A camera that is almost
+ * straight above keeps its own direction.
+ */
+function levelWithTube(offset: THREE.Vector3) {
+  const horizontal = Math.hypot(offset.x, offset.z);
+  if (horizontal > 0.05) offset.y = 0;
+}
 const YAW_SENSITIVITY = 0.0028;
 const PITCH_SENSITIVITY = 0.0022;
 /**
@@ -1573,7 +1582,9 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
           // face it — the stand is off-centre in the hood, so a straight
           // dolly along the view ray would leave it at the screen's edge.
           closeUpPosition.current
-            .subVectors(base, TUBE_FOCUS.point)
+            .subVectors(base, TUBE_FOCUS.point);
+          levelWithTube(closeUpPosition.current);
+          closeUpPosition.current
             .normalize()
             .multiplyScalar(TUBE_CLOSE_UP_DISTANCE)
             .add(TUBE_FOCUS.point);
@@ -1647,7 +1658,9 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
     tableDolly.current = THREE.MathUtils.damp(tableDolly.current, standCloseUp ? 1 : 0, HEAT_DOLLY_DAMPING, delta);
     if (tableDolly.current > 0.001 && TUBE_FOCUS.valid) {
       closeUpPosition.current
-        .subVectors(base, TUBE_FOCUS.point)
+        .subVectors(base, TUBE_FOCUS.point);
+      levelWithTube(closeUpPosition.current);
+      closeUpPosition.current
         .normalize()
         .multiplyScalar(TUBE_CLOSE_UP_DISTANCE)
         .add(TUBE_FOCUS.point);
