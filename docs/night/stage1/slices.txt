@@ -919,4 +919,4 @@ overlap x-z at y=12
 ............
 dense centre=5.010,4.291,5.813 components above 0.01=1; largest=2120; total=2120
 vertical profiles (steps 1,5,20,50,100,160): centre=15.01 span=3 floor=0.000; centre=14.83 span=5 floor=0.000; centre=13.71 span=8 floor=0.000; centre=11.08 span=12 floor=0.000; centre=6.82 span=21 floor=0.153; centre=4.29 span=21 floor=0.336
-centre pour x=5.477; wall pour x=5.721; max mass error=9.881e-15
+centre pour x=5.477; wall pour x=5.721; max mass error=9.770e-15

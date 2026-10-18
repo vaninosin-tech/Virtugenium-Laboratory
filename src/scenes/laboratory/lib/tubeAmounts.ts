@@ -1,5 +1,5 @@
 /** Game units are separate from virtual millilitres. A tube never spills. */
-import { silverStage } from "./silverStage";
+import { currentSearch, silverStage } from "./silverStage";
 import { silverRuntime } from "./tubeSilverRuntime";
 import { tubeVessel } from "./vesselGeometry";
 
@@ -42,7 +42,7 @@ export const MAX_AGNO_REVIEW_ML = TUBE_CAPACITY_ML - STANDARD_POUR_ML - 0.1;
 export function seedMl(reagentId: string): number {
   const base = initial[reagentId]?.ml ?? 0;
   if (reagentId !== "agno3" || typeof window === "undefined") return base;
-  const fromUrl = Number(new URLSearchParams(window.location?.search ?? "").get("agnoMl"));
+  const fromUrl = Number(new URLSearchParams(currentSearch()).get("agnoMl"));
   const override = Number.isFinite(fromUrl) && fromUrl > 0 ? fromUrl : (window as Window & { __silverAgnoMl?: unknown }).__silverAgnoMl;
   return typeof override === "number" && Number.isFinite(override)
     ? Math.min(MAX_AGNO_REVIEW_ML, Math.max(0.5, override)) : base;

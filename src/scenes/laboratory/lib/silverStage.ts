@@ -1,3 +1,10 @@
+/**
+ * The query string as the page was loaded. The game rewrites the address bar after start, which used to drop ?silverStage=,
+ * ?silverAgg= and ?agnoMl=; a reload reads the new address again.
+ */
+export const LOADED_SEARCH = typeof window !== "undefined" ? window.location?.search ?? "" : "";
+export const currentSearch = () => (typeof window === "undefined" ? "" : window.location?.search) || LOADED_SEARCH;
+
 /** Stage used when nothing overrides it. Stage 1 is the earlier cloud model and stays selectable with ?silverStage=1. */
 export const DEFAULT_SILVER_STAGE = 3;
 
@@ -11,7 +18,7 @@ export function resolveSilverStage(search: string, override: unknown): number {
 /** Selector for the AgCl implementation (default: stage 3, see DEFAULT_SILVER_STAGE). */
 export function silverStage(): number {
   if (typeof window === "undefined") return 1;
-  return resolveSilverStage(window.location?.search ?? "", (window as Window & { __silverStage?: unknown }).__silverStage);
+  return resolveSilverStage(currentSearch(), (window as Window & { __silverStage?: unknown }).__silverStage);
 }
 
 /**
@@ -26,7 +33,7 @@ export function resolveSilverAggregation(search: string, override: unknown): boo
 }
 
 export function silverAggregationEnabled(): boolean {
-  const search = typeof window === "undefined" ? "" : window.location?.search ?? "";
+  const search = currentSearch();
   const override = (typeof window === "undefined" ? undefined : (window as Window & { __silverAgg?: unknown }).__silverAgg)
     ?? (globalThis as { __silverAgg?: unknown }).__silverAgg;
   return resolveSilverAggregation(search, override);
