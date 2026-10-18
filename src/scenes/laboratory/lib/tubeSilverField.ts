@@ -2,7 +2,8 @@ import * as THREE from "three";
 import { LiquidMask, SpeciesField, VelocityField } from "./tubeVolumeField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { STAGE3_AGCL_SOLID_M3_PER_UNIT, SilverSedimentField } from "./tubeSilverSediment";
-import { GRAVITY, REFERENCE_DENSITY, buoyancyOptions, densityParts, referenceExcess, type DensityParts } from "./tubeBuoyancy";
+import { ConsolidatingDeposit, DEFAULT_DEPOSIT } from "./night/meso/consolidatingDeposit";
+import { GRAVITY, REFERENCE_DENSITY, buoyancyOptions, densityParts, fineWeightAcceleration, fineWeightOptions, referenceExcess, type DensityParts } from "./tubeBuoyancy";
 import { tubeVessel } from "./vesselGeometry";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
@@ -240,9 +241,19 @@ export class TubeSilverField {
       texture.unpackAlignment = 1;
       texture.needsUpdate = true;
     }
+    const depositFlag = this.flocMode && !!(globalThis as { __silverDeposit?: unknown }).__silverDeposit;
     this.sedimentField = new SilverSedimentField(this.mask.nx, this.mask.nz,
-      this.flocMode && silverAggregationEnabled()
+      this.flocMode && (silverAggregationEnabled() || depositFlag)
         ? STAGE3_AGCL_SOLID_M3_PER_UNIT : undefined);
+    if (depositFlag) {
+      // Experimental layered bed on the hemispherical floor; deposited mass is its only input (see tubeSilverSediment.ts).
+      const columnArea = 4 * this.mask.radius * this.mask.radius / (this.mask.nx * this.mask.nz);
+      const options = (globalThis as { __silverDeposit?: unknown }).__silverDeposit;
+      this.sedimentField.columnAreaM2 = columnArea;
+      this.sedimentField.attachBed(new ConsolidatingDeposit(this.mask.nx, this.mask.nz, 12,
+        { ...DEFAULT_DEPOSIT, cellArea: columnArea, spacing: 2 * this.mask.radius / this.mask.nx, ...(typeof options === "object" ? options as object : {}) },
+        ConsolidatingDeposit.bowl(this.mask.nx, this.mask.nz, this.mask.radius)), DEFAULT_DEPOSIT.rhoS, columnArea);
+    } else this.sedimentField.columnAreaM2 = 4 * this.mask.radius * this.mask.radius / (this.mask.nx * this.mask.nz);
     this.chipPixels = new Float32Array(this.mask.data.length);
     this.chipTexture = new THREE.Data3DTexture(this.chipPixels, this.mask.nx, this.mask.ny, this.mask.nz);
     this.chipTexture.format = THREE.RedFormat; this.chipTexture.type = THREE.FloatType;
@@ -276,6 +287,13 @@ export class TubeSilverField {
     sum + field.reduce((a, b) => a + b, 0), 0); }
   get sediment() { return this.sedimentField.values; }
   get sedimentMass() { return this.sedimentField.mass; }
+  /** Pressure-projection iterations while an experimental density coupling is on (the default few leave divergence that compresses scalars). */
+  private get projectionIterations(): number | undefined {
+    const b = buoyancyOptions((globalThis as { __silverBuoyancy?: unknown }).__silverBuoyancy);
+    if (b) return b.iterations ?? 120;
+    const f = fineWeightOptions((globalThis as { __silverFineWeight?: unknown }).__silverFineWeight);
+    return f ? f.iterations ?? 120 : undefined;
+  }
   /** Liquid volume (m3) the field units refer to. */
   private get liquidVolumeM3() { return Math.max(1e-12, tubeVessel.volumeFromHeight(this.liquidLevel) * 1e-6); }
   private referenceExcess(unitMol = 1e-4) { return referenceExcess(unitMol, this.liquidVolumeM3); }
@@ -442,9 +460,18 @@ export class TubeSilverField {
         // Heavy flocs load the liquid; the poured (lighter) NaCl solution is buoyant: weight is negative where the
         // incoming-solution tracer is. Acceleration = g * (relative density difference) * volume fraction.
         const buoy = buoyancyOptions((globalThis as { __silverBuoyancy?: unknown }).__silverBuoyancy);
+        const fineWeight = buoy ? undefined : fineWeightOptions((globalThis as { __silverFineWeight?: unknown }).__silverFineWeight);
+        const perUnit = fineWeight ? (fineWeight.unitMol ?? 1e-4) / this.liquidVolumeM3 : 0, cap = fineWeight?.cap ?? 100;
         for (let a = 0; a < m.activeCount; a++) {
           const i = m.active[a];
           const baseline = (this.flocMass.length ? this.flocMass[i] / m.activeCount : 0) - this.buoyancy * this.tracer[i];
+          if (fineWeight) {
+            // Fine suspension only (aggregates are in flocMass already); concentrations in mol/m3 from the mean-cell units.
+            const solid = Math.min(cap, (this.suspension[0][i] + this.suspension[1][i] + this.suspension[2][i]) * m.activeCount * perUnit);
+            const nano3 = Math.min(cap, (this.tracer[i] - this.species["Cl-"].values[i]) * m.activeCount * perUnit);
+            this.loadWeight[i] = baseline + fineWeightAcceleration(fineWeight, solid, nano3) / (m.activeCount * this.loadStrength);
+            continue;
+          }
           if (!buoy) { this.loadWeight[i] = baseline; continue; }
           const acceleration = GRAVITY * (buoy.scale ?? 1) / REFERENCE_DENSITY;
           const per = this.compositionDensity(i, buoy.unitMol, buoy.cap ?? 100);
@@ -490,7 +517,7 @@ export class TubeSilverField {
         agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined,
         0, this.stageOne ? { values: this.loadWeight, scale: m.activeCount * this.loadStrength,
           down: this.down.copy(up).negate(),
-          iterations: this.flocMode ? buoyancyOptions((globalThis as { __silverBuoyancy?: unknown }).__silverBuoyancy)?.iterations ?? (buoyancyOptions((globalThis as { __silverBuoyancy?: unknown }).__silverBuoyancy) ? 120 : undefined) : undefined } : undefined,
+          iterations: this.flocMode ? this.projectionIterations : undefined } : undefined,
         !streamOn && this.stageOne && amount > 0 && this.surfaceClosure
           ? { x: inlet.x, z: inlet.z, level,
             // jetStrength is the accepted ledger rate in mL/s for stage 3.
@@ -625,9 +652,8 @@ export class TubeSilverField {
         this.overlapTexture.needsUpdate = true;
       }
       if (this.flocMode) {
-        const columnArea = 4 * m.radius * m.radius / (m.nx * m.nz);
         for (let i = 0; i < this.sedimentHeightPixels.length; i++)
-          this.sedimentHeightPixels[i] = this.sedimentField.bulkVolumeM3(this.sedimentField.values[i]) / columnArea;
+          this.sedimentHeightPixels[i] = this.sedimentField.thicknessM(i);
         this.sedimentHeightTexture.needsUpdate = true;
         this.assertMassInvariant();
       }

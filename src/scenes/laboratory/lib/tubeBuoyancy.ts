@@ -48,3 +48,33 @@ export function buoyancyOptions(flag: unknown): BuoyancyOptions | undefined {
   if (!flag) return undefined;
   return typeof flag === "object" ? flag as BuoyancyOptions : {};
 }
+
+/**
+ * Weight of the FINE AgCl suspension (experimental, window.__silverFineWeight = true | options, off by default), added to the
+ * accepted load. Aggregates (flocs and the unresolved sections) already load the liquid through `flocMass` and are not counted
+ * again here; the incoming-solution buoyancy is kept as it is.
+ *
+ * mode "solid" (default): a = g (rho_s - rho_l) / rho_l * phi, phi = suspended solid volume / occupied liquid volume. This is the
+ *   particle weight minus the liquid it displaces (per mole of AgCl: 0.117 kg).
+ * mode "net": the same solid term minus the dissolved reagent mass that was removed from the liquid in the cell when the AgCl
+ *   formed (AgNO3 + NaCl - NaNO3, per mole formed: 0.127 kg). The two nearly cancel: forming a solid inside a parcel does not
+ *   make the parcel heavier; only separating the solid from its liquid does. "solid" is therefore an upper estimate.
+ */
+export interface FineWeightOptions {
+  mode?: "solid" | "net";
+  scale?: number;
+  unitMol?: number;
+  /** Largest concentration (mol/m3) used, see BuoyancyOptions.cap. */
+  cap?: number;
+  iterations?: number;
+}
+export function fineWeightOptions(flag: unknown): FineWeightOptions | undefined {
+  if (!flag) return undefined;
+  return typeof flag === "object" ? flag as FineWeightOptions : {};
+}
+/** Acceleration (m/s2, positive = down) of a cell from fine AgCl `solid` and dissolved product `nano3`, both mol/m3. */
+export function fineWeightAcceleration(options: FineWeightOptions, solid: number, nano3: number): number {
+  const excess = solid * EXCESS_KG_PER_MOL.agcl
+    - (options.mode === "net" ? Math.max(0, nano3) * (EXCESS_KG_PER_MOL.agno3 + EXCESS_KG_PER_MOL.nacl - EXCESS_KG_PER_MOL.nano3) : 0);
+  return GRAVITY * (options.scale ?? 1) * excess / REFERENCE_DENSITY;
+}

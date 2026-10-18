@@ -20,25 +20,56 @@ export interface DepositParams {
 }
 export const DEFAULT_DEPOSIT: DepositParams = {
   rhoS: 5560, rhoW: 1000, g: 9.81,
-  e0: 30,            // freshly settled floc bed, porosity ~0.97
-  eC: 2.5,           // strongly compacted, porosity ~0.71
-  sRef: 0.5, m: 0.6, // Pa; soft-soil scale for a bed a few mm high
-  tau: 1800,         // s
-  cellArea: 1e-6, yieldSlope: 1.2, creepRate: 0.2, spacing: 1e-3, layerMass: 2e-6,
+  e0: 9,             // freshly settled floc bed, porosity 0.90 (the starting porosity of the old global proxy)
+  eC: 1.2,           // strongly compacted, porosity 0.545 (its end value)
+  sRef: 1, m: 0.6,   // Pa; soft-soil scale: the self-weight of a sub-mm bed is about 1 Pa
+  tau: 300,          // s, structural (secondary) compaction time; placeholder, not measured for AgCl
+  cellArea: 1e-6, yieldSlope: 1.2, creepRate: 0.2, spacing: 1e-3, layerMass: 5e-8,
 };
 
 export class ConsolidatingDeposit {
   readonly mass: Float64Array;   // kg solid, [column][layer]
   readonly e: Float64Array;      // void ratio, [column][layer]
   creptTotal = 0;
-  constructor(readonly nx: number, readonly nz: number, readonly layers = 8, readonly p: DepositParams = DEFAULT_DEPOSIT) {
+  /** Floor elevation under each column (m) and whether the column is inside the vessel; defaults: flat, all valid. */
+  readonly floor: Float64Array; readonly valid: Uint8Array;
+  constructor(readonly nx: number, readonly nz: number, readonly layers = 8, readonly p: DepositParams = DEFAULT_DEPOSIT,
+    geometry: { floor?: Float64Array; valid?: Uint8Array } = {}) {
     this.mass = new Float64Array(nx * nz * layers); this.e = new Float64Array(nx * nz * layers).fill(p.e0);
+    this.floor = geometry.floor ?? new Float64Array(nx * nz); this.valid = geometry.valid ?? new Uint8Array(nx * nz).fill(1);
+  }
+  /** Hemispherical bowl of radius R sampled on an nx by nz grid of square columns (spacing 2R/nx). */
+  static bowl(nx: number, nz: number, radius: number) {
+    const floor = new Float64Array(nx * nz), valid = new Uint8Array(nx * nz);
+    for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
+      const px = ((x + 0.5) / nx * 2 - 1) * radius, pz = ((z + 0.5) / nz * 2 - 1) * radius, r = Math.hypot(px, pz);
+      if (r < radius * 0.98) { valid[z * nx + x] = 1; floor[z * nx + x] = radius - Math.sqrt(radius * radius - r * r); }
+    }
+    return { floor, valid };
+  }
+  /** Mass (kg) in a column. */
+  columnMass(column: number) { let s = 0; for (let l = 0; l < this.layers; l++) s += this.mass[this.at(column, l)]; return s; }
+  /** Nearest valid column (itself when valid); mass can never land outside the vessel. */
+  nearestValid(column: number) {
+    if (this.valid[column]) return column;
+    const x = column % this.nx, z = Math.floor(column / this.nx); let best = column, bd = Infinity;
+    for (let c = 0; c < this.valid.length; c++) if (this.valid[c]) {
+      const d = (c % this.nx - x) ** 2 + (Math.floor(c / this.nx) - z) ** 2; if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+  /** Remove up to `kg` from the top of a column (resuspension); returns the amount removed. */
+  remove(column: number, kg: number) {
+    let left = kg;
+    for (let l = this.layers - 1; l >= 0 && left > 0; l--) { const k = this.at(column, l), take = Math.min(this.mass[k], left); this.mass[k] -= take; left -= take; }
+    return kg - left;
   }
   private at(c: number, l: number) { return c * this.layers + l; }
   get solidMass() { let s = 0; for (const v of this.mass) s += v; return s; }
   /** Add solid mass (kg) to a column; it lands on top as fresh, loose material. Fills the next layer when the top is thick. */
   deposit(column: number, kg: number) {
     if (!(kg > 0)) return;
+    column = this.nearestValid(column);
     const { p, layers } = this, cap = p.layerMass;
     let l = 0; while (l < layers - 1 && this.mass[this.at(column, l)] >= cap) l++;
     const k = this.at(column, l), old = this.mass[k];
@@ -72,17 +103,21 @@ export class ConsolidatingDeposit {
       if (this.e[k] > eq) this.e[k] += (eq - this.e[k]) * a;      // compaction only: a bed does not re-swell by itself
     }
   }
-  /** Slope-limited creep: mass moves from the top layer of a high column toward a lower neighbour; solid mass is conserved. */
+  /** Slope-limited creep on the free-surface elevation (floor + bed): mass moves from the top of the higher column toward a lower
+   *  valid neighbour when the surface slope exceeds the yield slope, so a steep bowl wall sheds material toward the centre. Solid
+   *  mass is conserved. */
   creep(dt: number) {
     const { p, nx, nz } = this;
     for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
-      const c = z * nx + x, hc = this.height(c);
+      const c = z * nx + x; if (!this.valid[c]) continue;
+      const sc = this.floor[c] + this.height(c);
       for (const [dx, dz] of [[1, 0], [0, 1]] as const) {
         const xn = x + dx, zn = z + dz; if (xn >= nx || zn >= nz) continue;
-        const n = zn * nx + xn, hn = this.height(n), from = hc >= hn ? c : n, to = from === c ? n : c;
-        const dh = Math.abs(hc - hn), slope = dh / p.spacing;
+        const n = zn * nx + xn; if (!this.valid[n]) continue;
+        const sn = this.floor[n] + this.height(n), from = sc >= sn ? c : n, to = from === c ? n : c;
+        const slope = Math.abs(sc - sn) / p.spacing;
         if (slope <= p.yieldSlope) continue;
-        const excess = (slope - p.yieldSlope) / slope;             // fraction of the height step above yield
+        const excess = (slope - p.yieldSlope) / slope;
         let top = this.layers - 1; while (top > 0 && this.mass[this.at(from, top)] <= 0) top--;
         const k = this.at(from, top), move = Math.min(this.mass[k], this.mass[k] * p.creepRate * excess * Math.min(1, dt));
         if (move <= 0) continue;

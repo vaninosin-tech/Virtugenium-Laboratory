@@ -70,7 +70,9 @@ describe("default stage 3 does not reach the other experiments", () => {
     seedTubeAmounts(tubeId, ["agno3"]);
     expect(silverRuntime.applyDelivery(nacl())).toBe(true);
     expect(silverRuntime.field(tubeId)?.flocMode).toBe(true);
-    expect(silverRuntime.field(tubeId)?.silverAmount).toBe(1.15);
+    // Corrected on purpose: the game field now starts with the physical Ag+ amount, 2.5 mL x 0.1 mol/L = 0.25 mmol = 2.5 units
+    // (it was the normalised 1.15). Directly constructed fields keep the old default, see the second test below.
+    expect(silverRuntime.field(tubeId)?.silverAmount).toBeCloseTo(2.5, 12);
   });
 });
 

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { tubeVessel } from "./vesselGeometry";
+import type { ConsolidatingDeposit } from "./night/meso/consolidatingDeposit";
 
 /** Legacy stages retain their historical virtual concentration. */
 export const AGCL_MOLARITY_MOL_L = 0.01;
@@ -13,22 +14,51 @@ export class SilverSedimentField {
   readonly values: Float64Array;
   private readonly moved: Float64Array;
   compaction = 0;
+  /** Experimental (window.__silverDeposit): the layered, stress-compacting bed that owns the bottom geometry and porosity. */
+  private bed?: { deposit: ConsolidatingDeposit; kgPerUnit: number; columnArea: number };
+  /** Attach the bed. `values` stays the conserved ledger, equal to the bed's column masses after every step. */
+  attachBed(deposit: ConsolidatingDeposit, rhoS: number, columnArea: number) {
+    this.bed = { deposit, kgPerUnit: this.solidM3PerUnit * rhoS, columnArea };
+  }
+  get bedAttached() { return !!this.bed; }
+  get bedCreptKg() { return this.bed?.deposit.creptTotal ?? 0; }
+  /** Bed thickness (m) of a column. */
+  thicknessM(column: number) {
+    return this.bed ? this.bed.deposit.height(column) : this.bulkVolumeM3(this.values[column]) / Math.max(1e-12, this.columnAreaM2);
+  }
+  columnAreaM2 = 0;
   constructor(readonly nx: number, readonly nz: number,
     readonly solidM3PerUnit = AGCL_SOLID_M3_PER_UNIT) {
     this.values = new Float64Array(nx * nz);
     this.moved = new Float64Array(nx * nz);
   }
   get mass() { let sum = 0; for (const value of this.values) sum += value; return sum; }
-  get porosity() { return 0.90 - 0.35 * this.compaction; }
+  get porosity() { return this.bed ? this.bed.deposit.meanPorosity() || 0.9 : 0.90 - 0.35 * this.compaction; }
   bulkVolumeM3(mass: number) { return mass * this.solidM3PerUnit / (1 - this.porosity); }
-  get equivalentFillHeight() { return tubeVessel.heightFromVolume(this.bulkVolumeM3(this.mass) * 1e6); }
-  deposit(column: number, amount: number) { this.values[column] += amount; }
+  get equivalentFillHeight() {
+    return tubeVessel.heightFromVolume((this.bed ? this.bed.deposit.bulkVolume() : this.bulkVolumeM3(this.mass)) * 1e6);
+  }
+  deposit(column: number, amount: number) {
+    if (this.bed) {
+      column = this.bed.deposit.nearestValid(column);      // mass never lands outside the vessel
+      this.bed.deposit.deposit(column, amount * this.bed.kgPerUnit);
+    }
+    this.values[column] += amount;
+  }
   release(column: number, fraction: number) {
     const amount = this.values[column] * fraction;
     this.values[column] -= amount;
+    if (this.bed) this.bed.deposit.remove(column, amount * this.bed.kgPerUnit);
     return amount;
   }
+  /** Bed step: load-dependent compaction and slope creep; the ledger follows the bed's column masses. */
+  private stepBed(dt: number) {
+    const { deposit, kgPerUnit } = this.bed!;
+    deposit.consolidate(dt); deposit.creep(dt);
+    for (let c = 0; c < this.values.length; c++) this.values[c] = deposit.columnMass(c) / kgPerUnit;
+  }
   settle(dt: number) {
+    if (this.bed) { this.stepBed(dt); return; }
     this.compaction = Math.min(1, this.compaction + dt / 35);
     // Loose curds slide down the hemispherical floor toward its low point.
     const moved = this.moved;
@@ -48,6 +78,7 @@ export class SilverSedimentField {
 
   /** Cohesive curd slumps only when its local column load exceeds a neighbour's. */
   settleCurd(dt: number) {
+    if (this.bed) { this.stepBed(dt); return; }
     const moved = this.moved;
     moved.set(this.values);
     let loaded = 0;

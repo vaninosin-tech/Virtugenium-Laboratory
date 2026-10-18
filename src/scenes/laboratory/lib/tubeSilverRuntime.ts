@@ -1,3 +1,4 @@
+import { STAGE3_AGCL_MOLARITY_MOL_L } from "./tubeSilverSediment";
 import * as THREE from "three";
 import { TubeSilverField } from "./tubeSilverField";
 import { streamStateFromEvent } from "./tubeStreamModel";
@@ -23,6 +24,9 @@ function pendingStream(entry: Entry) {
   if (state) state.direction.transformDirection(CLAMP_TUBE_MOUTH.root.clone().invert());
   return state;
 }
+/** Concentration of the receiving AgNO3 (mol/L) and the moles one field unit stands for (1 mL of that concentration). */
+const AGNO3_MOLARITY_MOL_L = STAGE3_AGCL_MOLARITY_MOL_L;
+const FIELD_UNIT_MOL = 1e-3 * STAGE3_AGCL_MOLARITY_MOL_L;
 const entries = new Map<string, Entry>();
 const eventId = (event: DeliveryEvent) => `${event.serial}|${event.step}`;
 const tubeSlot = (tubeId: string): { location: TubeLocation; index: number } | undefined => {
@@ -75,8 +79,11 @@ export const silverRuntime = {
     if (!this.canApply(event) || !slot || !Number.isFinite(event.atMs)) return false;
     const isFirst = !existing;
     // Construct before mutating stores. The constructor is pure with respect to receiving chemistry.
+    // Field unit = 0.1 mmol = the NaCl portion (1 mL of 0.1 mol/L). The receiving AgNO3 is 0.1 mol/L too, so its amount in
+    // units is its volume in mL: 2.5 mL holds 0.25 mmol Ag+ = 2.5 units, of which 1 unit can precipitate with the 1 mL NaCl.
+    const silverUnits = amount.volumeMl * 1e-3 * AGNO3_MOLARITY_MOL_L / FIELD_UNIT_MOL;
     const field = existing?.field ?? new TubeSilverField("LOW", SILVER_TUBE_RADIUS,
-      SILVER_TUBE_BOTTOM, silverFieldHeight);
+      SILVER_TUBE_BOTTOM, silverFieldHeight, silverUnits);
     const inlet = localPoint(event.point);
     const diag: Diagnostic = existing?.diagnostics ?? { deliveredMl: 0, eventIds: [] };
     const up = localUp();
