@@ -17,7 +17,7 @@ async function drive(flag: unknown) {
   const priv = f as unknown as { flow: Float32Array };
   const m = f.mask, dy = m.height / m.ny, up = new THREE.Vector3(0, 1, 0), inlet = new THREE.Vector3(0.0065, 0, 0);
   const out = new Map<number, Snap>();
-  let previousMl = 0, delivered = 0, mlTotal = 1;
+  let previousMl = 0, delivered = 0, mlTotal = Number(process.env.START ?? 1);
   let volumeError = 0, massError = 0;
   for (let atMs = 0; atMs <= 10000; atMs += 50) {
     const total = pouredMl(Math.min(1, atMs / POUR_MS)), ml = total - previousMl;
@@ -97,7 +97,7 @@ function print(name: string, snaps: Map<number, Snap>) {
 
 describe('buoyancy of suspended AgCl: baseline vs composition vs additive', () => {
   it('prints the required diagnostics and keeps the invariants', async () => {
-    const base = await drive(undefined), comp = await drive({ mode: 'composition' }), add = await drive({ mode: 'additive' });
+    const base = await drive(undefined), comp = await drive({ mode: 'composition', scale: Number(process.env.SCALE ?? 1) }), add = await drive({ mode: 'additive' });
     print('BASELINE', base); print('COMPOSITION', comp); print('ADDITIVE', add);
     for (const t of MARKS) {
       expect(Math.abs(comp.get(t)!.totals.formed - base.get(t)!.totals.formed)).toBeLessThan(1);   // finite, same order
