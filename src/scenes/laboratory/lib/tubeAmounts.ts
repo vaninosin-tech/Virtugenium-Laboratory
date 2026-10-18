@@ -33,6 +33,20 @@ export const initial: Record<string, { ml: number; species?: Record<string, numb
   h2so4: { ml: 1, species: { "H+": 7.2 } },
   kmno4: { ml: 1, species: { "MnO4-": 2 } },
 };
+/**
+ * Review aid, off by default: window.__silverAgnoMl or ?agnoMl= (0.5 to 3.9 mL) fills the tube with that much AgNO3 instead
+ * of 2.5 mL so the liquid is easier to judge. Only the volume changes (liquid height, cell count, jet depth); the species
+ * amounts, the chloride portion and the geometry are untouched, and 3.9 mL leaves room for the standard 1 mL pour.
+ */
+export const MAX_AGNO_REVIEW_ML = TUBE_CAPACITY_ML - STANDARD_POUR_ML - 0.1;
+export function seedMl(reagentId: string): number {
+  const base = initial[reagentId]?.ml ?? 0;
+  if (reagentId !== "agno3" || typeof window === "undefined") return base;
+  const fromUrl = Number(new URLSearchParams(window.location?.search ?? "").get("agnoMl"));
+  const override = Number.isFinite(fromUrl) && fromUrl > 0 ? fromUrl : (window as Window & { __silverAgnoMl?: unknown }).__silverAgnoMl;
+  return typeof override === "number" && Number.isFinite(override)
+    ? Math.min(MAX_AGNO_REVIEW_ML, Math.max(0.5, override)) : base;
+}
 export function tubeAmount(tubeId: string): TubeAmount {
   let state = tubes.get(tubeId);
   if (!state) { state = { volumeMl: 0, species: {}, copper: 0 }; tubes.set(tubeId, state); }
@@ -45,7 +59,7 @@ export function seedTubeAmounts(tubeId: string, contents: readonly string[]) {
     // Stage 3 chloride has one entry point: a validated delivery event.
     if (id === "nacl" && contents.includes("agno3") && silverStage() === 3) continue;
     if (seededContents.get(tubeId)?.has(id)) continue;
-    deliver(tubeId, id, initial[id]?.ml ?? 0, true);
+    deliver(tubeId, id, seedMl(id), true);
   }
   return state;
 }
@@ -65,7 +79,7 @@ export function deliver(tubeId: string, reagentId: string, ml: number, seed = fa
     return 0;
   }
   const accepted = Math.min(ml, TUBE_CAPACITY_ML - state.volumeMl);
-  const fraction = seed ? (recipe.ml > 0 ? accepted / recipe.ml : 1)
+  const fraction = seed ? (seedMl(reagentId) > 0 ? accepted / seedMl(reagentId) : 1)
     : accepted / STANDARD_POUR_ML;
   state.volumeMl += accepted;
   state.copper += (recipe.copper ?? 0) * fraction;
