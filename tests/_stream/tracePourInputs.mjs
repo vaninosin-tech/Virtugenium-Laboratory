@@ -30,6 +30,9 @@ try {
     const streamModule = await import("/src/scenes/laboratory/lib/tubeStreamModel.ts");
     const amounts = await import("/src/scenes/laboratory/lib/tubeAmounts.ts");
     const seen = new Set(), rows = [];
+    // Events of earlier pours (the AgNO3 portion) stay in the ledger: mark them as already seen so only the NaCl pour is recorded.
+    for (const e of delivery.deliveryEvents(tubeId)) seen.add(`${e.serial}|${e.step}`);
+    let previousAt = null;
     window.__pourTrace = { rows, done: false };
     const timer = setInterval(() => {
       for (const e of delivery.deliveryEvents(tubeId)) {
@@ -39,7 +42,9 @@ try {
         const reconstructed = e.sourceMouth ? streamModule.streamStateFromEvent({ ...e, sourceOutlet: undefined, sourceOutletVelocity: undefined }, 50) : undefined;
         const field = window.__silverRuntime?.field(tubeId);
         const v = e.sourceOutletVelocity;
-        rows.push({ simMs: window.__diag.frozen().simMs, atMs: e.atMs, valid: e.valid, reason: e.reason, ml: e.ml, requestedMl: e.requestedMl ?? null,
+        const gapMs = previousAt === null ? null : e.atMs - previousAt;
+        if (e.valid) previousAt = e.atMs;
+        rows.push({ simMs: window.__diag.frozen().simMs, atMs: e.atMs, reagent: e.reagentId, gapMs, qFromCadenceMlPerS: gapMs ? e.ml / (gapMs / 1000) : null, valid: e.valid, reason: e.reason, ml: e.ml, requestedMl: e.requestedMl ?? null,
           qMlPerS: measured ? measured.q * 1e6 : null, source: measured ? measured.source : "none",
           outlet: e.sourceOutlet ?? null, outletSpeed: v ? Math.hypot(v.x, v.y, v.z) : null, outletVelocity: v ?? null,
           mouth: e.sourceMouth ?? null, impact: e.point, surfaceY: e.surfaceY,
@@ -59,14 +64,17 @@ try {
   if (!accepted.accepted) throw new Error("NaCl stand action refused");
   await page.waitForTimeout(Number(process.env.SECONDS ?? 6) * 1000);
   const rows = await page.evaluate(() => { window.__pourTrace.stop(); return window.__pourTrace.rows; });
-  const valid = rows.filter(r => r.valid);
-  const summary = { scenario, events: rows.length, validEvents: valid.length, measuredShare: valid.length ? valid.filter(r => r.source === "measured").length / valid.length : 0,
+  const valid = rows.filter(r => r.valid && r.reagent === "nacl");
+  const gaps = valid.map(r => r.gapMs).filter(g => g !== null).sort((a, b) => a - b);
+  const summary = { scenario, events: rows.length, naclEvents: rows.filter(r => r.reagent === "nacl").length, validEvents: valid.length,
+    eventGapMs: gaps.length ? { min: gaps[0], median: gaps[Math.floor(gaps.length / 2)], max: gaps[gaps.length - 1] } : null,
+    note: "Q in this trace assumes 50 ms per event like the runtime; qFromCadence uses the real gap between events", measuredShare: valid.length ? valid.filter(r => r.source === "measured").length / valid.length : 0,
     deliveredMl: valid.reduce((s, r) => s + r.ml, 0), pourDurationMs: valid.length ? valid[valid.length - 1].atMs - valid[0].atMs : 0,
     peakQmlPerS: Math.max(0, ...valid.map(r => r.qMlPerS ?? 0)), maxImpactSpeed: Math.max(0, ...valid.map(r => r.impactSpeed ?? 0)),
     fallUsedRange: [Math.min(...valid.map(r => r.fallUsed ?? Infinity)), Math.max(...valid.map(r => r.fallUsed ?? -Infinity))],
     reconstructedMinusMeasuredFall: valid.filter(r => r.fallMeasured !== null && r.fallReconstructed !== null).map(r => r.fallReconstructed - r.fallMeasured) };
   await writeFile(`${out}/${name}_pour_trace.json`, JSON.stringify({ summary, rows }, null, 1));
-  const columns = ["simMs", "atMs", "valid", "reason", "ml", "qMlPerS", "source", "fallUsed", "fallMeasured", "fallReconstructed", "outletSpeed", "impactSpeed",
+  const columns = ["simMs", "atMs", "reagent", "gapMs", "qFromCadenceMlPerS", "valid", "reason", "ml", "qMlPerS", "source", "fallUsed", "fallMeasured", "fallReconstructed", "outletSpeed", "impactSpeed",
     "impactSpeedReconstructed", "impactAreaMm2", "momentumFluxMN", "receivingMl", "solverStepMs", "streamPrepareMs"];
   await writeFile(`${out}/${name}_pour_trace.csv`, [columns.join(","), ...rows.map(r => columns.map(c => r[c] ?? "").join(","))].join("\n"));
   console.log("summary:", JSON.stringify(summary, null, 1));
