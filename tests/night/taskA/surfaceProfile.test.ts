@@ -49,7 +49,7 @@ describe('Task A: near-surface AgCl in the stage-3 runtime (aggregation off, fin
       let top = -1; for (let r = 0; r < m.ny; r++) if (cells[r] > 0) top = r;
       const lines = [`t=${(atMs / 1000).toFixed(2)} s: delivered ${f.delivered.toFixed(3)} mL, level ${(level * 1000).toFixed(2)} mm, ` +
         `top wet row ${top} spans ${(top * dy * 1000).toFixed(2)}..${((top + 1) * dy * 1000).toFixed(2)} mm (gap to surface ${((level - (top + 1) * dy) * 1000).toFixed(2)} mm), ` +
-        `extent ${f.extent.toFixed(3)}, fine ${f.suspension[0].reduce((s, v) => s + v, 0).toFixed(3)}`];
+        `extent ${f.extent.toFixed(3)}, fine ${f.suspension[0].reduce((s, v) => s + v, 0).toFixed(3)}, wet cells ${m.activeCount}, mean fine per wet cell ${(f.suspension[0].reduce((s, v) => s + v, 0) / m.activeCount).toExponential(2)}, mean at extent 1 ${(1 / m.activeCount).toExponential(2)}`];
       for (let r = top; r >= Math.max(0, top - 6); r--)
         lines.push(`   row ${r - top} (${((r + 0.5) * dy * 1000).toFixed(1)} mm): share ${(100 * rows[r] / total2).toFixed(1)}%  incoming-NaCl tracer share ${(100 * tracerRows[r] / tracerTotal).toFixed(1)}%  mean ${(rows[r] / Math.max(1, cells[r])).toExponential(2)}  max ${maxima[r].toExponential(2)}`);
       report.push(lines.join('\n'));
