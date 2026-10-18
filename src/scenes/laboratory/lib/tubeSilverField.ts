@@ -907,7 +907,9 @@ export class TubeSilverField {
         maxNodes: typeof (globalThis as { __silverNodeBudget?: unknown }).__silverNodeBudget === 'number'
           ? Math.max(1, Math.floor((globalThis as { __silverNodeBudget?: number }).__silverNodeBudget!)) : 260 });
       this.sections = new SectionalPopulation(m, this.flocSystem.config,
-        4 * Math.PI / 3 * primaryRadius ** 3, STAGE3_AGCL_SOLID_M3_PER_UNIT);
+        4 * Math.PI / 3 * primaryRadius ** 3, STAGE3_AGCL_SOLID_M3_PER_UNIT,
+        // Dev knob: 'conservative' selects the number-conserving pivot scheme (default: the legacy scheme).
+        { scheme: (globalThis as { __silverSectionScheme?: unknown }).__silverSectionScheme === 'conservative' ? 'conservative' : 'legacy' });
       this.flocMass = new Float32Array(m.data.length); this.flocVisual = new Float32Array(m.data.length);
       this.aggregateCompaction = new Float32Array(m.data.length);
       this.aggregateLooseness = new Float32Array(m.data.length);

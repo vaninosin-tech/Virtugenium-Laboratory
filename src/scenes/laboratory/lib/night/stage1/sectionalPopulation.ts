@@ -1,16 +1,38 @@
 import { nodeRadius, nodeSolidFraction, slipSpeed, type FlocConfig } from './flocSystem';
 import type { LiquidMask } from '../../tubeVolumeField';
 
+/**
+ * How a collision product is shared between the two pivots that bracket its mass.
+ * - legacy: the pivot weights are applied to the product MASS. Mass is conserved but each collision removes only
+ *   2*m0/m1 (about 0.23) of a particle instead of one, so the particle number is overestimated about 2x
+ *   (docs/night/wave19s1/REPORT.md). Kept as the default so every earlier result stays reproducible.
+ * - conservative: the weights are applied to the particle NUMBER (Kumar and Ramkrishna fixed pivots). One collision
+ *   removes exactly one particle and mass is still conserved. It also puts a true primary particle on the first
+ *   pivot (the legacy first pivot is a 0.32 micrometre floc of about two primaries). Select it with
+ *   window.__silverSectionScheme = 'conservative'; docs/night/taskB/REPORT.md has the validation.
+ */
+export type SectionScheme = 'legacy' | 'conservative';
+
+export interface SectionalOptions {
+  scheme?: SectionScheme;
+  /** Validation hook: replaces the Brownian plus shear kernel (m3/s) for pivot pair (i, j). */
+  kernel?: (i: number, j: number) => number;
+  /** Validation hook: replaces the production pivot grid (radii in m, particle masses in the same units as the ledger). */
+  pivots?: { radii: ArrayLike<number>; masses: ArrayLike<number> };
+}
+
 /** Fixed-pivot sectional population. All entries are normalized AgCl mass, never optical density. */
 export class SectionalPopulation {
   static readonly count = 13;
+  readonly bins: number;
+  readonly scheme: SectionScheme;
   readonly masses: Float64Array[];
-  readonly radii = new Float64Array(SectionalPopulation.count);
-  readonly particleMass = new Float64Array(SectionalPopulation.count);
-  readonly slip = new Float64Array(SectionalPopulation.count);
+  readonly radii: Float64Array;
+  readonly particleMass: Float64Array;
+  readonly slip: Float64Array;
   private readonly delta: Float64Array[];
-  readonly transfers = new Float64Array(SectionalPopulation.count);
-  readonly accumulated = new Float64Array(SectionalPopulation.count);
+  readonly transfers: Float64Array;
+  readonly accumulated: Float64Array;
   private readonly x: Uint8Array;
   private readonly y: Uint8Array;
   private readonly z: Uint8Array;
@@ -18,9 +40,15 @@ export class SectionalPopulation {
   private readonly shear: Float64Array;
   private readonly upper: Uint8Array;
   private readonly upperFraction: Float64Array;
-  constructor(readonly mask: LiquidMask, readonly config: FlocConfig, primarySolidM3: number, solidM3PerUnit: number) {
+  constructor(readonly mask: LiquidMask, readonly config: FlocConfig, primarySolidM3: number, solidM3PerUnit: number,
+    options: SectionalOptions = {}) {
     const n = mask.data.length;
-    this.masses = Array.from({ length: SectionalPopulation.count }, () => new Float64Array(n));
+    this.scheme = options.scheme ?? 'legacy';
+    this.bins = options.pivots ? options.pivots.radii.length : SectionalPopulation.count;
+    const bins = this.bins;
+    this.radii = new Float64Array(bins); this.particleMass = new Float64Array(bins); this.slip = new Float64Array(bins);
+    this.transfers = new Float64Array(bins); this.accumulated = new Float64Array(bins);
+    this.masses = Array.from({ length: bins }, () => new Float64Array(n));
     this.delta = this.masses.map(() => new Float64Array(n));
     this.x = new Uint8Array(n); this.y = new Uint8Array(n); this.z = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
@@ -28,25 +56,39 @@ export class SectionalPopulation {
       this.y[i] = Math.floor(i / mask.nx) % mask.ny;
       this.z[i] = Math.floor(i / (mask.nx * mask.ny));
     }
-    const pairs = SectionalPopulation.count ** 2;
+    const pairs = bins ** 2;
     this.brownian = new Float64Array(pairs); this.shear = new Float64Array(pairs);
     this.upper = new Uint8Array(pairs); this.upperFraction = new Float64Array(pairs);
     const primaryUnit = primarySolidM3 / solidM3PerUnit;
     const crossover = 1e-6;
     const crossoverUnit = primaryUnit * 0.5 * (crossover / (config.primaryRadius ?? 0.2e-6)) ** 3;
-    for (let b = 0; b < this.radii.length; b++) {
+    const primaryRadius = config.primaryRadius ?? 0.2e-6;
+    for (let b = 0; b < bins; b++) {
       this.radii[b] = 0.32e-6 * 2.05 ** b;
       this.particleMass[b] = this.radii[b] < crossover
-        ? primaryUnit * 0.5 * (this.radii[b] / (config.primaryRadius ?? 0.2e-6)) ** 3
+        ? primaryUnit * 0.5 * (this.radii[b] / primaryRadius) ** 3
         : crossoverUnit * (this.radii[b] / crossover) ** config.fractalDimension;
-      this.slip[b] = slipSpeed(this.radii[b], config);
     }
+    if (options.pivots) {
+      for (let b = 0; b < bins; b++) { this.radii[b] = options.pivots.radii[b]; this.particleMass[b] = options.pivots.masses[b]; }
+    } else if (this.scheme === 'conservative') {
+      // Same top pivot as the legacy grid, but the first pivot is one primary particle and the masses are geometric.
+      const top = this.particleMass[bins - 1], ratio = (top / primaryUnit) ** (1 / (bins - 1));
+      for (let b = 0; b < bins; b++) {
+        const mass = primaryUnit * ratio ** b;
+        this.particleMass[b] = mass;
+        this.radii[b] = b === 0 ? primaryRadius : mass < crossoverUnit
+          ? primaryRadius * (2 * mass / primaryUnit) ** (1 / 3)
+          : crossover * (mass / crossoverUnit) ** (1 / config.fractalDimension);
+      }
+    }
+    for (let b = 0; b < bins; b++) this.slip[b] = slipSpeed(this.radii[b], config);
     const kT = 1.380649e-23 * 293.15, mu = config.dynamicViscosity ?? 1.002e-3;
-    for (let i = 0; i < SectionalPopulation.count; i++) for (let j = i; j < SectionalPopulation.count; j++) {
-      const p = i * SectionalPopulation.count + j;
+    for (let i = 0; i < bins; i++) for (let j = i; j < bins; j++) {
+      const p = i * bins + j;
       const ri = this.radii[i], rj = this.radii[j], product = this.particleMass[i] + this.particleMass[j];
-      this.brownian[p] = 2 * kT / (3 * mu) * (ri + rj) * (1 / ri + 1 / rj);
-      this.shear[p] = (ri + rj) ** 3 / 3;
+      this.brownian[p] = options.kernel ? options.kernel(i, j) : 2 * kT / (3 * mu) * (ri + rj) * (1 / ri + 1 / rj);
+      this.shear[p] = options.kernel ? 0 : (ri + rj) ** 3 / 3;
       let upper = 1;
       while (upper < this.particleMass.length - 1 && this.particleMass[upper] < product) upper++;
       this.upper[p] = upper;
@@ -89,7 +131,7 @@ export class SectionalPopulation {
         const mi = this.particleMass[i];
         if (this.masses[i][cell] + this.delta[i][cell] <= 0) continue;
         for (let j = i; j <= top; j++) {
-          const mj = this.particleMass[j], p = i * SectionalPopulation.count + j;
+          const mj = this.particleMass[j], p = i * this.bins + j;
           const ai = this.masses[i][cell] + this.delta[i][cell];
           const aj = this.masses[j][cell] + this.delta[j][cell];
           if (ai <= 0 || aj <= 0) continue;
@@ -102,11 +144,21 @@ export class SectionalPopulation {
           this.delta[i][cell] -= fromI; this.delta[j][cell] -= fromJ;
           const product = mi + mj, upper = this.upper[p], lower = upper - 1;
           const upperFraction = this.upperFraction[p];
-          this.delta[lower][cell] += events * product * (1 - upperFraction);
-          this.delta[upper][cell] += events * product * upperFraction;
-          const moved = events * product;
-          this.transfers[upper] += moved * upperFraction;
-          this.accumulated[upper] += moved * upperFraction;
+          let toLower: number, toUpper: number;
+          if (this.scheme === 'conservative') {
+            // Number weights: one product particle is shared as (1 - f) on the lower and f on the upper pivot.
+            // Beyond the last pivot the whole product mass goes there (number cannot be kept, mass is).
+            const beyond = product > this.particleMass[upper];
+            toUpper = events * (beyond ? product : upperFraction * this.particleMass[upper]);
+            toLower = beyond ? 0 : events * (1 - upperFraction) * this.particleMass[lower];
+          } else {
+            toLower = events * product * (1 - upperFraction);
+            toUpper = events * product * upperFraction;
+          }
+          this.delta[lower][cell] += toLower;
+          this.delta[upper][cell] += toUpper;
+          this.transfers[upper] += toUpper;
+          this.accumulated[upper] += toUpper;
         }
       }
     }
