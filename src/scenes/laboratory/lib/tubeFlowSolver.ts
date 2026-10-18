@@ -120,7 +120,7 @@ export class TubeFlowSolver {
   /** Adds momentum at the impact only, then transports, damps and projects the entire velocity. */
   step(dt: number, inlet: THREE.Vector3, direction: THREE.Vector3, impulse: number,
     agitation = 0, background?: (x: number, y: number, z: number) => ArrayLike<number>,
-    jetReach = 0, load?: { values: Float64Array; scale: number; down: THREE.Vector3 },
+    jetReach = 0, load?: { values: Float64Array; scale: number; down: THREE.Vector3; iterations?: number },
     surface?: SurfaceSpread, stream?: TubeStreamModel, streamDissipation = 0) {
     const started = typeof performance !== "undefined" ? performance.now() : 0;
     const m = this.mask, old = this.previousFaces;
@@ -217,6 +217,7 @@ export class TubeFlowSolver {
         stream!.active && stream!.surfaceRise ? stream!.extraDivergence : undefined);
     } else if (jet) this.project(120);
     else if (flag && this.jetModel) this.project(120);
+    else if (load?.iterations) this.project(load.iterations);
     else this.project();
     this.lastProjectionMs = projectStart ? performance.now() - projectStart : 0;
     this.clearFast();

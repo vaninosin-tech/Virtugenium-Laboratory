@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { LiquidMask, SpeciesField, VelocityField } from "./tubeVolumeField";
 import { TUBE_SIMULATION } from "./tubeSimulationConfig";
 import { STAGE3_AGCL_SOLID_M3_PER_UNIT, SilverSedimentField } from "./tubeSilverSediment";
+import { GRAVITY, REFERENCE_DENSITY, buoyancyOptions, densityParts, referenceExcess, type DensityParts } from "./tubeBuoyancy";
 import { tubeVessel } from "./vesselGeometry";
 import { TubeFlowSolver } from "./tubeFlowSolver";
 import { precipitatePair, settleParticleClass } from "./tubePrecipitationPhysics";
@@ -275,6 +276,20 @@ export class TubeSilverField {
     sum + field.reduce((a, b) => a + b, 0), 0); }
   get sediment() { return this.sedimentField.values; }
   get sedimentMass() { return this.sedimentField.mass; }
+  /** Liquid volume (m3) the field units refer to. */
+  private get liquidVolumeM3() { return Math.max(1e-12, tubeVessel.volumeFromHeight(this.liquidLevel) * 1e-6); }
+  private referenceExcess(unitMol = 1e-4) { return referenceExcess(unitMol, this.liquidVolumeM3); }
+  /** Density excess (kg/m3) of cell i by species: the same species the reaction moves (see tubeBuoyancy.ts). */
+  compositionDensity(i: number, unitMol = 1e-4, cap = Infinity): DensityParts {
+    const m = this.mask, perUnit = unitMol / this.liquidVolumeM3;          // mol/m3 per field unit of mean-cell concentration
+    const ag = this.species["Ag+"].values[i] * m.activeCount, cl = this.species["Cl-"].values[i] * m.activeCount;
+    const tracer = this.tracer[i] * m.activeCount;
+    const solid = (this.suspension[0][i] + this.suspension[1][i] + this.suspension[2][i]) * m.activeCount
+      + (this.flocMass.length ? this.flocMass[i] : 0);
+    const c = (v: number) => Math.min(cap, v * perUnit);
+    return densityParts(c(ag), c(cl), c(tracer - cl), c(solid));
+  }
+  get compositionReference() { return this.referenceExcess(); }
   get coarseMass() { return this.flocs.reduce((sum, floc) => sum + floc.mass, 0)
     + this.coarse.reduce((sum, amount) => sum + amount, 0); }
   get denseMass() { return this.flocMode ? (this.flocSystem?.totalMass ?? 0)
@@ -426,9 +441,17 @@ export class TubeSilverField {
       if (this.flocMode) {
         // Heavy flocs load the liquid; the poured (lighter) NaCl solution is buoyant: weight is negative where the
         // incoming-solution tracer is. Acceleration = g * (relative density difference) * volume fraction.
+        const buoy = buoyancyOptions((globalThis as { __silverBuoyancy?: unknown }).__silverBuoyancy);
         for (let a = 0; a < m.activeCount; a++) {
           const i = m.active[a];
-          this.loadWeight[i] = (this.flocMass.length ? this.flocMass[i] / m.activeCount : 0) - this.buoyancy * this.tracer[i];
+          const baseline = (this.flocMass.length ? this.flocMass[i] / m.activeCount : 0) - this.buoyancy * this.tracer[i];
+          if (!buoy) { this.loadWeight[i] = baseline; continue; }
+          const acceleration = GRAVITY * (buoy.scale ?? 1) / REFERENCE_DENSITY;
+          const per = this.compositionDensity(i, buoy.unitMol, buoy.cap ?? 100);
+          // Acceleration of the body force = loadStrength * activeCount * loadWeight.
+          this.loadWeight[i] = buoy.mode === "additive"
+            ? baseline + acceleration * per.agcl / (m.activeCount * this.loadStrength)
+            : acceleration * (per.total - this.referenceExcess(buoy.unitMol)) / (m.activeCount * this.loadStrength);
         }
       } else if (this.stageOne) {
         // Flocs that trapped air at the surface float until the liquid wets them.
@@ -466,7 +489,8 @@ export class TubeSilverField {
         streamOn ? 0 : amount > 0 ? 0.2 * this.jetScale * Math.min(3, Math.max(0.4, jetStrength)) : 0,
         agitation, agitation > 0.01 ? (x, y, z) => this.velocity.at(x, y, z, this.age) : undefined,
         0, this.stageOne ? { values: this.loadWeight, scale: m.activeCount * this.loadStrength,
-          down: this.down.copy(up).negate() } : undefined,
+          down: this.down.copy(up).negate(),
+          iterations: this.flocMode ? buoyancyOptions((globalThis as { __silverBuoyancy?: unknown }).__silverBuoyancy)?.iterations ?? (buoyancyOptions((globalThis as { __silverBuoyancy?: unknown }).__silverBuoyancy) ? 120 : undefined) : undefined } : undefined,
         !streamOn && this.stageOne && amount > 0 && this.surfaceClosure
           ? { x: inlet.x, z: inlet.z, level,
             // jetStrength is the accepted ledger rate in mL/s for stage 3.
