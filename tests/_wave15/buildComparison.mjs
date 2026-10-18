@@ -17,7 +17,9 @@ const safeTime=v=>Number.isFinite(v)?v:0;
 await mkdir(out,{recursive:true});const referenceDir=join(out,"reference-frames");await mkdir(referenceDir,{recursive:true});
 run(ffmpeg,["-y","-v","error","-i",reference,"-vf",`fps=${fps}`,join(referenceDir,"ref-%05d.png")]);
 const refFiles=(await readdir(referenceDir)).filter(f=>/^ref-\d+\.png$/.test(f)).sort();if(!refFiles.length)throw new Error("Reference produced no frames");
-const rd=dimensions(join(referenceDir,refFiles[0])),raw0=rgb(join(referenceDir,refFiles[0]),rd.width,rd.height);
+// Detect the tube on a frame where it is filled (the first frames can be nearly black or have no persistent bright column).
+const detectFile = refFiles[Math.min(refFiles.length - 1, Math.floor(refFiles.length * 0.6))];
+const rd=dimensions(join(referenceDir,refFiles[0])),raw0=rgb(join(referenceDir,detectFile),rd.width,rd.height);
 const refBox=detectTube(raw0,rd.width,rd.height);
 const refs=refFiles.map((fn,i)=>({fn,time:i/fps,...stageMetrics(rgb(join(referenceDir,fn),rd.width,rd.height),rd.width,rd.height,refBox)}));
 const trace=JSON.parse(await readFile(join(game,"trace.json"),"utf8")),index=JSON.parse(await readFile(join(game,"frames","index.json"),"utf8")).idx.sort((a,b)=>a.abs-b.abs);
@@ -54,7 +56,7 @@ for(let gi=0;gi<gameCurve.length;gi++){
   const speed=process.env.X50_AT?(r.time>=Number(process.env.X50_AT)?"x50":"x5"):"x5/x50";
   const label=labelText({simMs:g.simMs,referenceSeconds:r.time,referenceSpeed:speed,stage:stage(g.simMs),camera:trace.camera??"wide",background:trace.background??"lab"});
   const file=join(panels,`panel-${String(gi).padStart(5,"0")}.png`);
-  const filter=`[0:v]crop=${rect(refBox)},scale=400:420,setsar=1[a];[1:v]scale=640:420,setsar=1[b];[2:v]scale=240:420:flags=neighbor,setsar=1[c];[a][b][c]hstack=inputs=3,pad=1280:480:0:0:black,drawtext=fontfile='${font}':text='${esc(label)}':x=10:y=440:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.8[v]`;
+  const filter=`[0:v]crop=${rect(refBox)},scale=400:420,setsar=1[a];[1:v]crop=${rect(gameBox)},scale=480:420,setsar=1[b];[2:v]scale=400:420:flags=neighbor,setsar=1[c];[a][b][c]hstack=inputs=3,pad=1280:480:0:0:black,drawtext=fontfile='${font}':text='${esc(label)}':x=10:y=440:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.8[v]`;
   run(ffmpeg,["-y","-v","error","-i",join(referenceDir,r.fn),"-i",join(game,"frames",g.fn),"-i",raw,"-filter_complex",filter,"-map","[v]","-frames:v","1",file]);
 }
 run(ffmpeg,["-y","-v","error","-framerate",String(fps),"-i",join(panels,"panel-%05d.png"),"-c:v","libx264","-pix_fmt","yuv420p",join(out,"comparison.mp4")]);
