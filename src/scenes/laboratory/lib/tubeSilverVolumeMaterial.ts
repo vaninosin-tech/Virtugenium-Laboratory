@@ -201,34 +201,42 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             accumulated += (1.0-alpha)*chipAlpha*vec3(0.96,0.97,0.98);
             alpha += (1.0-alpha)*chipAlpha;
           }
+          // The two physical populations occupy the same step. Mix their source
+          // radiances by optical depth before compositing, so opaque fine milk
+          // cannot systematically hide a dense aggregate in that same voxel.
+          float fineTau = 0.0, aggregateTau = 0.0;
+          vec3 fineColor = vec3(0.0), aggregateColor = vec3(0.0);
           if (uSolidMode != 2 && uCloudOn > 0.5 && smokeValue > 0.0) {
             if (uOpticsMode == 1) {
               // Raw concentration colormap; no grain or light transport.
-              float a3 = 1.0-exp(-min(1.0,smokeValue)*${glf(optics.rawScale)}*stepLength/uRadius);
-              accumulated += (1.0-alpha)*a3*vec3(clamp(smokeValue,0.0,1.0),0.12,1.0-clamp(smokeValue,0.0,1.0));
-              alpha += (1.0-alpha)*a3;
+              fineTau = min(1.0,smokeValue)*${glf(optics.rawScale)}*stepLength/uRadius;
+              fineColor = vec3(clamp(smokeValue,0.0,1.0),0.12,1.0-clamp(smokeValue,0.0,1.0));
             } else {
               float c = smokeValue*cloudGrain(grid);
-              float a3 = 1.0-exp(-uCloudK*c*stepLength/uRadius);
+              fineTau = uCloudK*c*stepLength/uRadius;
               float sourceLight = uOpticsMode == 2 ? ${glf(optics.extinctionGrey)} : cloudSource(p,c,-direction);
-              accumulated += (1.0-alpha)*a3*vec3(sourceLight);
-              alpha += (1.0-alpha)*a3;
+              fineColor = vec3(sourceLight);
             }
           }
           if (uSolidMode != 1 && uFlocOn > 0.5 && field.r > 0.0) {
             float porous = (1.0-${glf(agg.loosePorosity)}*clamp(field.g,0.0,1.0))
               * (0.85+0.15*clamp(field.b,0.0,1.0));
             float c = field.r*porous*aggregateGrain(grid,field);
-            float a4 = 1.0-exp(-${glf(agg.kappa)}*c*stepLength/uRadius);
+            aggregateTau = ${glf(agg.kappa)}*c*stepLength/uRadius;
             if (uOpticsMode == 1) {
               float raw = clamp(field.r,0.0,1.0);
-              a4 = 1.0-exp(-raw*${glf(optics.rawScale)}*stepLength/uRadius);
-              accumulated += (1.0-alpha)*a4*vec3(raw,0.12,1.0-raw);
+              aggregateTau = raw*${glf(optics.rawScale)}*stepLength/uRadius;
+              aggregateColor = vec3(raw,0.12,1.0-raw);
             } else {
               float light = uOpticsMode == 2 ? ${glf(optics.extinctionGrey)} : aggregateSource(p,c,-direction);
-              accumulated += (1.0-alpha)*a4*vec3(light);
+              aggregateColor = vec3(light);
             }
-            alpha += (1.0-alpha)*a4;
+          }
+          float solidTau = fineTau + aggregateTau;
+          if (solidTau > 0.0) {
+            float solidAlpha = 1.0-exp(-solidTau);
+            accumulated += (1.0-alpha)*solidAlpha*(fineTau*fineColor+aggregateTau*aggregateColor)/solidTau;
+            alpha += (1.0-alpha)*solidAlpha;
           }
           if (uOpticsMode != 0) { if (alpha >= ${glf(optics.alphaStop)}) break; else continue; }
           float hazeAlpha = uSmokeOn * (1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius));

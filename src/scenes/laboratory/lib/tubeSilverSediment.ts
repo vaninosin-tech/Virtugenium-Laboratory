@@ -77,8 +77,8 @@ export class SilverSedimentField {
 export class SilverSedimentGeometry extends THREE.BufferGeometry {
   private readonly position: Float32Array;
   private readonly thickness: Float32Array;
-  private readonly rings = 14;
-  private readonly sectors = 40;
+  private readonly rings = 24;
+  private readonly sectors = 64;
   constructor(private readonly radius: number, private readonly bottom: number) {
     super();
     const count = 1 + this.rings * this.sectors;
@@ -105,7 +105,7 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
     this.setIndex(indices);
   }
 
-  update(field: SilverSedimentField, heightTexture?: THREE.DataTexture) {
+  update(field: SilverSedimentField, heightTexture?: THREE.DataTexture, diagnosticDisplayScale = 1) {
     const image = heightTexture?.image as { data?: Float32Array; width?: number; height?: number } | undefined;
     const heights = image?.data;
     const nx = image?.width ?? field.nx, nz = image?.height ?? field.nz;
@@ -142,7 +142,7 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
         }
         const suppliedHeight = sampleHeight(x, z);
         const height = (suppliedHeight ?? silverSedimentThickness(local / Math.max(weight, 1e-8),
-          this.radius, field.compaction)) * taper;
+          this.radius, field.compaction)) * taper * diagnosticDisplayScale;
         const i = ring === 0 ? 0 : 1 + (ring - 1) * this.sectors + sector;
         this.position.set([x, floor + height, z], i * 3);
         this.position.set([x, floor, z], (count + i) * 3);

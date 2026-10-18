@@ -1,0 +1,33 @@
+{
+  "source": "controlled synthetic deposit",
+  "displayScale": 10,
+  "grid": [
+    12,
+    12
+  ],
+  "meshBefore": [
+    14,
+    40
+  ],
+  "meshAfter": [
+    24,
+    64
+  ],
+  "beforeCommit": "7690e47",
+  "before": {
+    "peakToBroadband": 0.07465874857753482,
+    "targetToBroadband": 0.9771764638203984,
+    "peak": 2499.376020954587,
+    "energy": 33477.33612704381,
+    "bins": 9016,
+    "size": 128
+  },
+  "after": {
+    "peakToBroadband": 0.06426662812647811,
+    "targetToBroadband": 0.0008675242385962432,
+    "peak": 2.647269219323649,
+    "energy": 41.19197313594493,
+    "bins": 9016,
+    "size": 128
+  }
+}

@@ -8,8 +8,8 @@ import { tubeCrop } from "../_wave11/browserCommon.mjs";
 const root=process.env.OUT??"docs/night/wave15r2/captures";
 const modes=process.env.BOTH==="1"?["wide","close"]:[process.env.CAMERA??"wide"];
 const cameras={wide:{dist:.42,fov:30,targetY:-.045,targetSide:.02},close:{dist:.2,fov:20,targetY:-.115,targetSide:0}};
-const dumpAt=JSON.parse(process.env.DUMPAT??"[500,1000,2000,3000,4500,6000,9000,12000,14000,17000,20000,22000]");
-const durationMs=Number(process.env.DURATION_MS??22000);
+const dumpAt=JSON.parse(process.env.DUMPAT??"[500,1000,2000,3000,4500,6000,9000,12000,14000,17000,20000,22000,24000]");
+const durationMs=Number(process.env.DURATION_MS??24000);
 const slow=Number(process.env.SLOW??.15);
 if(!(slow>0&&slow<=1)||!(durationMs>0)||!dumpAt.every(t=>Number.isFinite(t)&&t>=0))throw new RangeError("SLOW, DURATION_MS or DUMPAT");
 
@@ -38,9 +38,11 @@ for(const mode of modes){
         const sim=sm.simNowMs(),r={kind,sim,perf:performance.now(),wall:(performance.timeOrigin+performance.now())/1000,rend:window.__three.gl.info.render.frame,
           A:{events:dg?.eventIds.length??0,valid:dg?.eventIds.length??0,delivered:dg?.deliveredMl??0,firstValid:dg?.firstValidImpactMs?{atMs:dg.firstValidImpactMs,y:dg.firstImpactPoint?.y,surfaceY:dg.surfaceY}:null}};
         if(f){const m=f.mask;let fine=0,occupied=0,ag=0,cl=0,tracer=0,wetTop=-1;const rows=new Set();for(let k=0;k<m.activeCount;k++){const i=m.active[k],v=f.suspension[0][i];fine+=v;ag+=f.species["Ag+"].values[i];cl+=f.species["Cl-"].values[i];tracer+=f.tracer[i];wetTop=Math.max(wetTop,Math.floor(i/m.nx)%m.ny);if(v>1e-8){occupied++;rows.add(Math.floor(i/m.nx)%m.ny);}}
-          const nodes=f.flocSystem?.nodes??[];
+          const nodes=f.flocSystem?.nodes??[],cfg=f.flocSystem?.config;
+          const radiusMm=mass=>cfg?1000*cfg.quantumRadius*Math.pow(Math.max(mass,1e-15)/cfg.quantum,1/cfg.fractalDimension):0;
           r.B={fineTotal:fine,occupiedFraction:occupied/(m.activeCount||1),occupiedDepthFraction:rows.size/m.ny,agTotal:ag,clTotal:cl,tracerTotal:tracer,extent:f.extent,fieldDelivered:f.delivered,wetTop,nx:m.nx,ny:m.ny,nz:m.nz,
-            aggregateMass:f.denseMass??0,sedimentMass:f.sedimentField?.mass??0,aggregateCount:nodes.length,largestNodeMass:nodes.reduce((v,n)=>Math.max(v,n.mass),0)};}
+            aggregateMass:f.denseMass??0,sedimentMass:f.sedimentField?.mass??0,aggregateCount:nodes.length,largestNodeMass:nodes.reduce((v,n)=>Math.max(v,n.mass),0),
+            largestNodeRadiusMm:nodes.reduce((v,n)=>Math.max(v,radiusMm(n.mass)),0),meanNodeRadiusMm:nodes.length?nodes.reduce((v,n)=>v+radiusMm(n.mass),0)/nodes.length:0};}
         run.trace.push(r);
         box.textContent=`sim ${sim.toFixed(0)} ms  elapsed ${run.clickSim===null?"pre-click":((sim-run.clickSim)/1000).toFixed(2)+" s"}\nA valid ${r.A.valid} delivered ${r.A.delivered.toFixed(3)}  B fine ${r.B?.fineTotal.toFixed(5)??"-"}\ncloud depth ${r.B?.occupiedDepthFraction.toFixed(2)??"-"}  stage ${r.A.valid?"impact":"before impact"}`;
         if(f&&run.clickSim!==null){const elapsed=sim-run.clickSim;for(const t of dumpAt)if(elapsed>=t&&!run.dumps.some(d=>d.t===t)){

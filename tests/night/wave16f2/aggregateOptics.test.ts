@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as THREE from "three";
 import { makeSilverVolumeMaterial } from "../../../src/scenes/laboratory/lib/tubeSilverVolumeMaterial";
@@ -90,7 +90,7 @@ describe("field-driven AgCl aggregate optics", () => {
   it("writes synthetic CPU PPM layers and optics matrix", () => {
     const d = dump(0.45, 0.6, 0.09);
     for (let z = 2; z < 6; z++) for (let x = 2; x < 6; x++) d.sedimentHeight[x + d.nx * z] = 0.001;
-    const out = "docs/night/wave16f2";
+    const out = "docs/night/wave18f4/cpu16"; mkdirSync(out,{recursive:true});
     const panels: Uint8Array[] = [];
     for (const layer of [0, 1, 2, 3] as const) for (const mode of [0, 1, 2, 3] as const)
     {
@@ -108,7 +108,7 @@ describe("field-driven AgCl aggregate optics", () => {
         sheet.set(source, header.length + ((row * 110 + y) * width + col * 48) * 3);
       }
     writeFileSync(join(out, "synthetic-sheet.ppm"), sheet);
-    const sources = readdirSync("docs/night/wave16shared").filter(v => v.endsWith(".json"));
+    const sources = readdirSync("docs/night/wave16shared").filter(v => /^state_.*\.json$/.test(v));
     for (const filename of sources) {
       const raw = JSON.parse(readFileSync(join("docs/night/wave16shared", filename), "utf8"));
       const candidate = (raw.field ?? raw) as SilverAggregateDump;
