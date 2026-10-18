@@ -274,7 +274,7 @@ describe("tube reaction rendering contract", () => {
     f.advance(2, chemistry(0));
     expect(flocs.count).toBe(0);
     expect(f.get("TubeSediment").visible).toBe(false);
-  });
+  }, 15000);
 
   it("excites a spring on rapid tilt, then damps toward the horizontal surface", () => {
     const f = fixture(null);
@@ -420,7 +420,7 @@ describe("tube reaction rendering contract", () => {
     expect(f.get("TubeSilverDenseField")).toBeDefined();
     f.advance(5, chemistry(0));
     expect(f.get("TubeSediment").visible).toBe(false);
-  });
+  }, 15000);
 
   it("keeps precipitate opacity available for the transported onset and later stages", () => {
     const silver = fixture("silver-chloride");

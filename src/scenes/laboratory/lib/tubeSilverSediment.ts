@@ -97,7 +97,19 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
     this.setIndex(indices);
   }
 
-  update(field: SilverSedimentField) {
+  update(field: SilverSedimentField, heightTexture?: THREE.DataTexture) {
+    const image = heightTexture?.image as { data?: Float32Array; width?: number; height?: number } | undefined;
+    const heights = image?.data;
+    const nx = image?.width ?? field.nx, nz = image?.height ?? field.nz;
+    const sampleHeight = (x: number, z: number) => {
+      if (!heights || !nx || !nz) return null;
+      const gx = THREE.MathUtils.clamp((x / this.radius + 1) * nx * 0.5 - 0.5, 0, nx - 1);
+      const gz = THREE.MathUtils.clamp((z / this.radius + 1) * nz * 0.5 - 0.5, 0, nz - 1);
+      const ix = Math.floor(gx), iz = Math.floor(gz), fx = gx - ix, fz = gz - iz;
+      const at = (xx: number, zz: number) => Math.max(0, heights[Math.min(nz - 1, zz) * nx + Math.min(nx - 1, xx)] ?? 0);
+      return (at(ix, iz) * (1 - fx) + at(ix + 1, iz) * fx) * (1 - fz)
+        + (at(ix, iz + 1) * (1 - fx) + at(ix + 1, iz + 1) * fx) * fz;
+    };
     const count = 1 + this.rings * this.sectors;
     for (let ring = 0; ring <= this.rings; ring++) {
       const u = ring / this.rings;
@@ -124,8 +136,9 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
         // move or create any layer when a column contains no sediment.
         const grain = 0.91 + 0.055 * Math.sin(5 * angle + u * 11)
           + 0.035 * Math.sin(9 * angle - u * 17);
-        const height = silverSedimentThickness(local / Math.max(weight, 1e-8),
-          this.radius, field.compaction) * taper * grain;
+        const suppliedHeight = sampleHeight(x, z);
+        const height = (suppliedHeight ?? silverSedimentThickness(local / Math.max(weight, 1e-8),
+          this.radius, field.compaction)) * taper * grain;
         const i = ring === 0 ? 0 : 1 + (ring - 1) * this.sectors + sector;
         this.position.set([x, floor + height, z], i * 3);
         this.position.set([x, floor, z], (count + i) * 3);

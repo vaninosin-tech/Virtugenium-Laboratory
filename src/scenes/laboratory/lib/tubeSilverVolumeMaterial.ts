@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { SILVER_FINE_OPTICS as optics } from "./night/render/silverOpticsReference";
+import { SILVER_FINE_OPTICS as optics, SILVER_AGGREGATE_OPTICS as agg } from "./night/render/silverOpticsReference";
 
 // GLSL needs float literals: a bare 5 would be an int and break float multiplication.
 const glf = (v: number) => (Number.isInteger(v) ? v.toFixed(1) : String(v));
@@ -35,6 +35,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
     uniforms: { uCameraLocal: camera, uRadius: { value: radius },
       uBottom: { value: bottom }, uHeight: { value: height }, uLevel: { value: bottom },
       uDense: { value: dense }, uOverlap: { value: overlap },
+      uAggregate: { value: dense ?? emptyHaze() }, uSolidMode: { value: 2 },
       uHaze: { value: emptyHaze() }, uTint: { value: emptyHaze() }, uChip: { value: emptyHaze() }, uHazeStrength: { value: 9.0 }, uSteps: { value: optics.steps }, uNoise: { value: noiseVolume() },
       uTintStrength: { value: 6.0 }, uSmokeOn: { value: 0 }, uDiag: { value: 0 }, uCloudOn: { value: 0 },
       uCloudK: { value: optics.kappa }, uAlbedo: { value: optics.albedo },
@@ -58,37 +59,27 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
       uniform vec3 uCameraLocal;
       uniform float uRadius, uBottom, uHeight, uLevel;
       uniform vec3 uUp;
-      uniform sampler3D uDense, uOverlap, uHaze, uTint, uChip, uNoise;
+      uniform sampler3D uDense, uOverlap, uHaze, uTint, uChip, uNoise, uAggregate;
       uniform float uHazeStrength, uTintStrength, uTime;
       uniform int uSteps;
       uniform float uSmokeOn, uDiag, uCloudOn, uCloudK, uFlocOn;
       uniform float uAlbedo, uLightStrength, uAmbient, uAmbientBoost, uAnisotropy;
       uniform vec3 uLightDirection;
-      uniform int uOpticsMode;
+      uniform int uOpticsMode, uSolidMode;
       in vec3 vPoint;
       out vec4 outColor;
       // Value noise from a periodic 64^3 texture (see noiseVolume): one tap per lookup.
       float noise3(vec3 p) { return texture(uNoise, p*(1.0/64.0)).r; }
       float fbm3(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 3; i++) { s += a*noise3(p); p = p*2.03+vec3(1.7,9.2,3.1); a *= 0.5; } return s; }
       float billow3(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 3; i++) { s += a*abs(2.0*noise3(p)-1.0); p = p*2.1+vec3(5.3,1.1,7.7); a *= 0.5; } return s; }
-      // Wet cotton wool (the look tuned in cotton-lab.html): the simulated concentration decides where the mass is
-      // and how dense its core is; torn, feathery detail exists only at the rim, folds and lumps inside.
-      float cotton(vec4 field, vec3 grid, vec3 position) {
-        if (field.r <= 0.0) return 0.0;
-        vec3 q0 = vec3(position.x,position.y-uBottom,position.z)/uRadius;
-        vec3 w = vec3(noise3(q0*1.7+vec3(3.0,1.0,2.0)), noise3(q0*1.7+vec3(7.0,5.0,1.0)),
-          noise3(q0*1.7+vec3(2.0,9.0,4.0)))-0.5;
-        vec3 q = q0 + w*0.30;
-        // Cotton is a very porous fractal aggregate: it becomes opaque at a low concentration.
-        float concentration = field.r/(field.r+0.23);
-        float base = 1.05*concentration;
-        float rim = 1.0-smoothstep(0.35,0.95,base);
-        float lump = billow3(q*3.4), big = billow3(q*1.7), fold = fbm3(q*6.0);
-        float f = base + (0.34+0.30*rim)*(lump-0.30) + 0.22*(big-0.30) + (0.10+0.16*rim)*(fold-0.5);
-        // Fibres: elongated along the carrier flow direction stored in the field, torn at the rim only.
-        vec3 qf = q*vec3(9.0,4.0,9.0);
-        f += rim*0.34*(fbm3(qf)-0.45) + rim*0.12*(noise3(q*vec3(24.0,10.0,24.0))-0.5);
-        return smoothstep(0.58,0.80,f);
+      // Fibre noise changes extinction by at most 8%; it never changes the field silhouette.
+      float aggregateGrain(vec3 grid, vec4 field) {
+        vec3 q = grid * vec3(textureSize(uAggregate,0));
+        float phase = ${glf(agg.grainCyclesPerCell)} * 6.28318530718;
+        float orientation = field.a;
+        return 1.0 + ${glf(agg.grainAmount)} * field.g *
+          sin(phase * dot(q,vec3(1.0,0.37+orientation*0.2,0.19))) *
+          sin(phase * dot(q,vec3(0.23,-0.41,1.0)));
       }
       vec3 uvw(vec3 p) { return vec3(p.x/(2.0*uRadius)+0.5,
         (p.y-uBottom)/uHeight, p.z/(2.0*uRadius)+0.5); }
@@ -117,6 +108,21 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         return min(uLightStrength+uAmbient+uAmbientBoost,
           uAlbedo*(ambient+uLightStrength*phase*exp(-lightDepth)));
       }
+      float aggregateSource(vec3 p, float c, vec3 towardCamera) {
+        float depth = 0.0;
+        for (int k = 1; k <= ${agg.lightTaps}; k++) {
+          vec3 q = p + uLightDirection*uRadius*${glf(agg.lightTapDistance)}*float(k);
+          if (wet(q)) depth += texture(uAggregate,uvw(q)).r*${glf(agg.kappa * agg.lightTapDistance)};
+        }
+        float angle = clamp(dot(uLightDirection,towardCamera),-1.0,1.0);
+        float phase = ${glf(optics.isotropicFloor)} + ${glf(1 - optics.isotropicFloor)}*
+          (1.0+uAnisotropy*angle)/(1.0+uAnisotropy);
+        float ambient = uAmbient + uAmbientBoost*(1.0-exp(-2.0*c));
+        float light = uLightStrength*phase*exp(-depth);
+        float multiple = ${glf(agg.multipleScatter)}*uLightStrength*(1.0-exp(-depth));
+        return min(uLightStrength+uAmbient+uAmbientBoost,
+          ${glf(agg.albedo)}*(ambient+light+multiple));
+      }
       // Packed heaps are stored column by column; a small cross blur in x and z removes the column pattern.
       vec4 denseAt(vec3 g) {
         vec3 s = vec3(1.0/float(textureSize(uDense,0).x),1.0/float(textureSize(uDense,0).y),1.0/float(textureSize(uDense,0).z));
@@ -128,6 +134,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
         return c;
       }
       void main() {
+        if (uSolidMode == 3) discard; // Sediment is the height-field mesh, never volume mass.
         vec3 direction = normalize(vPoint-uCameraLocal);
         vec3 boxMin = vec3(-uRadius*1.2,uBottom-uRadius*0.15,-uRadius*1.2);
         vec3 boxMax = vec3(uRadius*1.2,uBottom+uHeight+uRadius*0.6,uRadius*1.2);
@@ -150,10 +157,8 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
           vec3 p = uCameraLocal+direction*(entry+(float(step)+jitter)*stepLength);
           if (!wet(p)) continue;
           vec3 grid = uvw(p);
-          vec4 field = denseAt(grid);
-          float rim = 1.0-smoothstep(0.87,0.985,length(p.xz)/uRadius);
-          float solid = uFlocOn > 0.5 ? cotton(field,grid,p)*rim : 0.0;
-          float source = texture(uOverlap,grid).r;
+          vec4 field = texture(uAggregate,grid);
+          float source = uDiag > 0.5 ? texture(uOverlap,grid).r : 0.0;
           if (uDiag > 1.5) {
             // Occupied-cell diagnostic: reads the concentration texture cell by cell, no optics, no normalization.
             ivec3 sz = textureSize(uOverlap,0);
@@ -169,21 +174,9 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             alpha += (1.0-alpha)*a2;
             continue;
           }
-          float mixing = source > 0.015 ? smoothstep(0.015,0.08,source) : 0.0;
-          float lit = 1.0, diffuse = 0.5;
-          if (solid > 0.01) {
-            // Self shadow toward the light and a slope term, as in the cotton lab.
-            vec3 toLight = normalize(vec3(0.45,0.7,0.55));
-            float sh = 0.0;
-            // Cheap lighting from the raw density (no second evaluation of the cotton noise: that made the shader
-            // so large that the browser spent minutes compiling it).
-            for (int k = 1; k <= 3; k++) { vec3 q3 = p+toLight*uRadius*0.12*float(k); if (wet(q3)) sh += texture(uDense,uvw(q3)).r; }
-            lit = exp(-sh*0.55);
-            diffuse = clamp(0.5-(texture(uDense,uvw(p+toLight*uRadius*0.07)).r-field.r)*1.2,0.0,1.0);
-          }
           // Fine solid shed by the cotton tints the water: bluish white, built up gently.
           float smokeValue = texture(uHaze,grid).r;
-          float tintValue = texture(uTint,grid).r;
+          float tintValue = uSmokeOn > 0.5 ? texture(uTint,grid).r : 0.0;
           float smokeDensity = 0.0, ribbon = 0.0;
           if (uSmokeOn > 0.5 && smokeValue > 0.0004) {
             // Smoke as in the reference: a smooth steel-grey veil plus thin curled ribbons, like ink in water.
@@ -197,8 +190,9 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             smokeDensity = smokeValue*(0.7*veil+2.2*ribbon);
           }
           // Small torn-off chips: separate bright specks, only where chips are present.
-          float chipValue = texture(uChip,grid).r;
-          if (uOpticsMode == 0 && chipValue > 0.0004) {
+          float chipValue = 0.0;
+          if (uSmokeOn > 0.5 && uOpticsMode == 0) chipValue = texture(uChip,grid).r;
+          if (uSmokeOn > 0.5 && uOpticsMode == 0 && chipValue > 0.0004) {
             // Irregular flakes: a warped, lower-frequency noise thresholded high so only a few survive.
             vec3 cq = vec3(p.x,p.y-uBottom,p.z)/uRadius*7.0;
             vec3 cw = vec3(noise3(cq*0.7+vec3(1.0,2.0,3.0)),noise3(cq*0.7+vec3(7.0,5.0,1.0)),noise3(cq*0.7+vec3(4.0,9.0,6.0)))-0.5;
@@ -207,7 +201,7 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
             accumulated += (1.0-alpha)*chipAlpha*vec3(0.96,0.97,0.98);
             alpha += (1.0-alpha)*chipAlpha;
           }
-          if (uCloudOn > 0.5 && smokeValue > 0.0) {
+          if (uSolidMode != 1 && uSolidMode != 3 && uCloudOn > 0.5 && smokeValue > 0.0) {
             if (uOpticsMode == 1) {
               // Raw concentration colormap; no grain or light transport.
               float a3 = 1.0-exp(-min(1.0,smokeValue)*${glf(optics.rawScale)}*stepLength/uRadius);
@@ -221,16 +215,25 @@ export function makeSilverVolumeMaterial(radius: number, bottom: number, height:
               alpha += (1.0-alpha)*a3;
             }
           }
+          if (uSolidMode != 0 && uSolidMode != 3 && uFlocOn > 0.5 && field.r > 0.0) {
+            float porous = (1.0-${glf(agg.loosePorosity)}*clamp(field.g,0.0,1.0))
+              * (0.85+0.15*clamp(field.b,0.0,1.0));
+            float c = field.r*porous*aggregateGrain(grid,field);
+            float a4 = 1.0-exp(-${glf(agg.kappa)}*c*stepLength/uRadius);
+            if (uOpticsMode == 1) {
+              float raw = clamp(field.r,0.0,1.0);
+              a4 = 1.0-exp(-raw*${glf(optics.rawScale)}*stepLength/uRadius);
+              accumulated += (1.0-alpha)*a4*vec3(raw,0.12,1.0-raw);
+            } else {
+              float light = uOpticsMode == 2 ? ${glf(optics.extinctionGrey)} : aggregateSource(p,c,-direction);
+              accumulated += (1.0-alpha)*a4*vec3(light);
+            }
+            alpha += (1.0-alpha)*a4;
+          }
           if (uOpticsMode != 0) { if (alpha >= ${glf(optics.alphaStop)}) break; else continue; }
           float hazeAlpha = uSmokeOn * (1.0-exp(-(smokeDensity*uHazeStrength+tintValue*uTintStrength)*stepLength/uRadius));
           accumulated += (1.0-alpha)*hazeAlpha*mix(vec3(0.34,0.44,0.58),vec3(0.74,0.82,0.92),clamp(ribbon*3.0,0.0,1.0));
           alpha += (1.0-alpha)*hazeAlpha;
-          float localAlpha = 1.0-exp(-(solid*26.0+mixing*0.012)*stepLength/uRadius);
-          vec3 color = mix(vec3(0.91,0.93,0.91),
-            vec3(1.0,1.0,0.995)*(0.70+0.22*lit+0.10*diffuse),
-            solid/(solid+mixing*0.10+0.00001));
-          accumulated += (1.0-alpha)*localAlpha*color;
-          alpha += (1.0-alpha)*localAlpha;
           if (alpha >= ${glf(optics.alphaStop)}) break;
         }
         if (alpha < 0.005) discard;
