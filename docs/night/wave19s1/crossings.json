@@ -1,0 +1,83 @@
+[
+  {
+    "label": "low_baseline",
+    "first": {}
+  },
+  {
+    "label": "low_r0_02_a0_05",
+    "first": {}
+  },
+  {
+    "label": "low_r0_02_a0_2",
+    "first": {}
+  },
+  {
+    "label": "low_r0_02_a0_5",
+    "first": {}
+  },
+  {
+    "label": "low_r0_02_a1",
+    "first": {
+      "mass001_3um": "20"
+    }
+  },
+  {
+    "label": "low_r0_05_a0_05",
+    "first": {}
+  },
+  {
+    "label": "low_r0_05_a0_2",
+    "first": {}
+  },
+  {
+    "label": "low_r0_05_a0_5",
+    "first": {}
+  },
+  {
+    "label": "low_r0_05_a1",
+    "first": {
+      "mass001_3um": "20"
+    }
+  },
+  {
+    "label": "low_r0_1_a0_05",
+    "first": {}
+  },
+  {
+    "label": "low_r0_1_a0_2",
+    "first": {}
+  },
+  {
+    "label": "low_r0_1_a0_5",
+    "first": {}
+  },
+  {
+    "label": "low_r0_1_a1",
+    "first": {
+      "mass001_3um": "22"
+    }
+  },
+  {
+    "label": "low_r0_2_a0_05",
+    "first": {}
+  },
+  {
+    "label": "low_r0_2_a0_2",
+    "first": {}
+  },
+  {
+    "label": "low_r0_2_a0_5",
+    "first": {}
+  },
+  {
+    "label": "low_r0_2_a1",
+    "first": {}
+  },
+  {
+    "label": "high_r0_05_a1",
+    "first": {
+      "mass001_3um": "17",
+      "mass01_3um": "20"
+    }
+  }
+]
