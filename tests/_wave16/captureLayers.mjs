@@ -14,7 +14,13 @@ try {
   const clickSim = await prepareSilver(page); manifest.clickSimMs = clickSim;
   for (const target of targets) {
     await waitSimulationElapsed(page, clickSim, target);
-    const frozen = await page.evaluate(() => { window.__diag.pauseSimulation(); return window.__diag.frozen(); });
+    const frozen = await page.evaluate(() => {
+      window.__diag.pauseSimulation();
+      window.__three.scene.traverse(object => {
+        if (object.name === "TubeSediment") object.userData.depositedVisible = object.visible;
+      });
+      return window.__diag.frozen();
+    });
     if (!frozen.paused) throw new Error("Simulation did not pause");
     const crop = await tubeCrop(page);
     for (const background of ["lab", "black", "gray"])
@@ -25,6 +31,9 @@ try {
             let mesh; window.__three.scene.traverse(object => { if (object.name === "TubeSilverDenseField") mesh = object; });
             if (!mesh) throw new Error("Silver mesh missing");
             mesh.material.uniforms.uSolidMode.value = layer;
+            window.__three.scene.traverse(object => {
+              if (object.name === "TubeSediment") object.visible = (layer === 0 || layer === 3) && object.userData.depositedVisible === true;
+            });
             return { ...window.__diag.frozen(), layer, optics, background,
               kappa: mesh.material.uniforms.uCloudK.value, aggregateKappa: 17,
               light: mesh.material.uniforms.uLightStrength.value, ambient: mesh.material.uniforms.uAmbient.value,
@@ -48,7 +57,10 @@ try {
         }
     await page.evaluate(() => {
       window.__diag.setBackground("lab"); window.__diag.setOpticsMode(0);
-      window.__three.scene.traverse(object => { if (object.name === "TubeSilverDenseField") object.material.uniforms.uSolidMode.value = 0; });
+      window.__three.scene.traverse(object => {
+        if (object.name === "TubeSilverDenseField") object.material.uniforms.uSolidMode.value = 0;
+        if (object.name === "TubeSediment") object.visible = object.userData.depositedVisible === true;
+      });
       window.__diag.resumeSimulation();
     });
   }

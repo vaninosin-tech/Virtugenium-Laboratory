@@ -945,8 +945,9 @@ gl_FragColor = vec4(uColor, min(0.9, mist + uSurfaceGas * surfaceBand * motion
       metalness: 0, side: THREE.DoubleSide, transparent: true,
       opacity: 0.38, depthWrite: false })
     : new THREE.MeshBasicMaterial({ color: "#f8f9f7", toneMapped: false,
-      side: THREE.DoubleSide, transparent: kind === "silver-chloride", depthWrite: false,
-      depthTest: kind !== "silver-chloride" });
+      side: kind === "silver-chloride" ? THREE.FrontSide : THREE.DoubleSide,
+      transparent: kind === "silver-chloride", depthWrite: false,
+      depthTest: true });
   if (kind === "barium-sulfate") {
     bedMaterial.onBeforeCompile = shader => {
       shader.vertexShader = `attribute float sedimentThickness;
@@ -978,10 +979,13 @@ ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
 if (vSedimentThickness < 0.000018) discard;`)
         .replace("#include <opaque_fragment>", `
 float deposited = texture2D(uSedimentHeight, vSedimentUv).r;
-diffuseColor.a *= smoothstep(0.000018, 0.00035, min(vSedimentThickness, deposited));
+// The mesh already follows the bilinearly sampled deposit. Mixing its interpolated
+// vertex height with another fragment height creates a regular triangle pattern.
+diffuseColor.a *= smoothstep(0.000018, 0.00035, vSedimentThickness);
+diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(0.000018, 0.0007, deposited);
 #include <opaque_fragment>`);
     };
-    bedMaterial.customProgramCacheKey = () => "silver-curd-bed-v2";
+    bedMaterial.customProgramCacheKey = () => "silver-curd-bed-v3";
   }
   const bed = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(bedGeometry, bedMaterial);
   bed.renderOrder = 5;

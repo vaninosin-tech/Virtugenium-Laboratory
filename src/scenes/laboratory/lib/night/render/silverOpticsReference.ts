@@ -20,7 +20,7 @@ export const SILVER_FINE_OPTICS = {
 
 /** Shared aggregate coefficients; density is supplied only by the aggregate field. */
 export const SILVER_AGGREGATE_OPTICS = {
-  kappa: 17.0, albedo: 0.96, loosePorosity: 0.55,
+  kappa: 17.0, albedo: 0.96, loosePorosity: 0.25,
   grainAmount: 0.08, grainCyclesPerCell: 3.5,
   rimStrength: 0.12, lightTaps: 2, lightTapDistance: 0.18,
   multipleScatter: 0.5, sedimentAlphaScale: 0.00035,
