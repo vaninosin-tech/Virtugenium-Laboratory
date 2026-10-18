@@ -63,6 +63,12 @@ export interface StreamOptions {
   alpha?: number;
   /** Extra turbulent decay of the resolved flow: rate = dissipation * |u| / R (0 keeps the baseline damping only). */
   dissipation?: number;
+  /**
+   * Experimental correction of the free-surface boundary: the incoming stream volume Q is a source in the top-row cells it
+   * enters and the same volume leaves uniformly through the top row (the rising free surface), instead of being drawn
+   * laterally out of the surface layer. Off by default.
+   */
+  surfaceRise?: boolean;
 }
 export const DEFAULT_STREAM_ALPHA = 0.057;
 export const DEFAULT_STREAM_DISSIPATION = 0.1;
@@ -74,6 +80,9 @@ export class TubeStreamModel {
   /** Fixed flag and value per face (face stored at the + side of its cell, index 3*cell + axis). */
   readonly fixed: Uint8Array;
   readonly value: Float32Array;
+  /** Prescribed volume sources (1/s; positive = created) of the surface-rise correction; zero unless enabled. */
+  readonly extraDivergence: Float32Array;
+  surfaceRise = false;
   readonly stations: StreamStation[] = [];
   active = false;
   state?: StreamState;
@@ -97,6 +106,8 @@ export class TubeStreamModel {
     const n = mask.data.length;
     this.fixed = new Uint8Array(3 * n);
     this.value = new Float32Array(3 * n);
+    this.extraDivergence = new Float32Array(n);
+    this.surfaceRise = !!options.surfaceRise;
     this.spacing = [2 * mask.radius / mask.nx, mask.height / mask.ny, 2 * mask.radius / mask.nz];
     this.alpha = options.alpha ?? DEFAULT_STREAM_ALPHA;
   }
@@ -148,7 +159,7 @@ export class TubeStreamModel {
     return cells.map(c => ({ ...c, w: c.w / sum }));
   }
   clear() {
-    this.fixed.fill(0); this.value.fill(0); this.stations.length = 0;
+    this.fixed.fill(0); this.value.fill(0); this.extraDivergence.fill(0); this.stations.length = 0;
     this.active = false; this.penetration = this.entrainedFlow = this.endFlow = this.endSpeed = 0;
     this.floorReached = false; this.inputMomentum = 0; this.firstFaceFlow = this.lastFaceFlow = 0;
     this.fixedFaces = this.lateralFaces = 0; this.maxSpeed = 0;
@@ -215,7 +226,20 @@ export class TubeStreamModel {
         this.fixed[3 * i + 1] = 1; this.value[3 * i + 1] = v; this.fixedFaces++;
         this.maxSpeed = Math.max(this.maxSpeed, Math.abs(v));
       }
-      if (this.firstFaceFlow === 0) this.firstFaceFlow = st.q;
+      if (this.firstFaceFlow === 0) {
+        this.firstFaceFlow = st.q;
+        if (this.surfaceRise) {
+          // The cells above the first imposed faces receive the stream volume (a source), the whole top row gives it up (the surface rises).
+          const cellVolume = this.spacing[0] * this.spacing[1] * this.spacing[2];
+          for (const c of cells) this.extraDivergence[m.index(c.x, j + 1, c.z)] += st.q * c.w / cellVolume;
+          const top: number[] = [];
+          for (let a = 0; a < m.activeCount; a++) {
+            const i = m.active[a], y = Math.floor(i / m.nx) % m.ny;
+            if (y + 1 >= m.ny || !m.data[i + m.nx]) top.push(i);
+          }
+          for (const i of top) this.extraDivergence[i] -= st.q / (top.length * cellVolume);
+        }
+      }
       this.lastFaceFlow = st.q;
       lateralPlans.push({ row: j, inflow: Math.max(0, st.q - previousFlow), cells });
       previousFlow = st.q;

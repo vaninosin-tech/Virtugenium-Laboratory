@@ -200,27 +200,14 @@ export class TubeFlowSolver {
           this.faces[axis][i] = stream!.value[3 * i + axis];
       }
       this.lastForcingMs = projectStart ? performance.now() - forcingStart : 0;
-      this.project(stream!.active ? 120 : 40, stream!.active ? stream!.fixed : undefined);
+      this.project(stream!.active ? 120 : 40, stream!.active ? stream!.fixed : undefined,
+        stream!.active && stream!.surfaceRise ? stream!.extraDivergence : undefined);
     } else if (jet) this.project(120);
     else if (flag && this.jetModel) this.project(120);
     else this.project();
     this.lastProjectionMs = projectStart ? performance.now() - projectStart : 0;
-    this.substeps = 1; this.lastMaxCourant = 0;
-    for (let k = 0; k < this.fastCount; k++) this.fastFlag[this.fastList[k]] = 0;
-    this.fastCount = 0;
-    if (streamMode) {
-      let maxC = 0;
-      for (let a = 0; a < m.activeCount; a++) {
-        const i = m.active[a];
-        for (let axis = 0; axis < 3; axis++) if (this.neighbor(i, axis, 1) >= 0) {
-          const courant = Math.abs(this.faces[axis][i]) * dt / this.spacing[axis];
-          maxC = Math.max(maxC, courant);
-          if (courant > 0.9) { this.fastFlag[3 * i + axis] = 1; this.fastList[this.fastCount++] = 3 * i + axis; }
-        }
-      }
-      this.lastMaxCourant = maxC;
-      this.substeps = Math.max(1, Math.min(64, Math.ceil(maxC / 0.9)));
-    }
+    this.clearFast();
+    if (streamMode) this.classifyFast(dt);
     if (jet && pre) {
       const post = this.totalFaceMomentum(dt);
       this.lastJetProjectionChange = post.map((v, axis) => v - pre![axis]);
@@ -235,6 +222,27 @@ export class TubeFlowSolver {
       this.lastStepMs = performance.now() - started;
       this.stepTimes[this.stepSamples++ % this.stepTimes.length] = this.lastStepMs;
     }
+  }
+  private clearFast() {
+    this.substeps = 1; this.lastMaxCourant = 0;
+    for (let k = 0; k < this.fastCount; k++) this.fastFlag[this.fastList[k]] = 0;
+    this.fastCount = 0;
+  }
+  /** Marks the faces whose Courant number at time step `dt` exceeds 0.9; transport(dt) then sub-cycles exactly those. */
+  classifyFast(dt: number) {
+    this.clearFast();
+    const m = this.mask;
+    let maxC = 0;
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a];
+      for (let axis = 0; axis < 3; axis++) if (this.neighbor(i, axis, 1) >= 0) {
+        const courant = Math.abs(this.faces[axis][i]) * dt / this.spacing[axis];
+        maxC = Math.max(maxC, courant);
+        if (courant > 0.9) { this.fastFlag[3 * i + axis] = 1; this.fastList[this.fastCount++] = 3 * i + axis; }
+      }
+    }
+    this.lastMaxCourant = maxC;
+    this.substeps = Math.max(1, Math.min(64, Math.ceil(maxC / 0.9)));
   }
   private totalFaceMomentum(dt: number) {
     const result = [0, 0, 0], m = this.mask;
@@ -270,7 +278,7 @@ export class TubeFlowSolver {
       this.lastVorticity[i] = Math.hypot(g[7] - g[5], g[2] - g[6], g[3] - g[1]);
     }
   }
-  private project(iterations?: number, fixed?: Uint8Array) {
+  private project(iterations?: number, fixed?: Uint8Array, sources?: Float32Array) {
     const m = this.mask;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a]; let div = 0;
@@ -279,7 +287,7 @@ export class TubeFlowSolver {
         div += ((plus >= 0 ? this.faces[axis][i] : 0)
           - (minus >= 0 ? this.faces[axis][minus] : 0)) / this.spacing[axis];
       }
-      this.divergence[i] = div;
+      this.divergence[i] = sources ? div - sources[i] : div;
     }
     const p = this.pressure;
     p.fill(0);

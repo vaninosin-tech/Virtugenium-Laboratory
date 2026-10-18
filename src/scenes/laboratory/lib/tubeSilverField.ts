@@ -477,7 +477,12 @@ export class TubeSilverField {
       // The stream stirs the added solution into the Ag+ liquid within about a second.
       const ionMixing = (this.stageOne ? this.ionDiffusivity : 0.00012) + agitation * 0.000003;
       const ionEddy = this.stageOne ? this.ionEddy : undefined;
-      if (!firstDeliveryStep) {
+      // Experimental coupled stepping (see coupledTransportReaction); undefined keeps the accepted operator splitting.
+      const couplingFlag = (globalThis as { __silverStreamCoupling?: unknown }).__silverStreamCoupling;
+      const coupling = !streamOn ? 0 : couplingFlag === "auto" ? this.solver.substeps
+        : typeof couplingFlag === "number" && couplingFlag >= 1 ? Math.floor(couplingFlag) : 0;
+      const coupled = coupling > 0 && this.flocMode && !firstDeliveryStep && !silverTracerOnly();
+      if (!firstDeliveryStep && !coupled) {
         for (const field of Object.values(this.species)) this.solver.transport(field.values, step, ionMixing, ionEddy);
         this.solver.transport(this.tracer, step, ionMixing, ionEddy);
         if (this.flocMode && (globalThis as { __silverSubgrid?: unknown }).__silverSubgrid) {
@@ -510,7 +515,8 @@ export class TubeSilverField {
         this.sedimentField.settleCurd(step);
       else this.sedimentField.settle(step);
       for (let k = 0; k < 3; k++) {
-        if (this.stageOne && k === 1) this.solver.transport(this.suspension[k], step, 0.00003, 1);
+        if (coupled) { /* handled in coupledTransportReaction */ }
+        else if (this.stageOne && k === 1) this.solver.transport(this.suspension[k], step, 0.00003, 1);
         else if (this.stageOne && k === 0) this.solver.transport(this.suspension[k], step,
           this.flocMode ? (this.fineTransport.diffusivity ?? FINE_DIFFUSIVITY) : 0.000012,
           this.flocMode ? (this.fineTransport.eddyScale ?? FINE_EDDY_SCALE) : 0.6);
@@ -522,42 +528,8 @@ export class TubeSilverField {
         this.fineTransport.diffusivity ?? FINE_DIFFUSIVITY,
         this.fineTransport.eddyScale ?? FINE_EDDY_SCALE);
       this.solver.transport(this.coarse, step, this.stageOne ? 0.000004 : 0.000003, this.stageOne ? 0.8 : undefined);
-      const ba = this.species["Ag+"].values, so = this.species["Cl-"].values;
-      if (this.flocMode && (globalThis as { __silverSubgrid?: unknown }).__silverSubgrid) {
-        this.subgridAvailableAg.set(ba); this.subgridAvailableCl.set(so);
-      }
-      this.productSource.fill(0);
-      const tracerOnly = silverTracerOnly();
-      for (let a = 0; a < m.activeCount; a++) {
-        const i = m.active[a];
-        // Phase A diagnostic (?silverDiag=tracer): precipitation is disabled and only the incoming NaCl is traced.
-        const formed = tracerOnly ? 0 : precipitatePair(ba[i], so[i], m.activeCount, 0.0005, step,
-          this.suspension[0][i] + this.suspension[1][i] + this.suspension[2][i]);
-        ba[i] -= formed; so[i] -= formed; this.extent += formed;
-        this.productSource[i] = formed;
-        if (this.flocMode) { this.suspension[0][i] += formed; continue; }
-        if (this.stageOne) {
-          if (formed <= 0) continue;
-          const curd = formed * STAGE_ONE_DENSE_FRACTION;
-          this.suspension[0][i] += formed - curd;
-          // The stream makes the cotton where the reagents meet. Whatever forms in the surface layers is
-          // buoyed there as a raft (the rim); the rest is carried down by the flow.
-          this.dense[i] += curd;
-          this.denseCoordinates[0][i] += curd * ((i % m.nx + 0.5) / m.nx);
-          this.denseCoordinates[1][i] += curd * ((Math.floor(i / m.nx) % m.ny + 0.5) / m.ny);
-          this.denseCoordinates[2][i] += curd * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
-          this.denseCoordinates[4][i] += curd * this.age;
-          continue;
-        }
-        // Dense, freshly nucleated parcels flocculate locally. All visible
-        // lobes draw from this solid reservoir; dilute parcels remain fine.
-        const flocculation = THREE.MathUtils.smoothstep(
-          (formed + this.suspension[0][i]) * m.activeCount, 0.001, 0.035);
-        const aggregate = formed * TUBE_SIMULATION.silver.flocMassFraction * flocculation;
-        this.coarse[i] += aggregate;
-        const fine = formed - aggregate;
-        for (let k = 0; k < 3; k++) this.suspension[k][i] += fine * [0.58, 0.28, 0.14][k];
-      }
+      if (coupled) this.coupledTransportReaction(step, ionMixing, ionEddy, coupling);
+      else this.react(step, false);
       if (this.flocMode) {
         this.advanceFlocSystem(step);
         // The legacy smoke layer moved fine solid into an unrendered "tint" class (suspension[1]); with the smoke layer off that parked
@@ -912,6 +884,77 @@ export class TubeSilverField {
   }
 
   /** Primary particles flocculate where the fine solid is concentrated (rate ~ concentration), then the flocs move. */
+  /**
+   * Local AgCl precipitation over a time interval dt (once per 50 ms step in the accepted baseline). With `accumulate`
+   * the formed amounts of consecutive sub-intervals add up in productSource (experimental coupled stepping).
+   */
+  private react(dt: number, accumulate: boolean) {
+    const m = this.mask;
+    const ba = this.species["Ag+"].values, so = this.species["Cl-"].values;
+    if (this.flocMode && (globalThis as { __silverSubgrid?: unknown }).__silverSubgrid) {
+      this.subgridAvailableAg.set(ba); this.subgridAvailableCl.set(so);
+    }
+    if (!accumulate) this.productSource.fill(0);
+    const tracerOnly = silverTracerOnly();
+    for (let a = 0; a < m.activeCount; a++) {
+      const i = m.active[a];
+      // Phase A diagnostic (?silverDiag=tracer): precipitation is disabled and only the incoming NaCl is traced.
+      const formed = tracerOnly ? 0 : precipitatePair(ba[i], so[i], m.activeCount, 0.0005, dt,
+        this.suspension[0][i] + this.suspension[1][i] + this.suspension[2][i]);
+      ba[i] -= formed; so[i] -= formed; this.extent += formed;
+      this.productSource[i] = accumulate ? this.productSource[i] + formed : formed;
+      if (this.flocMode) { this.suspension[0][i] += formed; continue; }
+      if (this.stageOne) {
+        if (formed <= 0) continue;
+        const curd = formed * STAGE_ONE_DENSE_FRACTION;
+        this.suspension[0][i] += formed - curd;
+        // The stream makes the cotton where the reagents meet. Whatever forms in the surface layers is
+        // buoyed there as a raft (the rim); the rest is carried down by the flow.
+        this.dense[i] += curd;
+        this.denseCoordinates[0][i] += curd * ((i % m.nx + 0.5) / m.nx);
+        this.denseCoordinates[1][i] += curd * ((Math.floor(i / m.nx) % m.ny + 0.5) / m.ny);
+        this.denseCoordinates[2][i] += curd * ((Math.floor(i / (m.nx * m.ny)) + 0.5) / m.nz);
+        this.denseCoordinates[4][i] += curd * this.age;
+        continue;
+      }
+      // Dense, freshly nucleated parcels flocculate locally. All visible
+      // lobes draw from this solid reservoir; dilute parcels remain fine.
+      const flocculation = THREE.MathUtils.smoothstep(
+        (formed + this.suspension[0][i]) * m.activeCount, 0.001, 0.035);
+      const aggregate = formed * TUBE_SIMULATION.silver.flocMassFraction * flocculation;
+      this.coarse[i] += aggregate;
+      const fine = formed - aggregate;
+      for (let k = 0; k < 3; k++) this.suspension[k][i] += fine * [0.58, 0.28, 0.14][k];
+    }
+  }
+  private static nonzero(values: Float64Array, mask: LiquidMask) {
+    for (let a = 0; a < mask.activeCount; a++) if (values[mask.active[a]] !== 0) return true;
+    return false;
+  }
+  /**
+   * Experimental (window.__silverStreamCoupling = n | 'auto', physical stream only): the 50 ms step of the scalar fields is
+   * cut into n sub-steps; each transports Ag+, Cl-, the tracer and the fine suspension with the frozen faces and then
+   * reacts, so Cl- cannot cross the liquid before it has had a chance to precipitate. Same kinetics, same flow.
+   */
+  private coupledTransportReaction(step: number, ionMixing: number, ionEddy: number | undefined, n: number) {
+    const dt = step / n, m = this.mask;
+    this.productSource.fill(0);
+    this.solver.classifyFast(dt);
+    const fine = this.fineTransport;
+    for (let sub = 0; sub < n; sub++) {
+      for (const field of Object.values(this.species)) this.solver.transport(field.values, dt, ionMixing, ionEddy);
+      this.solver.transport(this.tracer, dt, ionMixing, ionEddy);
+      for (let k = 0; k < 3; k++) {
+        if (k > 0 && !TubeSilverField.nonzero(this.suspension[k], m)) continue;
+        if (this.stageOne && k === 1) this.solver.transport(this.suspension[k], dt, 0.00003, 1);
+        else if (this.stageOne && k === 0) this.solver.transport(this.suspension[k], dt,
+          this.flocMode ? (fine.diffusivity ?? FINE_DIFFUSIVITY) : 0.000012, this.flocMode ? (fine.eddyScale ?? FINE_EDDY_SCALE) : 0.6);
+        else this.solver.transport(this.suspension[k], dt, this.stageOne ? 0.000001 : 0.000018);
+      }
+      this.react(dt, true);
+    }
+    this.solver.classifyFast(step);
+  }
   private advanceFlocSystem(dt: number) {
     const m = this.mask, smoothing = this.suspension[0], primaryRadius = this.primaryRadiusM;
     const stickingScale = this.stickingScale;

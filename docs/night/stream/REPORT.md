@@ -82,3 +82,68 @@ The first AgNO3 portion that the game pours into the tube is the standard 1 mL (
 Stream penetration 10.9 mm (the bowl; the liquid is 8.7 mm deep before the pour and 17.4 mm after), entrained 2.4 mL/s, impact speed 1.63 m/s. The conclusions of section 6 hold: the physical stream gives entrainment-limited bulk overlap, not localized near-surface overlap. The pinned baseline numbers in `compare.test.ts` are for the 2.5 mL start (default); run with `INITIAL_ML=1` to reproduce this table (that run fails the pinned-baseline assertion on purpose).
 
 Review aid for judging the liquid: `?agnoMl=3.9` or `window.__silverAgnoMl = 3.9` scales the live AgNO3 pour to that volume (0.5 to 3.9 mL); off by default.
+
+---
+
+# 10. Review iteration: scenario, numerical coupling, free surface (answers to the eight decisions)
+Everything below is CPU-only in the cloud, on the verified scenario **1 mL AgNO3 + 1 mL NaCl** (LOW grid, game pour curve, aggregation off, liquid 8.7 mm before and 15.3 mm after the pour). `__silverStream` stays experimental and off; the baseline, the pouring envelope and the legacy jet are untouched (default runs reproduce the pinned baseline numbers). Test files: `tests/night/stream/coupling.test.ts`, `surface.test.ts`, `final.test.ts`; Windows script: `tests/_stream/tracePourInputs.mjs`.
+
+## 10.1 Priority 1: the actual scenario and pouring inputs
+- **Scenario confirmed from the runtime.** After the AgNO3 pour the Windows game reported `volume: 1` (`tubeAmount`), and the code adds the NaCl portion as the standard 1 mL (`STANDARD_POUR_ML`). So the acceptance scenario is 1 + 1 mL. The 2.5 mL tables of sections 3 to 6 were a geometry-sensitivity case and must not be compared with the 1 mL results (section 9 already reran the comparison).
+- **Pouring inputs are NOT yet validated.** The 13 cm fall, 1.6 m/s impact and 3 mN momentum flux came from the reconstructed lip (mouth plane). Nothing here is a measurement. `tests/_stream/tracePourInputs.mjs` (read-only; run it in the Windows game) records for every ledger event: simulation time, measured or reconstructed outlet position and source type, free-surface height, the fall (measured, reconstructed and used), outlet speed, impact speed (and the reconstructed one), delivered increment, Q(t), impact area, momentum flux, impact position and direction, receiving volume, solver and stream-preparation time, and checks the scenario before the pour. Output `<OUT>/<NAME>_pour_trace.json/.csv`. If the animation does not supply the lip for an event the row says `reconstructed` and the console warns; those rows are not measurements.
+
+## 10.2 Priority 2: does "transport sub-steps, then react once" misplace the AgCl?
+Audit of the order in `TubeSilverField.advance` (stream mode): delivery/inject Cl- -> stream faces + projection -> Ag+, Cl-, tracer transport (slow faces in one pass, fast faces in up to 64 sub-steps) -> fine suspension transport -> **precipitation once per 50 ms** -> floc system. So yes: in one step Cl- is carried through the jet column before any reaction is evaluated. A coupled option was added (experimental, `window.__silverStreamCoupling = n | 'auto'`, needs the stream flag): the step is cut into n sub-steps, each transports Ag+, Cl-, tracer and fine AgCl with the frozen faces and then reacts with dt/n (same kinetics, same stoichiometry, same flow). Controlled study (identical flow: the passive-scalar buoyancy feedback is switched off in this study, identical delivered mass, identical grid):
+
+| run | reaction interval | AgCl @1.0 / 1.35 / 2.5 / 4.0 s | centroid of newly formed AgCl (mm) | within 3 mm of the surface | L1 of the formation profile vs n=128 |
+| --- | --- | --- | ---: | ---: | ---: |
+| accepted split | 50 ms, once | 0.455 / 0.706 / 0.896 / 0.969 | 6.18 | 2.6% | 0.032 |
+| coupled n=2 | 25 ms | 0.444 / 0.720 / 0.943 / 0.988 | 6.14 | 4.1% | 0.046 |
+| n=4 | 12.5 ms | 0.472 / 0.787 / 0.957 / 0.991 | 5.98 | 3.5% | 0.055 |
+| n=8 | 6.25 ms | 0.474 / 0.783 / 0.956 / 0.991 | 6.05 | 3.2% | 0.034 |
+| n=16 | 3.1 ms | 0.474 / 0.783 / 0.956 / 0.991 | 6.11 | 3.2% | 0.020 |
+| n=32 | 1.6 ms | 0.470 / 0.781 / 0.955 / 0.991 | 6.17 | 3.5% | 0.011 |
+| n=64 | 0.8 ms | 0.471 / 0.781 / 0.955 / 0.991 | 6.23 | 3.7% | 0.002 |
+| n=128 (reference) | 0.4 ms | 0.470 / 0.780 / 0.955 / 0.991 | 6.24 | 3.7% | 0 |
+Final liquid depth 15.3 mm, vertical cell 1.45 mm. Mass conserved to 1e-13 and no negative concentration at every resolution.
+
+Against your thresholds:
+- **Between the two finest (n=64 and 128), all four pass:** total AgCl differs 0.0%, centroid 0.01 mm (limit: one cell 1.45 mm and 5% of the depth, 0.77 mm), near-surface share 0.1 percentage points, L1 0.002.
+- **Convergence is demonstrated from n=4 on:** the L1 error against the finest run falls 0.055, 0.034, 0.020, 0.011, 0.002 (n=4 to 64). It is not monotone at the coarse end (n=1 and 2 give 0.032 and 0.046): those runs are pre-asymptotic, because at 50 ms the peak Courant number is 137 and the solver's sub-step cap (64) leaves the fast faces above Courant 1, where the donor limiter clips the flux. I had not noticed this; it is a numerical error of the as-built stream run (and of any n=1 or 2 run).
+- **The accepted splitting against the converged answer:** the *position* of the newly formed AgCl is not an artefact of the splitting (centroid 6.18 against 6.24 mm, near-surface share 2.6 against 3.7%, L1 0.032: all within your limits). The *amount* is: the as-built run under-predicts the total AgCl by 9.4% at 1.35 s and 6.2% at 2.5 s (fails the 5% limit). So my earlier statements that the AgCl "forms along the jet path" and that the peak at the bowl is a splitting effect were not supported: the formation profile is set by where the jet fluid, already carrying entrained Ag+, mixes, not by the order of operations. The penetration result of sections 3 to 6 stands in position and is slightly low in amount.
+- **Cost:** about 8 to 16 ms per pouring step for n=4 to 16 (median), against about 18 ms for the as-built split in that run; the first run of a series pays the JIT warm-up, so treat the cost column as indicative (the final comparison below gives mean values in a warm process). Nothing here accelerates the chemistry: the kinetics are the same function evaluated more often.
+
+## 10.3 Priority 3: free-surface boundary
+Measured on the as-built stream run (coupled n=8, 0.85 to 1.15 s):
+- **Local inconsistency:** the stream draws Q out of the top-row cells it enters while no surface face supplies it, so the pressure solve feeds them laterally. Residual divergence in the top two rows is 2.8 to 25 1/s against 0.3 to 2.8 below (stream flux over one cell volume Q/V = 960 1/s); the mean over the whole liquid is 0.9 to 8.6 1/s.
+- **Double counting:** the net lateral volume flux into the jet layers realised by the final faces is **3.0, 0.9 and 2.2 times** the entrainment the integral model prescribed (0.85, 1.0, 1.15 s). The extra comes from the pressure solve through the free boundary faces: the jet entrains twice during the intervals when the surface suction is active, and an inward surface flow of about 0.1 m/s appears near the stream.
+- **Isolated correction (experimental, `window.__silverStream = { surfaceRise: true }`):** the stream volume Q is a source in the top-row cells it enters and the same volume leaves uniformly through the top row (the rising free surface). Net source zero to float32 round-off (below 1e-6 of Q): no liquid is created, the vessel volume, the volume-to-height mapping and the delivery accounting are untouched. With it the realised/prescribed entrainment is 0.88, 0.92, 0.97 and the inward surface flow falls to 29, 11 and 23 mm/s (entrainment from the surface layer is still expected to converge on the jet).
+- **Impact of the correction:** total AgCl -17.5% at 1.35 s and -9.3% at 2.5 s, the formation centroid moves up 1.5 mm (one cell), near-surface share +4.1 percentage points, L1 of the formation profile 0.27. That exceeds the thresholds, so the as-built stream had a measurable numerical error at the surface; the correction is kept as an isolated experimental option. The pressure residual in the top rows remains (it comes from the per-cell imbalance of the imposed faces, not from the surface source).
+
+## 10.4 Priority 4: settling of single microscopic particles (documented, not implemented)
+Stokes, water, AgCl 5560 kg/m3: v = 2 (rho_s - rho) g r^2 / (9 mu) gives 2.5e-8 m/s for r = 0.05 um (0.0005 mm in 20 s) and 4.0e-7 m/s for r = 0.2 um (0.008 mm in 20 s), confirming your numbers. Individual fine particles therefore stay suspended; nothing in the fine-suspension settling was changed. Collective effects (a dense reacting parcel is denser than the clear liquid and can sink as a plume) are not covered by this estimate; the stage-3 field does not load the liquid with the fine suspension (only floc mass is used in `loadWeight`). This is recorded as a candidate for the later, separate task you described, not touched here.
+
+## 10.5 Priority 5: the controlled comparison (1 mL + 1 mL, same delivery history, passive-scalar buoyancy feedback on)
+| | A baseline | B stream as built | B corrected (n=8 + surface rise) | C legacy jet |
+| --- | --- | --- | --- | --- |
+| AgCl @1.0 / 1.35 / 2.5 / 4.0 s | 0.092 / 0.183 / 0.410 / 0.585 | 0.455 / 0.706 / 0.896 / 0.969 | 0.371 / 0.645 / 0.866 / 0.942 | 0.177 / 0.462 / 0.823 / 0.966 |
+| centroid of newly formed AgCl (mm, of 15.3) | 7.14 | 6.18 | 7.56 | 7.22 |
+| newly formed within 3 mm of the surface | 6.2% | 2.7% | 7.3% | 9.9% |
+| fine AgCl in the top three rows @0.85 / 1.0 / 1.35 s | 88% / 19% / 1.3% | 35% / 7.7% / 6.5% | 51% / 18% / 16% | 49% / 11% / 2.6% |
+| cells where Ag+ and Cl- overlap @0.85 / 1.0 / 1.35 s | 1.5% / 0.1% / 0% | 37% / 7.6% / 3.8% | 27% / 21% / 14.5% | 2.6% / 2.1% / 2.6% |
+| fluid |u| max @0.85 s (m/s) | 0.014 | 1.00 | 1.00 | 0.27 |
+| cost per pouring step: advance mean / peak (ms) | 10.2 / 31 | 17.5 / 36 | 14.0 / 19 | 9.6 / 25 |
+| solver mean / projection mean (ms) | 1.6 / 0.5 | 7.1 / 5.7 | 4.2 / 3.6 | 5.0 / 3.1 |
+Newly formed AgCl by height (share of all formed, mm above the bowl bottom): A 2 to 15 mm with its peak at 6.5 to 8 mm; B as built 1 to 12 mm, peak 5 mm; B corrected 1 to 15 mm, peak 8 to 9.4 mm; C 1 to 14 mm, peak 5 mm. Velocities stay inside the vessel (zero outside), conservation 2e-14 or better and no negative field in all four.
+Reading:
+- In this scenario the **baseline already forms most of its AgCl in the lower and middle part** (centroid 7.1 mm of 15.3), but slowly (0.18 at 1.35 s) because Ag+ and Cl- overlap in only 0 to 1.5% of the cells after 0.85 s.
+- The stream mainly enlarges and prolongs the **overlap** (14 to 37% of the cells against 0 to 1.5%), which makes the reaction 3 to 4 times faster; the corrected version also keeps **16% of the fine AgCl in the top three rows at 1.35 s** (baseline 1.3%, as built 6.5%) and a centroid close to the baseline's. Whether that matches the reference is for the Windows comparison: nothing was tuned towards it.
+- The corrected configuration costs about 4 ms more per pouring step than the baseline in the mean (solver 4.2 against 1.6 ms, projection 3.6 against 0.5 ms); frame rate is not measurable here.
+
+## 10.6 Answers to the three stop-condition questions of the review
+- **Is the computed jet physically and numerically consistent with the actual game scenario?** Numerically: the as-built run had two errors (Courant above the sub-step cap at the pour peak; double-counted entrainment at the free surface). The coupled stepping (n=4 and finer) removes the first; the surface-rise option removes the second (realised/prescribed 0.88 to 0.97). Physically: not established, because the pouring inputs (lip height, speed, Q(t)) are still the reconstruction; the Windows trace is the next step.
+- **Is the position of the precipitation credible?** The position is robust to the splitting. It changed by one cell with the surface correction. It has not been compared with the real game or the reference.
+- **Next problem:** if the Windows trace confirms the inputs and the corrected stream is still visually far from the reference, stop tuning fluid momentum and move to the mesoscopic representation. Not decided here.
+
+## 10.7 How to try the corrected configuration (experimental, off by default)
+In the console before the pour: `window.__silverStream = { surfaceRise: true }; window.__silverStreamCoupling = 8;`. For the recording scripts: `INIT="window.__silverStream={surfaceRise:true};window.__silverStreamCoupling=8;"`. For the as-built stream: `window.__silverStream = true`. Nothing else changes.
