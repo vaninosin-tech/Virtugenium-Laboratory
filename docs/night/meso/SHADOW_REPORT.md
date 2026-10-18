@@ -1,15 +1,43 @@
-# MesoCloud shadow run on the real stage-3 flow (CPU)
+# MesoCloud x2 with active region, subgrid mixing and connectivity diagnostics (CPU)
 
-`tests/night/meso/shadow.test.ts` (env `CONFIG=A|B`, `END`, `MARKS`, `KAPPA`, `SHADOW_OUT`). The field is unchanged; a `MesoCloud` (3x finer grid, 93312 cells against 3456) receives only the AgCl formed per step (`productSource`) and is advected by the field's own solver faces. Scenario of record: 2.5 mL AgNO3 0.1 M + 1 mL NaCl 0.1 M, aggregation off. A = accepted baseline, B = fine-suspension weight on. Slices in `docs/night/meso/shadow/` (left: the field's own fine suspension on its grid, right: MesoCloud, same colour scale, mid plane, gamma 0.6). These are CPU slices, not game footage.
+Code: `src/scenes/laboratory/lib/night/meso/{mesoCloud,cloudTopology}.ts`. Harness: `tests/night/meso/shadow.test.ts` (env `CONFIG=A|B`, `REFINE`, `MIX=none|eddy`, `ETA`, `KAPPA`, `TOPO=1`, `QUALITY`, `END`, `MARKS`, `SHADOW_OUT`). Scenario of record: 2.5 mL AgNO3 + 1 mL NaCl, aggregation off; A = accepted baseline, B = `__silverDensity {model: "net"}`. The cloud is a shadow: it receives only the AgCl formed per step and moves with the field's own solver faces; it feeds nothing back and no renderer reads it. Nothing was seen in the game. Slices: `docs/night/meso/shadow2/` (left the field's fine suspension, right the refined cloud, same scale, mid plane; CPU slices only).
 
-## Findings
-- Conservation: the refined cloud holds exactly what it was given (formed = meso = field mass to 4 decimals at every mark; test asserts 1e-9 relative).
-- B (weight on), 5 s: the coarse field is a smooth vertical gradient; the refined cloud shows folded, curled bands with dark (transparent) gaps between them and a bright mass at the bottom. At 10 and 20 s a ring-like structure with a dark centre and milky surroundings remains while the coarse field has become a plain stratification. Peak density is 5.6 times higher in the refined cloud at 5 s (16.6 against 3.0 mean-cell units), gap fraction 0.31 against 0.20.
-- A (baseline), 5 s: a slanted wedge from the inlet side; the refined cloud has a sharper bright core, a thin extension and a small curl at the tip; gap fraction 0.68 against 0.61. At 20 and 40 s both become a diffuse layer at the top (as in the long run).
-- Component counts at 10/25/50 % of the peak (B): coarse always 1/1/1; refined 11/13/7 at 5 s, 1/4/10 at 10 s, 1/2/5 at 20 s, 1/3/2 at 40 s. They show that the refined field resolves several separate dense regions that the coarse field merges, and that they merge again; the counts depend on the threshold relative to a peak that is dominated by one bright spot, so they are indicators, not a measured separation event.
-- Restricted-vs-field mismatch (L1 / mass) is 0.22 to 0.32: the refined cloud, summed back to the coarse grid, differs from the field's own fine suspension by about a quarter of the mass distribution. Cause: the field's fine transport adds sub-grid mixing (eddy term tied to strain, `FINE_EDDY_SCALE`, diffusivity 1e-9) that the shadow does not apply (its subgrid diffusivity is 1e-8 m2/s plus numerical diffusion). With a 3x finer grid the eddy part should shrink, and how much is a modelling decision, not settled here. Until it is, the persistence of the swirl at 20 s may be overstated.
+## 1. What was built
+- Resolution x2 as the practical target; x3 kept for comparison only.
+- Active region: work only in coarse blocks holding mass plus their 26 wet neighbours, rebuilt before every call so the region moves and grows with the cloud; blocks below 1e-13 of the total are frozen, never zeroed (they stay in `mass`, `restrictTo`, `components` and wake up when a neighbour exports into them); while the pour needs sub-stepped faces the whole wet domain is active; mass is created nowhere. Tests: drifting cloud conserves mass to 1e-12 and does not clip the leaving edge; the active-region result equals the full-domain computation to 1e-9; frozen dust is kept; face interpolation equals the direct definition at refine 1, 2, 3 (dry cells, random faces). A leak found on the way (diffusion into a partner outside the list) was fixed and is covered.
+- Unresolved mixing: kappa = 1e-9 + eta * eddy(parent cell) * 0.02, where `eddy` is the flow solver's own eddy diffusivity and 0.02 the scale the coarse fine-suspension closure uses (FINE_EDDY_SCALE); eta = (h_fine / h_coarse)^(4/3) (Richardson) = 0.40 at x2. Explicit, conservative, cut into sub-steps so kappa dt / h^2 <= 1/8. Mass conserved to 1e-12.
+- Connectivity at four physical thresholds (0.5, 1, 2, 4 times the mean-cell density): connected-region count, mass, volume, lobes, thinnest neck between the two heaviest lobes (distance transform plus widest path, tested on a synthetic dumbbell), topology events by cell overlap between snapshots (split, merge, birth, death) with the neck width before a split and the diffusion length, regions lighter than 2 percent of the total mass treated as dust, and cumulative transport and mixing contributions to the change of the field. Test: a split is found only when the concentration structure changes.
 
-## Cost and limits
-- MesoCloud at refine 3: 36 to 39 ms per 50 ms step in node on one core, which is not affordable next to the field (8 to 13 ms). Refine 2 (31104 cells) would be about a third of that; a sparse update restricted to cells above a threshold is not implemented.
-- Not coupled: the refined field does not feed back into the flow or the field, and no renderer reads it. Nothing here was seen in the game.
-- Not shown: stretched thin connections that pinch off into detached regions as a measured event; the images show curls and gaps, and the counts hint at separations, but a tracked separation event needs a dedicated test.
+## 2. Performance (node, one core, mean / p99 per 50 ms step; field step shown for scale)
+| | MesoCloud | parts (interpolate / advect / mixing) | active blocks | field step |
+|---|---|---|---|---|
+| x3 whole grid (previous version, A) | 36 to 39 ms | | all | |
+| x3 active, B | 15.3 ms (p99 25) | 6.0 / 7.0 / 1.9 | 1722 of 3456 | 8.4 ms |
+| x2 active, B | 5.6 ms (p99 19) | 2.3 / 2.4 / 0.7 | 1717 of 3456 | 8.9 ms (flow, 120-iteration projection, net density, reaction) |
+| x2 active, A | 4.0 ms (p99 8) | 1.9 / 1.4 / 0.5 | 1322 of 3456 | 4.0 ms |
+The optimisation of the interpolation (stencil weights per block offset, one validity pass) took x3 from 24 to 15 ms and x2 from 8.5 to 5.6 ms. The active region saves only 40 to 50 percent of the blocks because the cloud fills most of the column; it would help more for a compact plume. Aggregation cost, rendering cost and the game frame time are not part of this measurement; they need the Windows run.
+
+## 3. Subgrid sensitivity (B, x2; sum of squares per mass as the structure measure; grid-scale roughness = deviation from the 6-neighbour mean)
+| mixing | peak (coarse 3.7) | gap fraction (coarse 0.08) | structure | roughness (coarse 0.008) |
+|---|---|---|---|---|
+| none (only the scheme's own diffusion) | 8.3 | 0.23 | 2.75 | 0.035 |
+| eta x0.25 | 8.1 | 0.21 | 2.68 | |
+| eta x1 (default, closure consistent) | 7.5 | 0.17 | 2.53 | 0.023 |
+| eta x4 | 6.0 | 0.10 | 2.10 | 0.014 |
+| eta x16 | 3.2 | 0.006 | 1.40 | |
+At x1 the refined cloud keeps 92 percent of the unmixed structure and its roughness is a smooth 0.02 (no two-cell noise), so thin structures are not wiped out and not left as grid-scale filaments; at x16 the structure is as smooth as the coarse field, which is the "too much diffusion" end. The choice x1 follows from the existing closure, not from tuning to a picture.
+
+## 4. Cloud morphology and separation on the real flow
+- Folded, curled bands and transparent gaps inside a connected body appear during the first seconds of B (see `configB_x2_t005.png` to `t020.png`): the coarse field shows a smooth gradient at the same time. Refined peak density is about twice the coarse one.
+- Connectivity: in A and B, at every threshold from 0.5 to 4 times the mean, the regions that hold at least 2 percent of the mass are ONE region for the whole 40 s. Split, merge events among significant regions: none (A: 0/0, B: 0/0 at all thresholds). Many small dense fragments exist at 4 times the mean (5 to 15, each below 2 percent of the mass); whether they would read as separate puffs depends on rendering and is not claimed. Thinnest neck: not defined (fewer than two heavy lobes).
+- Contributions: transport accounts for 97 percent of the summed field change (cumulative L1 88 against 2.2 for mixing), so the structure that exists is made by transport, not by diffusion.
+- No visible separation can be claimed, and none of the observed region changes is a separation of significant regions.
+
+## 5. STOP: why separation does not appear (limiting mechanism, no tuning iteration)
+Tested, with the outcome:
+- Stretching available: the resolved strain integrated along the cloud is 17 to 24 in B within 10 s (A: 2 to 8), well above the 3 to 5 needed; not the limit.
+- Diffusion: no mixing at all (x2 and x3) gives the same single significant region; one small lobe (3 percent of the mass) splits off at 4 times the mean; not the limit.
+- Concentration resolution: x3 against x2 changes the fragments at 4 times the mean but not the significant regions; not the limit.
+- Density feedback: with it (B) the flow is stronger and folds the cloud, without it (A) the cloud is a slanted wedge; neither separates.
+- Flow resolution: on the HIGH flow grid (16 x 32 x 16, x2 meso) the density-coupled flow does not settle: at 15 s the resolved strain is 17.7 1/s (max 71) with an integral of 160, hundreds of tiny fragments (182 regions at threshold 1, none above 2 percent of the mass), restricted-vs-field mismatch 0.52. This is the same kind of sustained grid-scale motion found for aggregation plus net density at the LOW grid (density report, section 5). It depends on the momentum viscosity: with the same coupling at LOW, aggregation on, the sustained mean |w| is 1.1 mm/s at the baseline viscosity 2e-7 m2/s, 0.42 mm/s at water's 1e-6 and 0.008 mm/s at 4e-6 (`window.__silverViscosity`, experimental). The baseline solver's momentum diffusivity is 5 times below water's.
+Limiting mechanism, by what the evidence supports: the density-driven flow is the limit. At LOW resolution it is a single smooth overturning cell that folds the cloud but cannot pinch it into separate significant regions; at HIGH resolution (and with aggregate weight at LOW) it becomes a sustained grid-scale motion that fragments the field into noise, which is not a physical separation. Both are properties of the flow solver (grid resolution and under-damped grid-scale motion), not of the concentration field, the mixing or the cloud representation. Not tested and not claimed: whether a finer, properly damped flow would separate a plume, and the role of the pour jet (the stream model is off). The next step is therefore on the flow, not on MesoCloud; no architecture change is proposed before the viscosity/damping question of the flow solver is settled.

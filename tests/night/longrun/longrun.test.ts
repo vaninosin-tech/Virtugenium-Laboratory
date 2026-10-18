@@ -15,6 +15,7 @@ async function run() {
   vi.stubGlobal('window', { location: { search: '' }, __silverAgg: agg });
   (globalThis as Record<string, unknown>).__silverBuoyancy = process.env.BUOY ? { mode: 'composition' } : undefined;
   (globalThis as Record<string, unknown>).__silverDeposit = process.env.DEPOSIT ? true : undefined;
+  (globalThis as Record<string, unknown>).__silverViscosity = process.env.NU ? Number(process.env.NU) : undefined;
   (globalThis as Record<string, unknown>).__silverDensity = process.env.DENS ? { model: process.env.DENS } : undefined;
   (globalThis as Record<string, unknown>).__silverFineWeight = process.env.FINE ? { mode: process.env.FINE === 'net' ? 'net' : 'solid' } : undefined;
   const { TubeSilverField } = await import('../../../src/scenes/laboratory/lib/tubeSilverField');

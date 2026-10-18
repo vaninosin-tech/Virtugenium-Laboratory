@@ -45,3 +45,6 @@ Not established: what sustains the circulation. Known: it needs aggregates carry
 - Keep `net` as the preferred direction (agreed) but not as a default: B is clean, D is not.
 - Whether to give the aggregate population the same subgrid mixing as the fine suspension (physically motivated, but a model change, not a check).
 - The baseline tuned buoyancy stays; the 56 times gap is documented, not corrected.
+
+## 7. Addendum: viscosity of the momentum solver
+The flow solver diffuses momentum with 2e-7 m2/s (`TUBE_SIMULATION.jetFlow.molecularDiffusivity`), 5 times below the kinematic viscosity of water (1e-6) and with a uniform damping of 0.26 1/s. With the corrected density and aggregation (config D) the sustained mean |w| at 60 s is 1.1 mm/s at 2e-7, 0.42 mm/s at 1e-6 and 0.008 mm/s at 4e-6 (experimental `window.__silverViscosity`, default unchanged). So part of the sustained motion in D is under-damped grid-scale motion; at water's viscosity it remains at about 3.9 mm/s peak. Viscosity 4e-6 is above water's and above a Smagorinsky estimate at this grid (about 2e-7 to 4e-7), so it is a diagnostic, not a proposal. D stays provisional; the question to settle is the momentum damping of the solver at the grid scale. The same sensitivity appears on the HIGH flow grid with net density (MesoCloud report, section 5).

@@ -51,6 +51,23 @@ describe('consolidating bed behind the sediment ledger', () => {
   });
 });
 
+describe('stability and no premature compaction', () => {
+  it('a vanishingly small deposit stays finite and non-negative through compaction and creep', () => {
+    const f = field(); f.deposit(6 * NX + 6, 1e-15); f.deposit(5 * NX + 6, 3e-16);
+    for (let s = 0; s < 4000; s++) f.settleCurd(0.05);
+    for (let c = 0; c < NX * NZ; c++) { expect(Number.isFinite(f.thicknessM(c))).toBe(true); expect(f.thicknessM(c)).toBeGreaterThanOrEqual(0); expect(f.values[c]).toBeGreaterThanOrEqual(0); }
+    expect(f.mass).toBeCloseTo(1.3e-15, 25);
+  });
+  it('fresh material stays loose: a thin bed has barely compacted after ten seconds and its porosity stays high after minutes', () => {
+    const f = field(); const c = 6 * NX + 6; f.deposit(c, 0.04);              // about the load of the 180 s experiment per column
+    const loose = f.porosity;
+    for (let s = 0; s < 200; s++) f.settleCurd(0.05);                           // 10 s
+    expect(f.porosity).toBeGreaterThan(loose - 0.01);
+    for (let s = 0; s < 4000; s++) f.settleCurd(0.05);                          // another 200 s
+    expect(f.porosity).toBeGreaterThan(0.85);                                  // load dependent: a sub-mm bed does not collapse to the old 0.55
+  });
+});
+
 describe('field flag', () => {
   async function run(flag: unknown) {
     vi.stubGlobal('window', { location: { search: '' }, __silverAgg: 1 });

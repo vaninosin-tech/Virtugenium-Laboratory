@@ -38,6 +38,8 @@ export class TubeFlowSolver {
   private readonly direction = new THREE.Vector3();
   private jetModel?: TubeJetModel;
   readonly lastStrain: Float32Array;
+  /** Per-cell eddy diffusivity (m2/s) of the resolved flow after the last step, before the per-field scale (read-only view). */
+  get eddyDiffusivities(): Float32Array { return this.eddy; }
   readonly lastVorticity: Float32Array;
   lastJetMomentumSource: readonly number[] = [0, 0, 0];
   lastEntrainmentFlux = 0;
@@ -154,6 +156,10 @@ export class TubeFlowSolver {
     const d = this.direction.copy(direction).normalize();
     const width2 = (m.radius * 0.32) ** 2;
     const damp = Math.exp(-dt * (TUBE_SIMULATION.jetFlow.viscousDamping + agitation * 0.2));
+    // Kinematic viscosity of the momentum diffusion: the tuned 2e-7 m2/s of the accepted baseline unless window.__silverViscosity (m2/s;
+    // water is about 1e-6) is set, an experimental check of how much grid-scale motion the baseline value leaves undamped.
+    const override = (globalThis as { __silverViscosity?: unknown }).__silverViscosity;
+    const viscosity = typeof override === "number" && override >= 0 ? override : TUBE_SIMULATION.jetFlow.molecularDiffusivity;
     const streamMode = !!stream, faceLimit = jet ? 0.25 : streamMode ? 1.2 : 0.09;
     for (let a = 0; a < m.activeCount; a++) {
       const i = m.active[a];
@@ -189,7 +195,7 @@ export class TubeFlowSolver {
         }
         // Physical stream mode: turbulent decay of the resolved flow, rate = C |u| / R (momentum is not kept for seconds).
         const turbulent = streamMode && streamDissipation > 0 ? Math.exp(-dt * streamDissipation * Math.abs(v) / m.radius) : 1;
-        const rawFace = (advected + dt * TUBE_SIMULATION.jetFlow.molecularDiffusivity * laplace) * damp * turbulent
+        const rawFace = (advected + dt * viscosity * laplace) * damp * turbulent
           + (jet ? jet.source[3 * i + axis] : source * d.getComponent(axis))
           // Heavy suspended solid loads the liquid: a body force along gravity.
           + (load ? dt * load.scale * 0.5 * (load.values[i] + load.values[j]) * load.down.getComponent(axis) : 0)
