@@ -9,9 +9,10 @@
 //   STEPS=trace,fps node tests/_stream/runGate.mjs  a subset of the steps (trace, fps, record)
 import { spawnSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-const root = process.env.OUT ?? "docs/night/stream/gate";
+// Absolute: baselineRecord.mjs runs ffmpeg with another working directory, so a relative output path breaks the video step.
+const root = resolve(process.env.OUT ?? "docs/night/stream/gate");
 const url = process.env.URL ?? "http://127.0.0.1:5201/";
 const configs = {
   A: { name: "A_baseline", init: "" },
