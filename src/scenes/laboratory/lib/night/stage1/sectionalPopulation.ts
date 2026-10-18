@@ -11,10 +11,26 @@ export class SectionalPopulation {
   private readonly delta: Float64Array[];
   readonly transfers = new Float64Array(SectionalPopulation.count);
   readonly accumulated = new Float64Array(SectionalPopulation.count);
+  private readonly x: Uint8Array;
+  private readonly y: Uint8Array;
+  private readonly z: Uint8Array;
+  private readonly brownian: Float64Array;
+  private readonly shear: Float64Array;
+  private readonly upper: Uint8Array;
+  private readonly upperFraction: Float64Array;
   constructor(readonly mask: LiquidMask, readonly config: FlocConfig, primarySolidM3: number, solidM3PerUnit: number) {
     const n = mask.data.length;
     this.masses = Array.from({ length: SectionalPopulation.count }, () => new Float64Array(n));
     this.delta = this.masses.map(() => new Float64Array(n));
+    this.x = new Uint8Array(n); this.y = new Uint8Array(n); this.z = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      this.x[i] = i % mask.nx;
+      this.y[i] = Math.floor(i / mask.nx) % mask.ny;
+      this.z[i] = Math.floor(i / (mask.nx * mask.ny));
+    }
+    const pairs = SectionalPopulation.count ** 2;
+    this.brownian = new Float64Array(pairs); this.shear = new Float64Array(pairs);
+    this.upper = new Uint8Array(pairs); this.upperFraction = new Float64Array(pairs);
     const primaryUnit = primarySolidM3 / solidM3PerUnit;
     const crossover = 1e-6;
     const crossoverUnit = primaryUnit * 0.5 * (crossover / (config.primaryRadius ?? 0.2e-6)) ** 3;
@@ -24,6 +40,18 @@ export class SectionalPopulation {
         ? primaryUnit * 0.5 * (this.radii[b] / (config.primaryRadius ?? 0.2e-6)) ** 3
         : crossoverUnit * (this.radii[b] / crossover) ** config.fractalDimension;
       this.slip[b] = slipSpeed(this.radii[b], config);
+    }
+    const kT = 1.380649e-23 * 293.15, mu = config.dynamicViscosity ?? 1.002e-3;
+    for (let i = 0; i < SectionalPopulation.count; i++) for (let j = i; j < SectionalPopulation.count; j++) {
+      const p = i * SectionalPopulation.count + j;
+      const ri = this.radii[i], rj = this.radii[j], product = this.particleMass[i] + this.particleMass[j];
+      this.brownian[p] = 2 * kT / (3 * mu) * (ri + rj) * (1 / ri + 1 / rj);
+      this.shear[p] = (ri + rj) ** 3 / 3;
+      let upper = 1;
+      while (upper < this.particleMass.length - 1 && this.particleMass[upper] < product) upper++;
+      this.upper[p] = upper;
+      this.upperFraction[p] = Math.min(1, Math.max(0,
+        (product - this.particleMass[upper - 1]) / (this.particleMass[upper] - this.particleMass[upper - 1])));
     }
   }
   get totalMass() { let total = 0; for (const bin of this.masses) for (const v of bin) total += v; return total; }
@@ -48,36 +76,32 @@ export class SectionalPopulation {
   }
   /** Brownian plus resolved shear Smoluchowski events. Pair consumption is limited by both source masses. */
   collide(dt: number, cellM3: number, strain: Float32Array, sticking: number | Float64Array) {
-    const m = this.mask, kT = 1.380649e-23 * 293.15, mu = this.config.dynamicViscosity ?? 1.002e-3;
+    const m = this.mask;
     this.transfers.fill(0);
     for (let a = 0; a < m.activeCount; a++) {
       const cell = m.active[a], G = strain[cell];
+      const alpha = typeof sticking === 'number' ? sticking : sticking[cell];
       let highest = 0;
       for (let b = this.masses.length - 1; b > 0; b--)
         if (this.masses[b][cell] > 0) { highest = b; break; }
       const top = Math.min(this.masses.length - 1, highest + 1);
       for (let i = 0; i <= top; i++) {
-        const mi = this.particleMass[i], ri = this.radii[i];
+        const mi = this.particleMass[i];
         if (this.masses[i][cell] + this.delta[i][cell] <= 0) continue;
         for (let j = i; j <= top; j++) {
-          const mj = this.particleMass[j], rj = this.radii[j];
+          const mj = this.particleMass[j], p = i * SectionalPopulation.count + j;
           const ai = this.masses[i][cell] + this.delta[i][cell];
           const aj = this.masses[j][cell] + this.delta[j][cell];
           if (ai <= 0 || aj <= 0) continue;
-          const kernel = 2 * kT / (3 * mu) * (ri + rj) * (1 / ri + 1 / rj) + G * (ri + rj) ** 3 / 3;
+          const kernel = this.brownian[p] + G * this.shear[p];
           const ni = ai / mi, nj = aj / mj;
-          const alpha = typeof sticking === 'number' ? sticking : sticking[cell];
           const events = Math.min((i === j ? ni / 2 : Math.min(ni, nj)) * 0.25,
             alpha * kernel * ni * nj * dt / cellM3 * (i === j ? 0.5 : 1));
           if (!(events > 0)) continue;
           const fromI = events * mi, fromJ = events * mj;
           this.delta[i][cell] -= fromI; this.delta[j][cell] -= fromJ;
-          const product = mi + mj;
-          let upper = 1;
-          while (upper < this.particleMass.length - 1 && this.particleMass[upper] < product) upper++;
-          const lower = upper - 1;
-          const upperFraction = Math.min(1, Math.max(0,
-            (product - this.particleMass[lower]) / (this.particleMass[upper] - this.particleMass[lower])));
+          const product = mi + mj, upper = this.upper[p], lower = upper - 1;
+          const upperFraction = this.upperFraction[p];
           this.delta[lower][cell] += events * product * (1 - upperFraction);
           this.delta[upper][cell] += events * product * upperFraction;
           const moved = events * product;
@@ -98,7 +122,7 @@ export class SectionalPopulation {
     for (let b = 0; b < this.masses.length; b++) {
       const mass = this.masses[b], delta = this.delta[b], slip = this.slip[b] * gravitySign;
       for (let a = 0; a < m.activeCount; a++) {
-        const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / strideZ);
+        const i = m.active[a], x = this.x[i], y = this.y[i], z = this.z[i];
         const original = mass[i]; if (original <= 0) continue;
         let out = 0;
         for (let side = 0; side < 6; side++) {

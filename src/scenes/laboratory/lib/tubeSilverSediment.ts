@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { silverSedimentThickness } from "./night/render/silverOptics";
 import { tubeVessel } from "./vesselGeometry";
 
 /** Legacy stages retain their historical virtual concentration. */
@@ -147,8 +146,9 @@ export class SilverSedimentGeometry extends THREE.BufferGeometry {
           weight += w;
         }
         const suppliedHeight = sampleHeight(x, z);
-        const height = (suppliedHeight ?? silverSedimentThickness(local / Math.max(weight, 1e-8),
-          this.radius, field.compaction)) * taper * diagnosticDisplayScale;
+        const columnArea = 4 * this.radius * this.radius / (field.nx * field.nz);
+        const physicalFallback = field.bulkVolumeM3(local / Math.max(weight, 1e-8)) / columnArea;
+        const height = (suppliedHeight ?? physicalFallback) * taper * diagnosticDisplayScale;
         const i = ring === 0 ? 0 : 1 + (ring - 1) * this.sectors + sector;
         this.position.set([x, floor + height, z], i * 3);
         this.position.set([x, floor, z], (count + i) * 3);

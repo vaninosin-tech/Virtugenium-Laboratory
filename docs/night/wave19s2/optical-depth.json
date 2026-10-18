@@ -1,0 +1,72 @@
+[
+  {
+    "time": 3,
+    "method": "straight occupied x/y ray along z; homogeneous voxel density, without grain, trilinear interpolation, or alpha stop",
+    "fine": {
+      "p50": 0.07449989823918841,
+      "p95": 10.366146833511241,
+      "max": 13.47118526389036
+    },
+    "sections": {
+      "p50": 0.014948221322839527,
+      "p95": 15.789885796420277,
+      "max": 23.27749151168391
+    }
+  },
+  {
+    "time": 6,
+    "method": "straight occupied x/y ray along z; homogeneous voxel density, without grain, trilinear interpolation, or alpha stop",
+    "fine": {
+      "p50": 1.7863765928124875,
+      "p95": 9.72019329178174,
+      "max": 13.567226709125745
+    },
+    "sections": {
+      "p50": 1.7198236267569875,
+      "p95": 20.749229729594663,
+      "max": 42.61737259849907
+    }
+  },
+  {
+    "time": 9,
+    "method": "straight occupied x/y ray along z; homogeneous voxel density, without grain, trilinear interpolation, or alpha stop",
+    "fine": {
+      "p50": 2.1912086766779946,
+      "p95": 8.852685176485803,
+      "max": 10.525012271346423
+    },
+    "sections": {
+      "p50": 3.301513418834656,
+      "p95": 36.96832432821393,
+      "max": 93.73826649338005
+    }
+  },
+  {
+    "time": 14,
+    "method": "straight occupied x/y ray along z; homogeneous voxel density, without grain, trilinear interpolation, or alpha stop",
+    "fine": {
+      "p50": 1.4690984495853185,
+      "p95": 6.251368054178277,
+      "max": 12.61607882369952
+    },
+    "sections": {
+      "p50": 2.720579036639538,
+      "p95": 40.52218887023627,
+      "max": 233.48640895485875
+    }
+  },
+  {
+    "time": 22,
+    "method": "straight occupied x/y ray along z; homogeneous voxel density, without grain, trilinear interpolation, or alpha stop",
+    "fine": {
+      "p50": 0.8100068952292964,
+      "p95": 2.7658206617990446,
+      "max": 8.466052782398958
+    },
+    "sections": {
+      "p50": 1.4484683187736664,
+      "p95": 10.807211815752089,
+      "max": 431.413893699646
+    }
+  }
+]

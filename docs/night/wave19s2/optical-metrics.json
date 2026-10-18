@@ -1,0 +1,1002 @@
+[
+  {
+    "time": 3,
+    "representation": "fine",
+    "optics": 0,
+    "denseCore": 0.609727328431371,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.18877128065353757
+  },
+  {
+    "time": 3,
+    "representation": "sections",
+    "optics": 0,
+    "denseCore": 0.5359145220588221,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.15805093641375323
+  },
+  {
+    "time": 3,
+    "representation": "nodes",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 3,
+    "representation": "sediment",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.000018766432557219064
+  },
+  {
+    "time": 3,
+    "representation": "combined",
+    "optics": 0,
+    "denseCore": 0.6108302696078419,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.34684098349985
+  },
+  {
+    "time": 3,
+    "representation": "fine",
+    "optics": 1,
+    "denseCore": 0.03319937193627453,
+    "contrast": 0.2829607843137255,
+    "min": 0,
+    "max": 0.2829607843137255,
+    "mass": 0.18877128065353757
+  },
+  {
+    "time": 3,
+    "representation": "sections",
+    "optics": 1,
+    "denseCore": 0.006459227941176469,
+    "contrast": 0.2920533333333333,
+    "min": 0,
+    "max": 0.2920533333333333,
+    "mass": 0.15805093641375323
+  },
+  {
+    "time": 3,
+    "representation": "nodes",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 3,
+    "representation": "sediment",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.000018766432557219064
+  },
+  {
+    "time": 3,
+    "representation": "combined",
+    "optics": 1,
+    "denseCore": 0.03336700367647059,
+    "contrast": 0.2804909803921569,
+    "min": 0,
+    "max": 0.2804909803921569,
+    "mass": 0.34684098349985
+  },
+  {
+    "time": 3,
+    "representation": "fine",
+    "optics": 2,
+    "denseCore": 0.49080882352941096,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.18877128065353757
+  },
+  {
+    "time": 3,
+    "representation": "sections",
+    "optics": 2,
+    "denseCore": 0.4976332720588236,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.15805093641375323
+  },
+  {
+    "time": 3,
+    "representation": "nodes",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 3,
+    "representation": "sediment",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.000018766432557219064
+  },
+  {
+    "time": 3,
+    "representation": "combined",
+    "optics": 2,
+    "denseCore": 0.49066329656862645,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.34684098349985
+  },
+  {
+    "time": 3,
+    "representation": "fine",
+    "optics": 3,
+    "denseCore": 0.21374846813725495,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.18877128065353757
+  },
+  {
+    "time": 3,
+    "representation": "sections",
+    "optics": 3,
+    "denseCore": 0.06644454656862744,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.15805093641375323
+  },
+  {
+    "time": 3,
+    "representation": "nodes",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 3,
+    "representation": "sediment",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.000018766432557219064
+  },
+  {
+    "time": 3,
+    "representation": "combined",
+    "optics": 3,
+    "denseCore": 0.21617647058823533,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.34684098349985
+  },
+  {
+    "time": 6,
+    "representation": "fine",
+    "optics": 0,
+    "denseCore": 0.6541743259803912,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.2707548332197872
+  },
+  {
+    "time": 6,
+    "representation": "sections",
+    "optics": 0,
+    "denseCore": 0.6249310661764694,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.3361632499609237
+  },
+  {
+    "time": 6,
+    "representation": "nodes",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 6,
+    "representation": "sediment",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.00017450000598843724
+  },
+  {
+    "time": 6,
+    "representation": "combined",
+    "optics": 0,
+    "denseCore": 0.6623774509803912,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.6070925831867192
+  },
+  {
+    "time": 6,
+    "representation": "fine",
+    "optics": 1,
+    "denseCore": 0.05644287530637258,
+    "contrast": 0.287601568627451,
+    "min": 0,
+    "max": 0.287601568627451,
+    "mass": 0.2707548332197872
+  },
+  {
+    "time": 6,
+    "representation": "sections",
+    "optics": 1,
+    "denseCore": 0.030771418504901955,
+    "contrast": 0.2909050980392157,
+    "min": 0,
+    "max": 0.2909050980392157,
+    "mass": 0.3361632499609237
+  },
+  {
+    "time": 6,
+    "representation": "nodes",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 6,
+    "representation": "sediment",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.00017450000598843724
+  },
+  {
+    "time": 6,
+    "representation": "combined",
+    "optics": 1,
+    "denseCore": 0.0573251455269608,
+    "contrast": 0.2959074509803922,
+    "min": 0,
+    "max": 0.2959074509803922,
+    "mass": 0.6070925831867192
+  },
+  {
+    "time": 6,
+    "representation": "fine",
+    "optics": 2,
+    "denseCore": 0.48615196078431083,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.2707548332197872
+  },
+  {
+    "time": 6,
+    "representation": "sections",
+    "optics": 2,
+    "denseCore": 0.4895756740196069,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.3361632499609237
+  },
+  {
+    "time": 6,
+    "representation": "nodes",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 6,
+    "representation": "sediment",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.00017450000598843724
+  },
+  {
+    "time": 6,
+    "representation": "combined",
+    "optics": 2,
+    "denseCore": 0.4852481617647026,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.6070925831867192
+  },
+  {
+    "time": 6,
+    "representation": "fine",
+    "optics": 3,
+    "denseCore": 0.30680147058823526,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.2707548332197872
+  },
+  {
+    "time": 6,
+    "representation": "sections",
+    "optics": 3,
+    "denseCore": 0.2416053921568627,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.3361632499609237
+  },
+  {
+    "time": 6,
+    "representation": "nodes",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 6,
+    "representation": "sediment",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.00017450000598843724
+  },
+  {
+    "time": 6,
+    "representation": "combined",
+    "optics": 3,
+    "denseCore": 0.32342218137254886,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.6070925831867192
+  },
+  {
+    "time": 9,
+    "representation": "fine",
+    "optics": 0,
+    "denseCore": 0.6591528799019598,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.26034923957539136
+  },
+  {
+    "time": 9,
+    "representation": "sections",
+    "optics": 0,
+    "denseCore": 0.6521905637254889,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.4994929693610238
+  },
+  {
+    "time": 9,
+    "representation": "nodes",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 9,
+    "representation": "sediment",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.0005966614743926678
+  },
+  {
+    "time": 9,
+    "representation": "combined",
+    "optics": 0,
+    "denseCore": 0.6735677083333323,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.7604388704108336
+  },
+  {
+    "time": 9,
+    "representation": "fine",
+    "optics": 1,
+    "denseCore": 0.055112863051470604,
+    "contrast": 0.28897019607843144,
+    "min": 0,
+    "max": 0.28897019607843144,
+    "mass": 0.26034923957539136
+  },
+  {
+    "time": 9,
+    "representation": "sections",
+    "optics": 1,
+    "denseCore": 0.042251807598039225,
+    "contrast": 0.2950737254901961,
+    "min": 0,
+    "max": 0.2950737254901961,
+    "mass": 0.4994929693610238
+  },
+  {
+    "time": 9,
+    "representation": "nodes",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 9,
+    "representation": "sediment",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.0005966614743926678
+  },
+  {
+    "time": 9,
+    "representation": "combined",
+    "optics": 1,
+    "denseCore": 0.05896919883578429,
+    "contrast": 0.2959074509803922,
+    "min": 0,
+    "max": 0.2959074509803922,
+    "mass": 0.7604388704108336
+  },
+  {
+    "time": 9,
+    "representation": "fine",
+    "optics": 2,
+    "denseCore": 0.48579963235293855,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.26034923957539136
+  },
+  {
+    "time": 9,
+    "representation": "sections",
+    "optics": 2,
+    "denseCore": 0.4868872549019585,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.4994929693610238
+  },
+  {
+    "time": 9,
+    "representation": "nodes",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 9,
+    "representation": "sediment",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.0005966614743926678
+  },
+  {
+    "time": 9,
+    "representation": "combined",
+    "optics": 2,
+    "denseCore": 0.4843367034313689,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.7604388704108336
+  },
+  {
+    "time": 9,
+    "representation": "fine",
+    "optics": 3,
+    "denseCore": 0.31547947303921536,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.26034923957539136
+  },
+  {
+    "time": 9,
+    "representation": "sections",
+    "optics": 3,
+    "denseCore": 0.29725796568627444,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.4994929693610238
+  },
+  {
+    "time": 9,
+    "representation": "nodes",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 9,
+    "representation": "sediment",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.0005966614743926678
+  },
+  {
+    "time": 9,
+    "representation": "combined",
+    "optics": 3,
+    "denseCore": 0.3440793504901959,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.7604388704108336
+  },
+  {
+    "time": 14,
+    "representation": "fine",
+    "optics": 0,
+    "denseCore": 0.6410156249999986,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.18907390278672903
+  },
+  {
+    "time": 14,
+    "representation": "sections",
+    "optics": 0,
+    "denseCore": 0.6435585171568615,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.6953130656829233
+  },
+  {
+    "time": 14,
+    "representation": "nodes",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 14,
+    "representation": "sediment",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.0030412648185827507
+  },
+  {
+    "time": 14,
+    "representation": "combined",
+    "optics": 0,
+    "denseCore": 0.6667202818627442,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.8874282332882718
+  },
+  {
+    "time": 14,
+    "representation": "fine",
+    "optics": 1,
+    "denseCore": 0.04099308823529411,
+    "contrast": 0.2909050980392157,
+    "min": 0,
+    "max": 0.2909050980392157,
+    "mass": 0.18907390278672903
+  },
+  {
+    "time": 14,
+    "representation": "sections",
+    "optics": 1,
+    "denseCore": 0.030385062806372567,
+    "contrast": 0.2950737254901961,
+    "min": 0,
+    "max": 0.2950737254901961,
+    "mass": 0.6953130656829233
+  },
+  {
+    "time": 14,
+    "representation": "nodes",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 14,
+    "representation": "sediment",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.0030412648185827507
+  },
+  {
+    "time": 14,
+    "representation": "combined",
+    "optics": 1,
+    "denseCore": 0.048792512254901936,
+    "contrast": 0.2959074509803922,
+    "min": 0,
+    "max": 0.2959074509803922,
+    "mass": 0.8874282332882718
+  },
+  {
+    "time": 14,
+    "representation": "fine",
+    "optics": 2,
+    "denseCore": 0.4874234068627438,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.18907390278672903
+  },
+  {
+    "time": 14,
+    "representation": "sections",
+    "optics": 2,
+    "denseCore": 0.48807444852941173,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.6953130656829233
+  },
+  {
+    "time": 14,
+    "representation": "nodes",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 14,
+    "representation": "sediment",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.0030412648185827507
+  },
+  {
+    "time": 14,
+    "representation": "combined",
+    "optics": 2,
+    "denseCore": 0.48500306372548735,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.8874282332882718
+  },
+  {
+    "time": 14,
+    "representation": "fine",
+    "optics": 3,
+    "denseCore": 0.28064491421568627,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.18907390278672903
+  },
+  {
+    "time": 14,
+    "representation": "sections",
+    "optics": 3,
+    "denseCore": 0.27659313725490187,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.6953130656829233
+  },
+  {
+    "time": 14,
+    "representation": "nodes",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 14,
+    "representation": "sediment",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.0030412648185827507
+  },
+  {
+    "time": 14,
+    "representation": "combined",
+    "optics": 3,
+    "denseCore": 0.33003216911764693,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.8874282332882718
+  },
+  {
+    "time": 22,
+    "representation": "fine",
+    "optics": 0,
+    "denseCore": 0.5958026960784306,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.10024643544820731
+  },
+  {
+    "time": 22,
+    "representation": "sections",
+    "optics": 0,
+    "denseCore": 0.5858838848039203,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.8381770289942833
+  },
+  {
+    "time": 22,
+    "representation": "nodes",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 22,
+    "representation": "sediment",
+    "optics": 0,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.020641263246129592
+  },
+  {
+    "time": 22,
+    "representation": "combined",
+    "optics": 0,
+    "denseCore": 0.6219515931372537,
+    "contrast": 0.4980392156862744,
+    "min": 0.5019607843137255,
+    "max": 0.9999999999999999,
+    "mass": 0.9590647276886457
+  },
+  {
+    "time": 22,
+    "representation": "fine",
+    "optics": 1,
+    "denseCore": 0.022777267156862745,
+    "contrast": 0.2873184313725491,
+    "min": 0,
+    "max": 0.2873184313725491,
+    "mass": 0.10024643544820731
+  },
+  {
+    "time": 22,
+    "representation": "sections",
+    "optics": 1,
+    "denseCore": 0.014544489889705881,
+    "contrast": 0.29258823529411765,
+    "min": 0,
+    "max": 0.29258823529411765,
+    "mass": 0.8381770289942833
+  },
+  {
+    "time": 22,
+    "representation": "nodes",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 22,
+    "representation": "sediment",
+    "optics": 1,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.020641263246129592
+  },
+  {
+    "time": 22,
+    "representation": "combined",
+    "optics": 1,
+    "denseCore": 0.029539374999999996,
+    "contrast": 0.2959074509803922,
+    "min": 0,
+    "max": 0.2959074509803922,
+    "mass": 0.9590647276886457
+  },
+  {
+    "time": 22,
+    "representation": "fine",
+    "optics": 2,
+    "denseCore": 0.4923023897058831,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.10024643544820731
+  },
+  {
+    "time": 22,
+    "representation": "sections",
+    "optics": 2,
+    "denseCore": 0.49342830882352984,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.8381770289942833
+  },
+  {
+    "time": 22,
+    "representation": "nodes",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0
+  },
+  {
+    "time": 22,
+    "representation": "sediment",
+    "optics": 2,
+    "denseCore": 0.5019607843137238,
+    "contrast": 0,
+    "min": 0.5019607843137255,
+    "max": 0.5019607843137255,
+    "mass": 0.020641263246129592
+  },
+  {
+    "time": 22,
+    "representation": "combined",
+    "optics": 2,
+    "denseCore": 0.4894684436274503,
+    "contrast": 0.050980392156862786,
+    "min": 0.4509803921568627,
+    "max": 0.5019607843137255,
+    "mass": 0.9590647276886457
+  },
+  {
+    "time": 22,
+    "representation": "fine",
+    "optics": 3,
+    "denseCore": 0.18408394607843132,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.10024643544820731
+  },
+  {
+    "time": 22,
+    "representation": "sections",
+    "optics": 3,
+    "denseCore": 0.16181066176470585,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.8381770289942833
+  },
+  {
+    "time": 22,
+    "representation": "nodes",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0
+  },
+  {
+    "time": 22,
+    "representation": "sediment",
+    "optics": 3,
+    "denseCore": 0,
+    "contrast": 0,
+    "min": 0,
+    "max": 0,
+    "mass": 0.020641263246129592
+  },
+  {
+    "time": 22,
+    "representation": "combined",
+    "optics": 3,
+    "denseCore": 0.2396216299019608,
+    "contrast": 0.9999999999999999,
+    "min": 0,
+    "max": 0.9999999999999999,
+    "mass": 0.9590647276886457
+  }
+]
