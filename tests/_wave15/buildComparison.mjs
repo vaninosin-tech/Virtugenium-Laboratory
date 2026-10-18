@@ -37,7 +37,7 @@ const result={reference:{file:reference,box:refBox,frames:refs},game:{directory:
   method:"Monotone dynamic time warping on whiteness fraction and white-front position; each game frame is joined to the nearest in-page wall epoch (performance.timeOrigin + performance.now), then to the true simulation clock. Reference playback timestamps do not define chemical time.",
   alignment:path.map(([gi,ri])=>({gameIndex:gi,referenceIndex:ri,gameSimMs:gameCurve[gi].simMs,referencePlaybackSeconds:refs[ri].time}))};
 await writeFile(join(out,"metrics.json"),JSON.stringify(result,null,2));
-const W=900,H=480,rangeMs=trace.durationMs??22000,alignSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="100%" height="100%" fill="white"/><text x="60" y="30" font-size="20">Stage alignment: game simulation vs reference playback</text><path d="M60 40 V420 H860" fill="none" stroke="black"/><polyline fill="none" stroke="#1565c0" stroke-width="3" points="${result.alignment.map(p=>`${60+800*p.gameSimMs/rangeMs},${420-360*p.referencePlaybackSeconds/Math.max(1,refs.at(-1).time)}`).join(" ")}"/><text x="350" y="460">Game simulation seconds (0 to ${(rangeMs/1000).toFixed(0)})</text><text x="65" y="55">Reference playback: 0 to ${refs.at(-1).time.toFixed(1)} s</text></svg>`;
+const W=900,H=480,rangeMs=trace.durationMs??24000,alignSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="100%" height="100%" fill="white"/><text x="60" y="30" font-size="20">Stage alignment: game simulation vs reference playback</text><path d="M60 40 V420 H860" fill="none" stroke="black"/><polyline fill="none" stroke="#1565c0" stroke-width="3" points="${result.alignment.map(p=>`${60+800*p.gameSimMs/rangeMs},${420-360*p.referencePlaybackSeconds/Math.max(1,refs.at(-1).time)}`).join(" ")}"/><text x="350" y="460">Game simulation seconds (0 to ${(rangeMs/1000).toFixed(0)})</text><text x="65" y="55">Reference playback: 0 to ${refs.at(-1).time.toFixed(1)} s</text></svg>`;
 await writeFile(join(out,"alignment.svg"),alignSvg);
 if(process.env.METRICS_ONLY==="1"){console.log(`${refs.length} reference, ${frames.length} game frames; metrics only`);process.exit(0);}
 const panels=join(out,"panels");await mkdir(panels,{recursive:true});
@@ -50,6 +50,7 @@ for(let gi=0;gi<gameCurve.length;gi++){
   const g=gameCurve[gi],r=refs[lookup.get(gi)??0],dump=nearestDump(g.simMs),field=dump?.fields??dump;
   const n=field?.nx??12,ny=field?.ny??24,nz=field?.nz??12;
   const fineBytes=Buffer.alloc(n*ny*3),aggregateBytes=Buffer.alloc(n*(ny+4)*3);
+  const flocWidth=64,flocHeight=ny+4,flocBytes=Buffer.alloc(flocWidth*flocHeight*3);
   for(let y=0;y<ny;y++)for(let x=0;x<n;x++){
     const i=x+n*((ny-1-y)+ny*Math.floor(nz/2));
     const fine=field?.mask?.[i]?Math.round(255*Math.min(1,(field.fine?.[i]??0)/Number(process.env.FIELD_SCALE??.005))):0;
@@ -61,14 +62,23 @@ for(let gi=0;gi<gameCurve.length;gi++){
     const v=Math.round(255*Math.min(1,h/Number(process.env.SEDIMENT_SCALE??.001)));
     aggregateBytes.fill(v,3*(y*n+x),3*(y*n+x)+3);
   }
-  const id=String(gi).padStart(5,"0"),raw=join(panels,`fine-${id}.ppm`),aggregateRaw=join(panels,`aggregate-${id}.ppm`);
+  const count=Math.max(0,dump?.B?.aggregateCount??0),sizeMm=Math.max(0,dump?.B?.largestNodeRadiusMm??0);
+  for(let y=0;y<flocHeight;y++)for(let x=0;x<flocWidth;x++){
+    const bar=y<flocHeight/2?Math.min(1,count/260):Math.min(1,sizeMm/5);
+    const active=x/flocWidth<bar,i=3*(y*flocWidth+x);
+    flocBytes[i]=active?(y<flocHeight/2?242:61):24;
+    flocBytes[i+1]=active?(y<flocHeight/2?225:212):28;
+    flocBytes[i+2]=active?(y<flocHeight/2?105:237):34;
+  }
+  const id=String(gi).padStart(5,"0"),raw=join(panels,`fine-${id}.ppm`),aggregateRaw=join(panels,`aggregate-${id}.ppm`),flocRaw=join(panels,`floc-${id}.ppm`);
   await writeFile(raw,Buffer.concat([Buffer.from(`P6\n${n} ${ny}\n255\n`),fineBytes]));
   await writeFile(aggregateRaw,Buffer.concat([Buffer.from(`P6\n${n} ${ny+4}\n255\n`),aggregateBytes]));
+  await writeFile(flocRaw,Buffer.concat([Buffer.from(`P6\n${flocWidth} ${flocHeight}\n255\n`),flocBytes]));
   const speed=process.env.X50_AT?(r.time>=Number(process.env.X50_AT)?"x50":"x5"):"x5/x50";
-  const label=labelText({simMs:g.simMs,referenceSeconds:r.time,referenceSpeed:speed,stage:progressionStage(g.simMs,markers),camera:trace.camera??"wide",background:trace.background??"lab"});
+  const label=labelText({simMs:g.simMs,referenceSeconds:r.time,referenceSpeed:speed,stage:progressionStage(g.simMs,markers),camera:trace.camera??"wide",background:trace.background??"lab"})+` | flocs ${count} max radius ${sizeMm.toFixed(2)} mm`;
   const file=join(panels,`panel-${String(gi).padStart(5,"0")}.png`);
-  const filter=`[0:v]crop=${rect(refBox)},scale=350:420,setsar=1[a];[1:v]crop=${rect(gameBox)},scale=430:420,setsar=1[b];[2:v]scale=210:420:flags=neighbor,setsar=1[c];[3:v]scale=210:420:flags=neighbor,setsar=1[d];[a][b][c][d]hstack=inputs=4,pad=1200:480:0:0:black,drawtext=fontfile='${font}':text='${esc(label)}':x=10:y=440:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.8[v]`;
-  run(ffmpeg,["-y","-v","error","-i",join(referenceDir,r.fn),"-i",join(game,"frames",g.fn),"-i",raw,"-i",aggregateRaw,"-filter_complex",filter,"-map","[v]","-frames:v","1",file]);
+  const filter=`[0:v]crop=${rect(refBox)},scale=350:420,setsar=1[a];[1:v]crop=${rect(gameBox)},scale=430:420,setsar=1[b];[2:v]scale=210:420:flags=neighbor,setsar=1,drawtext=fontfile='${font}':text='fine':x=5:y=5:fontsize=17:fontcolor=yellow[c];[3:v]scale=210:420:flags=neighbor,setsar=1,drawtext=fontfile='${font}':text='aggregate density / deposit':x=5:y=5:fontsize=15:fontcolor=yellow[d];[4:v]scale=160:420:flags=neighbor,setsar=1,drawtext=fontfile='${font}':text='floc count':x=5:y=5:fontsize=16:fontcolor=yellow,drawtext=fontfile='${font}':text='max radius':x=5:y=215:fontsize=16:fontcolor=yellow[e];[a][b][c][d][e]hstack=inputs=5,pad=1360:480:0:0:black,drawtext=fontfile='${font}':text='${esc(label)}':x=10:y=440:fontsize=16:fontcolor=white:box=1:boxcolor=black@0.8[v]`;
+  run(ffmpeg,["-y","-v","error","-i",join(referenceDir,r.fn),"-i",join(game,"frames",g.fn),"-i",raw,"-i",aggregateRaw,"-i",flocRaw,"-filter_complex",filter,"-map","[v]","-frames:v","1",file]);
 }
 run(ffmpeg,["-y","-v","error","-framerate",String(fps),"-i",join(panels,"panel-%05d.png"),"-c:v","libx264","-pix_fmt","yuv420p",join(out,"comparison.mp4")]);
 console.log(`${refs.length} reference frames, ${frames.length} game frames, ${gameCurve.length} comparison panels`);

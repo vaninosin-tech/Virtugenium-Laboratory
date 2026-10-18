@@ -55,11 +55,63 @@ try {
           }
           manifest.captures.push({ file, target, state, crop, metrics });
         }
+    // Deliberately enlarged display-only surface: a thin physical deposit cannot
+    // establish whether a repeated shader or mesh pattern is actually absent.
+    const diagnosticScale = Number(process.env.SEDIMENT_DIAGNOSTIC_SCALE ?? 10);
+    const diagnosticSynthetic = process.env.SEDIMENT_DIAGNOSTIC_SYNTHETIC !== "0";
+    if (diagnosticScale >= 5 && diagnosticScale <= 20) for (const background of ["lab", "black", "gray"]) {
+      const state = await page.evaluate(({ background, diagnosticScale, diagnosticSynthetic }) => {
+        const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId;
+        const field = id && window.__silverRuntime.field(id);
+        let bed; window.__three.scene.traverse(object => { if (object.name === "TubeSediment") bed = object; });
+        if (!bed || !field) throw new Error("Sediment diagnostic lacks field or mesh");
+        window.__diag.setBackground(background); window.__diag.setOpticsMode(0);
+        const physical = field.sedimentHeightTexture;
+        const texture = physical.clone();
+        texture.image = { ...physical.image, data: new Float32Array(physical.image.data) };
+        if (diagnosticSynthetic) {
+          const {width:nx,height:nz,data} = texture.image;
+          for (let z=0;z<nz;z++) for (let x=0;x<nx;x++) {
+            const u=(x+.5)/nx*2-1,v=(z+.5)/nz*2-1,r2=u*u+v*v;
+            data[x+nx*z]=r2<.8 ? .00007*(1-r2/.8)*(1+.18*Math.sin(7*u+3*v)+.12*Math.cos(5*v-2*u)) : 0;
+          }
+        }
+        texture.needsUpdate = true; bed.userData.diagnosticTexture = texture;
+        window.__silverSedimentDiagnosticTexture = texture;
+        window.__silverSedimentDiagnosticScale = diagnosticScale;
+        if (bed.material.userData.sedimentShader) bed.material.userData.sedimentShader.uniforms.uSedimentHeight.value = texture;
+        bed.visible = diagnosticSynthetic || field.sedimentField.mass > 0;
+        bed.geometry.update(field.sedimentField, texture, diagnosticScale);
+        return { ...window.__diag.frozen(), background, diagnosticScale, diagnosticSynthetic, sedimentMass: field.sedimentField.mass };
+      }, { background, diagnosticScale, diagnosticSynthetic });
+      await page.waitForTimeout(120);
+      const file = `silver-t${target}-sediment-diagnostic-x${diagnosticScale}-bg${background}.png`;
+      const png = await page.screenshot({ path: `${output}/${file}`, clip: crop });
+      const decoded = await page.evaluate(async base64 => { const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode();
+        const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
+        const context = canvas.getContext("2d"); context.drawImage(image,0,0);
+        return { width:image.width, height:image.height, rgba:Array.from(context.getImageData(0,0,image.width,image.height).data) };
+      }, png.toString("base64"));
+      manifest.captures.push({ file, target, state, crop, metrics:{ moire:sedimentMoireMetric(decoded.rgba,decoded.width,decoded.height) } });
+      await page.evaluate(() => { let bed; window.__three.scene.traverse(object => { if (object.name === "TubeSediment") bed = object; });
+        if (!bed) return; const id=window.__testTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId;
+        const field=id&&window.__silverRuntime.field(id);
+        if (field) { bed.geometry.update(field.sedimentField,field.sedimentHeightTexture,1);
+          if (bed.material.userData.sedimentShader) bed.material.userData.sedimentShader.uniforms.uSedimentHeight.value=field.sedimentHeightTexture; }
+        delete window.__silverSedimentDiagnosticTexture; delete window.__silverSedimentDiagnosticScale;
+        bed.userData.diagnosticTexture?.dispose(); bed.userData.diagnosticTexture=null;
+      });
+    }
     await page.evaluate(() => {
       window.__diag.setBackground("lab"); window.__diag.setOpticsMode(0);
       window.__three.scene.traverse(object => {
         if (object.name === "TubeSilverDenseField") object.material.uniforms.uSolidMode.value = 0;
-        if (object.name === "TubeSediment") object.visible = object.userData.depositedVisible === true;
+        if (object.name === "TubeSediment") {
+          object.visible = object.userData.depositedVisible === true;
+          const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId;
+          const field = id && window.__silverRuntime.field(id);
+          if (field) object.geometry.update(field.sedimentField, field.sedimentHeightTexture, 1);
+        }
       });
       window.__diag.resumeSimulation();
     });

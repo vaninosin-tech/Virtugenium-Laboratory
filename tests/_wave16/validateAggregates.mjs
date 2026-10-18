@@ -28,6 +28,7 @@ try {
     const id = window.__testTubeStorageStore.getState().fumeHoodTestTubes[0]?.instanceId;
     const field = id && window.__silverRuntime.field(id);
     const aggregate = field?.aggregateTexture ?? field?.denseTexture;
+    const displayAggregate = mesh?.material.uniforms.uAggregate.value;
     const sediment = field?.sedimentHeightTexture;
     const uploaded = texture => texture ? renderer.properties.get(texture).__version === texture.version : false;
     const program = mesh && renderer.properties.get(mesh.material).currentProgram;
@@ -36,8 +37,13 @@ try {
       programs: programs.map(p => ({ linked: !!gl.getProgramParameter(p.program, gl.LINK_STATUS),
         runnable: p.diagnostics?.runnable ?? true, log: p.diagnostics?.programLog ?? "" })),
       meshVisible: !!mesh?.visible, silverProgramLinked: !!program && programs.includes(program),
-      aggregateExists: !!aggregate, aggregateBound: mesh?.material.uniforms.uAggregate.value === aggregate,
-      aggregateUploaded: uploaded(aggregate),
+      aggregateExists: !!aggregate, aggregateBound: !!displayAggregate &&
+        (displayAggregate === aggregate || displayAggregate.image?.width === field?.mask.nx * 2),
+      aggregateUploaded: uploaded(displayAggregate), aggregateDisplaySize: displayAggregate?.image &&
+        [displayAggregate.image.width, displayAggregate.image.height, displayAggregate.image.depth],
+      flocCount: field?.flocSystem?.nodes.length ?? 0, flocLinks: field?.flocSystem?.links.length ?? 0,
+      flocDataPresent: !field?.flocSystem?.nodes.length ||
+        displayAggregate !== aggregate && displayAggregate?.image?.width === field.mask.nx * 2,
       sedimentExists: !!sediment, sedimentBound: bed?.material.userData.sedimentShader?.uniforms.uSedimentHeight.value === sediment,
       sedimentUploaded: uploaded(sediment), depositedMass, sedimentVisible: !!bed,
       paused: window.__diag.frozen().paused,
@@ -65,6 +71,7 @@ try {
     programs: state.programs.length > 0 && state.programs.every(v => v.linked && v.runnable && !/ERROR/i.test(v.log)),
     silverProgram: state.meshVisible && state.silverProgramLinked,
     aggregate: state.aggregateExists && state.aggregateBound && state.aggregateUploaded,
+    flocData: state.flocDataPresent,
     sedimentTexture: state.sedimentExists && (!state.sedimentVisible || state.sedimentBound && state.sedimentUploaded),
     sedimentArrival: state.sedimentVisible === (state.depositedMass > 0),
     image: pixel.count > 100 && pixel.variance > 0,

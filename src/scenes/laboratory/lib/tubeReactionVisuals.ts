@@ -7,6 +7,9 @@ import { TubeSilverField } from "./tubeSilverField";
 import { BariumSedimentField, BariumSedimentGeometry } from "./tubeBariumSediment";
 import { SilverSedimentField, SilverSedimentGeometry } from "./tubeSilverSediment";
 import { makeSilverVolumeMaterial, makeLegacySilverVolumeMaterial } from "./tubeSilverVolumeMaterial";
+import { SilverFlocReconstruction } from "./night/render/silverFlocReconstruction";
+import { SILVER_AGGREGATE_OPTICS as silverAggregateOptics } from "./night/render/silverOpticsReference";
+import { nodeRadius } from "./night/stage1/flocSystem";
 import { silverStage, silverDiagnostic } from "./silverStage";
 import { TubeMixingField } from "./tubeMixingField";
 import { TubeImmersion } from "./tubeImmersion";
@@ -736,6 +739,23 @@ float relief = 0.84 + 0.16 * abs(dot(normal, normalize(vec3(0.4, 0.8, 0.3))));
   const silverVolume = stageSilverVolume
     ? makeSilverVolumeMaterial(radius, box.min.y, fieldHeight)
     : makeLegacySilverVolumeMaterial(radius, box.min.y);
+  let flocReconstruction: SilverFlocReconstruction | null = null;
+  let flocReconstructionField: TubeSilverField | null = null;
+  let flocReconstructionVersion = -1;
+  const aggregateDisplayTexture = (field: TubeSilverField | null) => {
+    if (!runtimeSilver || !field?.flocSystem?.nodes.length || !field.aggregateTexture) return field?.aggregateTexture ?? field?.denseTexture ?? null;
+    const m = field.mask;
+    if (!flocReconstruction || flocReconstruction.nx !== m.nx || flocReconstruction.ny !== m.ny || flocReconstruction.nz !== m.nz) {
+      flocReconstruction?.dispose(); flocReconstruction = new SilverFlocReconstruction(m.nx, m.ny, m.nz);
+      flocReconstructionVersion = -1;
+    }
+    if (flocReconstructionField !== field || flocReconstructionVersion !== field.aggregateTexture.version) {
+      flocReconstruction.update(field.aggregatePixels, field.flocSystem.nodes, field.flocSystem.links,
+        m.radius, m.bottom, m.height, mass => nodeRadius(mass, field.flocSystem.config));
+      flocReconstructionField = field; flocReconstructionVersion = field.aggregateTexture.version;
+    }
+    return flocReconstruction.texture;
+  };
   const bubbleMaterial = new THREE.MeshPhysicalMaterial({ color: "#e8f7fa", transparent: true, opacity: 0.85, roughness: 0.04, metalness: 0, depthWrite: false, depthTest: true, side: THREE.DoubleSide });
   const pourAirMaterial = new THREE.MeshBasicMaterial({ color: "#e8f7fa", transparent: true,
     opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
@@ -976,13 +996,13 @@ varying vec2 vSedimentUv;
 uniform sampler2D uSedimentHeight;
 ${shader.fragmentShader}`.replace("#include <clipping_planes_fragment>",
         `#include <clipping_planes_fragment>
-if (vSedimentThickness < 0.000018) discard;`)
+if (vSedimentThickness < ${silverAggregateOptics.sedimentAlphaStart}) discard;`)
         .replace("#include <opaque_fragment>", `
 float deposited = texture2D(uSedimentHeight, vSedimentUv).r;
 // The mesh already follows the bilinearly sampled deposit. Mixing its interpolated
 // vertex height with another fragment height creates a regular triangle pattern.
-diffuseColor.a *= smoothstep(0.000018, 0.00035, vSedimentThickness);
-diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(0.000018, 0.0007, deposited);
+diffuseColor.a *= smoothstep(${silverAggregateOptics.sedimentAlphaStart}, ${silverAggregateOptics.sedimentAlphaEnd}, vSedimentThickness);
+diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(${silverAggregateOptics.sedimentAlphaStart}, ${silverAggregateOptics.sedimentToneEnd}, deposited);
 #include <opaque_fragment>`);
     };
     bedMaterial.customProgramCacheKey = () => "silver-curd-bed-v3";
@@ -1128,7 +1148,7 @@ diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(0.000018, 0.0007, deposited);
     silverDenseMesh.name = "TubeSilverDenseField";
     silverDenseMesh.onBeforeRender = updateSilverVolumeCamera;
     silverVolume.material.uniforms.uDense.value = silverField?.denseTexture ?? null;
-    silverVolume.material.uniforms.uAggregate.value = (silverField as (TubeSilverField & { aggregateTexture?: THREE.Data3DTexture }) | null)?.aggregateTexture ?? silverField?.denseTexture ?? null;
+    silverVolume.material.uniforms.uAggregate.value = aggregateDisplayTexture(silverField);
     silverVolume.material.uniforms.uOverlap.value = silverField?.overlapTexture ?? null;
     silverVolume.material.uniforms.uDiag.value = silverDiagnostic() === "cells" ? 2 : silverDiagnostic() === "tracer" ? 1 : 0;
     silverVolume.material.uniforms.uHaze.value = (silverField as (TubeSilverField & { fineTexture?: THREE.Data3DTexture }) | null)?.fineTexture ?? silverField?.texture ?? null;
@@ -1176,7 +1196,7 @@ diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(0.000018, 0.0007, deposited);
         if (silverDenseMesh) {
           silverDenseMesh.visible = !!silverField;
           silverVolume.material.uniforms.uDense.value = silverField?.denseTexture ?? null;
-          silverVolume.material.uniforms.uAggregate.value = (silverField as (TubeSilverField & { aggregateTexture?: THREE.Data3DTexture }) | null)?.aggregateTexture ?? silverField?.denseTexture ?? null;
+          silverVolume.material.uniforms.uAggregate.value = aggregateDisplayTexture(silverField);
           silverVolume.material.uniforms.uOverlap.value = silverField?.overlapTexture ?? null;
           silverVolume.material.uniforms.uHaze.value = (silverField as (TubeSilverField & { fineTexture?: THREE.Data3DTexture }) | null)?.fineTexture ?? silverField?.texture ?? null;
           silverVolume.material.uniforms.uTint.value = silverField?.tintTexture ?? null;
@@ -1799,17 +1819,22 @@ diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(0.000018, 0.0007, deposited);
       // AgCl's deposit is made by the same settling flocs, never a smooth cap.
       const silverSolidMode = kind === "silver-chloride"
         ? (silverVolume.material.uniforms.uSolidMode?.value as number | undefined) ?? 0 : 0;
+      const sedimentDiagnosticTexture = typeof window === "undefined" ? undefined
+        : (window as Window & { __silverSedimentDiagnosticTexture?: THREE.DataTexture }).__silverSedimentDiagnosticTexture;
       bed.visible = !!bariumField && bariumField.sedimentMass > 0.02
-        || !!silverField && (stageOneSilver ? runtimeSilver && silverField.sedimentMass > 0 && (silverSolidMode === 0 || silverSolidMode === 3)
+        || !!silverField && (stageOneSilver ? runtimeSilver && (silverField.sedimentMass > 0 || !!sedimentDiagnosticTexture) && (silverSolidMode === 0 || silverSolidMode === 3)
           : silverField.sedimentMass > 0.0002);
       if (bed.visible && bariumField) bedGeometry.update(bariumField.sedimentField);
       if (bed.visible && silverField) {
         bed.geometry = silverBedGeometry;
-        const heightTexture = (silverField as TubeSilverField & { sedimentHeightTexture?: THREE.DataTexture }).sedimentHeightTexture;
+        const heightTexture = sedimentDiagnosticTexture ??
+          (silverField as TubeSilverField & { sedimentHeightTexture?: THREE.DataTexture }).sedimentHeightTexture;
         bedMaterial.userData.sedimentHeightTexture = heightTexture;
         if (bedMaterial.userData.sedimentShader) bedMaterial.userData.sedimentShader.uniforms.uSedimentHeight.value = heightTexture ?? silverSedimentFallbackTexture;
-        silverBedGeometry.update(silverField.sedimentField,
-          heightTexture);
+        const sedimentDiagnosticScale = typeof window === "undefined" ? 1
+          : Number((window as Window & { __silverSedimentDiagnosticScale?: number }).__silverSedimentDiagnosticScale ?? 1);
+        silverBedGeometry.update(silverField.sedimentField, heightTexture,
+          Number.isFinite(sedimentDiagnosticScale) ? THREE.MathUtils.clamp(sedimentDiagnosticScale, 1, 20) : 1);
       }
       let bedCurdCount = 0;
       if (bed.visible && silverField && !stageOneSilver && p > 0) {
@@ -2106,7 +2131,7 @@ diffuseColor.rgb *= 0.96 + 0.04 * smoothstep(0.000018, 0.0007, deposited);
         gasGeometry.dispose(); bedGeometry.dispose(); silverBedGeometry.dispose(); silverSedimentFallbackTexture.dispose(); coarseGeometry.dispose(); coarseMaterial.dispose(); bedMaterial.dispose(); bottomCausticGeometry.dispose(); standCausticGeometry.dispose();
         bottomCausticMaterial.dispose(); standCausticMaterial.dispose();
         curdGeometry.dispose(); silverDenseGeometry?.dispose();
-        white.dispose(); flocMaterial.dispose(); silverVolume.material.dispose(); bubbleMaterial.dispose(); pourAirMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
+        white.dispose(); flocMaterial.dispose(); silverVolume.material.dispose(); flocReconstruction?.dispose(); bubbleMaterial.dispose(); pourAirMaterial.dispose(); gasMaterial.dispose(); liquid?.dispose(); backdrop?.material.dispose();
         absorption?.dispose();
         dyedShellMaterial?.dispose();
         for (const mesh of [coarseParticles, flakes, silverCotton, silverLinks, silverBedCurds, bubbles, pourAir, attachedBubbles, gas, splash, condensate, foam]) mesh.dispose();

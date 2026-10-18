@@ -51,13 +51,13 @@ describe("Wave 17 aggregate optics and capture tools", () => {
     const silver=source.slice(source.indexOf('} else if (kind === "silver-chloride") {'),
       source.indexOf('bedMaterial.customProgramCacheKey = () => "silver-curd-bed-v3"'));
     expect(source).toContain('side: kind === "silver-chloride" ? THREE.FrontSide');
-    expect(silver).toContain('smoothstep(0.000018, 0.00035, vSedimentThickness)');
+    expect(silver).toContain('smoothstep(${silverAggregateOptics.sedimentAlphaStart}, ${silverAggregateOptics.sedimentAlphaEnd}, vSedimentThickness)');
     expect(silver).not.toMatch(/(?:sin|cos|fract|mod)\s*\(/);
     expect(silver).not.toMatch(/min\(vSedimentThickness, deposited\)/);
   });
 
   it("writes CPU reference panels for real state, including three backgrounds", () => {
-    const out="docs/night/wave17f2";mkdirSync(out,{recursive:true});
+    const out="docs/night/wave18f4/cpu17";mkdirSync(out,{recursive:true});
     for(const solid of [0,1,2,3] as const)for(const optics of [0,1,2,3] as const)
       writeFileSync(join(out,`state-9s-solid${solid}-optics${optics}.ppm`),renderSilverLayers(dump,optics,solid,48,110));
     for(const [name,bg] of [["black",0],["gray",.5],["lab",.85]] as const)

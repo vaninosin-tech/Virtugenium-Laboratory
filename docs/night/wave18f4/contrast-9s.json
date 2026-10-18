@@ -1,0 +1,24 @@
+{
+  "background": "CPU lab wall",
+  "wall": 0.85,
+  "brightestAggregate": {
+    "aggregate": 1.3857021217265482,
+    "fine": 0.9986060065232729,
+    "combined": 1.2366726386882887,
+    "alpha": 0.9953269787888872
+  },
+  "bestDisplayContrast": {
+    "aggregate": 0.9105457270324695,
+    "fine": 0.7928060599866954,
+    "combined": 0.8294524478932431,
+    "alpha": 0.30969078452887266,
+    "contrast": 0.1177396670457741
+  },
+  "bestCombinedContrast": {
+    "aggregate": 1.0389895785908863,
+    "fine": 0.9605401479562571,
+    "combined": 1.0990685118767152,
+    "contrast": 0.039459852043742916
+  },
+  "aggregateMinusWall": 0.15000000000000002
+}
