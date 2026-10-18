@@ -12,7 +12,8 @@ else {
   const code=await new Promise(resolve=>child.on("exit",resolve));if(code!==0)process.exit(code??1);
   trace=JSON.parse(await readFile(`${out}/${name}-run.json`,"utf8"));
 }
-{ const last=[...trace.samples].reverse().find(s=>s.A); if(last) trace={...trace,diag:last.A}; } // the recorder stores the diag selector string under diag; the checks need the runtime diagnostics
+// Older recordings used `diag` for the selector; current ones reserve it for runtime diagnostics.
+{ const last=[...(trace.samples??[])].reverse().find(s=>s.A); if(last && typeof trace.diag === "string") trace={...trace,diag:last.A}; }
 const result=checkRegression(trace,{strict:!process.env.TRACE||process.env.STRICT==="1"});
 await writeFile(`${out}/${name}-regression.json`,JSON.stringify(result,null,2));
 console.log(result);

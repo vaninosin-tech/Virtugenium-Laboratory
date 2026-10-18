@@ -80,7 +80,7 @@ try {
     dump.structure=spatialMetrics(dump.fields.fine,dump.fields.mask,dump.fields);
     dump.processes=processMetrics(dump.fields,prior); prior=dump.processes;
   }
-  await writeFile(`${out}/${name}-run.json`,JSON.stringify({ config:name, init:configuredInit, diag:process.env.DIAG??"", clickSim:click.clickSim,
+  await writeFile(`${out}/${name}-run.json`,JSON.stringify({ config:name, init:configuredInit, diagSelector:process.env.DIAG??"", clickSim:click.clickSim,
     receiverBefore:data.receiverBefore, sourceBefore:data.sourceBefore,firstChloride:data.firstChloride,firstSource:data.firstSource,
     events:data.events,
     samples:data.samples.map(s=>{const {fields,...rest}=s;return rest;}), dumps:data.dumps },null,2));

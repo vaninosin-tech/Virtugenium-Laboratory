@@ -1,7 +1,7 @@
 const near=(a,b,tolerance)=>Number.isFinite(a)&&Number.isFinite(b)&&Math.abs(a-b)<=tolerance;
 export function checkRegression(trace,{strict=false}={}) {
   const failures=[],unavailable=new Set(),check=(name,available,passed)=>{if(!available){const category=name.replace(/ \d+$/,""),fresh=!unavailable.has(category);unavailable.add(category);if(strict&&fresh)failures.push(`${category}: unavailable`);}else if(!passed)failures.push(name);};
-  const samples=trace.samples??trace.trace??[],click=trace.clickSim,diag=trace.diag??samples.at(-1)?.A??trace.dumps?.at(-1)?.A;
+  const samples=trace.samples??trace.trace??[],click=trace.clickSim,diag=(trace.diag && typeof trace.diag === "object" ? trace.diag : null)??[...samples].reverse().find(s=>s.A)?.A??trace.dumps?.at(-1)?.A;
   const valid=samples.filter(s=>(s.A?.valid??s.A?.events??s.A?.eventIds?.length??0)>0);
   const impactElapsed=diag?.firstValidImpactMs < click ? diag.firstValidImpactMs : diag?.firstValidImpactMs-click;
   const before=samples.filter(s=>s.sim<click+impactElapsed);
@@ -12,9 +12,11 @@ export function checkRegression(trace,{strict=false}={}) {
   check("ledger equals field delivery",Number.isFinite(diag?.deliveredMl)&&Number.isFinite(samples.at(-1)?.B?.fieldDelivered),near(diag?.deliveredMl,samples.at(-1)?.B?.fieldDelivered,1e-9));
   check("receiver volume increase",Number.isFinite(trace.receiverBefore)&&Number.isFinite(samples.at(-1)?.receiverMl),near(samples.at(-1)?.receiverMl-trace.receiverBefore,diag?.deliveredMl,1e-9));
   check("source volume decrease",Number.isFinite(trace.sourceBefore)&&Number.isFinite(samples.at(-1)?.sourceMl),near(trace.sourceBefore-samples.at(-1)?.sourceMl,1,1e-9));
-  check("no tracer before impact",before.length>0,before.every(s=>(s.B?.tracerTotal??s.B?.tracerSum??0)<=1e-12));
-  check("no chloride before impact",before.length>0,before.every(s=>(s.B?.clTotal??0)<=1e-12));
-  check("no product before impact",before.length>0,before.every(s=>(s.B?.extent??0)<=1e-12));
+  // The runtime creates its field at first valid delivery. An absent pre-impact field is an empty field.
+  const preImpactNote=before.some(s=>!s.B) ? "Field absent before first valid impact; treated as zero tracer, chloride and product." : null;
+  check("no tracer before impact",before.length>0,before.every(s=>!s.B || (s.B.tracerTotal??s.B.tracerSum??0)<=1e-12));
+  check("no chloride before impact",before.length>0,before.every(s=>!s.B || (s.B.clTotal??0)<=1e-12));
+  check("no product before impact",before.length>0,before.every(s=>!s.B || (s.B.extent??0)<=1e-12));
   const firstCl=trace.firstChloride;
   check("chloride onset timing",Number.isFinite(diag?.firstChlorideInsertionMs),near(diag?.firstChlorideInsertionMs,diag?.firstValidImpactMs,50));
   check("first chloride top rows",firstCl&&valid[0]?.B,firstCl?.cell?.[1]>=(valid[0]?.B?.wetTop??0)-2);
@@ -38,10 +40,13 @@ export function checkRegression(trace,{strict=false}={}) {
     const f=d.fields??d;let bad=0;
     for(let i=0;i<f.src.length;i++)if(f.src[i]>1e-12&&!(f.ag?.[i]+f.src[i]>0&&f.cl?.[i]+f.src[i]>0))bad++;
     check(`product source overlaps reactants ${k}`,!!f.ag&&!!f.cl,bad===0);
-    if(d.fields&&f.mask&&f.ag&&Number.isFinite(d.B?.extent)) {
-      let total=0;for(let i=0;i<f.ag.length;i++)if(f.mask[i])total+=f.ag[i];
-      check(`silver conservation dump ${k}`,true,near(total+d.B.extent,1.15,1e-9));
+    if(f.mask&&f.ag&&Number.isFinite(d.B?.extent??f.extent)) {
+      let agTotal=0,clTotal=0,dry=0;for(let i=0;i<f.ag.length;i++) {if(f.mask[i]) {agTotal+=f.ag[i];clTotal+=f.cl?.[i]??0;} else for(const a of [f.ag,f.cl,f.fine,f.tracer,f.src])if(a&&Math.abs(a[i])>1e-12)dry++;}
+      const extent=d.B?.extent??f.extent;
+      check(`silver conservation dump ${k}`,true,near(agTotal+extent,1.15,1e-9));
+      check(`chloride conservation dump ${k}`,!!f.cl&&Number.isFinite(d.B?.fieldDelivered??f.fieldDelivered),near(clTotal+extent,d.B?.fieldDelivered??f.fieldDelivered,1e-9));
+      check(`no concentration in dry cells ${k}`,true,dry===0);
     }
   }
-  return {ok:failures.length===0,failures,unavailable:[...unavailable],checked:samples.length,dumps:dumps.length};
+  return {ok:failures.length===0,failures,unavailable:[...unavailable],notes:preImpactNote?[preImpactNote]:[],checked:samples.length,dumps:dumps.length};
 }
