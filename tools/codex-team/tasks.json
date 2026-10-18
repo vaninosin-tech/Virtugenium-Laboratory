@@ -20,7 +20,11 @@
         "tests/_wave15/r1/",
         "tests/_wave15/captureExperiments.mjs",
         "tests/_wave15/compareExperiments.mjs",
-        "docs/night/wave15r1/"
+        "docs/night/wave15r1/",
+        "src/scenes/laboratory/lib/createCopperPile.ts",
+        "src/scenes/laboratory/lib/createCopperPile.test.ts",
+        "src/scenes/laboratory/lib/tubeCopperField.ts",
+        "src/scenes/laboratory/lib/tubeCopperField.test.ts"
       ]
     },
     {
