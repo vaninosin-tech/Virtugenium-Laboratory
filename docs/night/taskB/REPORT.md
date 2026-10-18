@@ -50,3 +50,54 @@ In the stage-3 field with `__silverAgg = 1` and the conservative scheme, 100 ste
 1. Decide the production pivot grid (bins, ratio) from a cost/accuracy trade-off using this harness; extend the validation to a finer grid and the shear kernel.
 2. Run `tests/night/wave19s1/sensitivityGrid.test.ts` with `__silverSectionScheme = 'conservative'` and the chosen grid, then review in the game.
 3. Only then consider making the scheme the default (the old results are pinned to `legacy`; `tests/night/wave19s2/sectionalPopulationBaseline.ts` holds a frozen copy of the old class).
+
+---
+
+# Part 2: convergence, shear kernel, cost, and the large-floc question (CPU)
+
+Scheme selection is unchanged: **`legacy` stays the default**. Added knobs for validation and trials: `options.bins` (pivots of the conservative grid; window `__silverSectionBins`) and `options.prune` (below). Tests: `tests/night/taskB/convergence.test.ts`.
+
+## Validation
+- **Nonnegative populations and mass:** in every run below mass drift is below 1e-12 relative and no bin goes negative.
+- **Sum kernel `K = B (m_i + m_j)`** (exact: `N = N0 exp(-x)`, `M2 = M2_0 exp(2x)`), x = 1.5, pivot mass ratio 2, 2^(1/2), 2^(1/4): number error 2.7%, 3.9%, 4.6%; **M2 error 148%, 38%, 18%** (converging, slowly). For a size-dependent kernel the number error does not shrink with the grid (the product allocation changes the kernel values); it stays below 5%.
+- **Production Brownian kernel**, primaries 0.2 micrometre, full-conversion solid fraction 1.3e-3, 22 s, steps 0.05 s, error against 208 sections:
+
+| sections | N/N0 | N error | M2/M2_0 | M2 error | mass above 1 um |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 13 | 0.1681 | 2.0% | 27.4 | 159% | 13.6% |
+| 26 | 0.1712 | 0.16% | 13.4 | 27% | 1.4% |
+| 52 | 0.1715 | 0.01% | 11.15 | 5.4% | 0.09% |
+| 104 | 0.1715 | 0.01% | 10.69 | 1.0% | 0.01% |
+| 208 (reference) | 0.1715 | | 10.58 | | 0.01% |
+
+  With resolved shear G = 2 s^-1 the pattern is the same (M2 error 174%, 28%, 5.6%, 1.0%). The **13-section result was an artefact**: it put 13.6% of the mass above 1 micrometre where the converged answer is 0.01%.
+- **Time step:** 52 sections, G = 2: N 0.1684 (dt 0.05) against 0.1689 (dt 0.0125). Densest pocket below: N 0.00070 against 0.00073, mass above 10 um 0.986 against 0.989.
+- **Pruning** (`prune = 1e-9` of the cell's solid, conservative scheme only; skipped classes keep their mass): N and M2 identical to five digits at 52 and 104 sections.
+
+## Cost of one collide call (every wet cell holds the 1 s / 11 s / 22 s distribution), ms per 50 ms step
+| sections | LOW 1740 cells | HIGH 4320 cells |
+| ---: | ---: | ---: |
+| 13 | 1.0 / 1.4 / 1.8 | 2.3 / 3.6 / 4.5 |
+| 26 | 1.3 / 2.3 / 2.7 | 3.2 / 5.9 / 6.8 |
+| 52 | 2.7 / 5.3 / 6.6 | 6.9 / 13.0 / 16.7 |
+| 104 | 6.2 / 13.6 / 17.8 | 22.3 / 34.9 / 46.7 |
+
+Without pruning the same loops cost 50 ms (52 sections, LOW) to 800 ms (104, HIGH) per step. **52 sections with pruning is the practical representation** (M2 within about 5% of the 208-section reference, 7 to 17 ms); 104 is too heavy for HIGH. Single-thread Node on the cloud machine; the Windows machine will differ. Advection and rendering are extra.
+
+## Do larger flocs form with a converged representation?
+Box with the production radius law (porous spheres below 1 micrometre, fractal dimension 1.9 above), sticking 1, no breakup, 104 sections, 22 s. "phi x" is the solid fraction as a multiple of the full-conversion mean of the whole tube. The CPU field's own strain rate is mean 0.1 to 0.7, 95th percentile 1 to 3.6, maximum 6 to 16 s^-1, and its largest cell value of AgCl is about 4.4 times that mean (Task A). Primaries 0.2 um:
+
+| | G = 2 | G = 10 | G = 50 |
+| --- | --- | --- | --- |
+| phi x1 | 0.02% above 1 um, largest 0.8 um | 0.2%, 0.9 um | 10%, 1.4 um |
+| phi x4 | 22%, 1.6 um | 48%, 2.7 um | 92% above 1 um, **76% above 100 um** (top class) |
+| phi x10 | 71%, 3.6 um | 92% above 1 um, 63% above 100 um (top class) | 93% above 100 um |
+| phi x50 | 83% above 100 um | 95% above 100 um | 99% above 100 um |
+
+Primary radius 0.05 um gives the same pattern with faster number loss (N/N0 0.003 against 0.17 at phi x1, G = 2). Sticking 0.3 and 0.05 only slow it (largest class 0.6 and 0.4 um at phi x1, G = 2; N/N0 0.41 and 0.81 for 0.2 um primaries).
+- **At the tube-average concentration and the model's resolved flow, a converged representation gives microscopic aggregates (largest about 1 micrometre) in 22 s: no cotton.** That is a property of the converged model, not of the earlier unconverged one, and it says nothing against a coherent cloud of microscopic particles being optically milky.
+- Large flocs **do** appear in this model once the local solid fraction is about 4 times the mean together with a strain rate near 50 s^-1, or about 10 times the mean at 10 s^-1. These are upper bounds: no breakup (flocs that size would break at such shear), sticking 1, and the top class (1.76 mm) collects everything beyond it. The CPU flow field does not reach 50 s^-1; the real stream and sub-grid turbulence might. So large flocs are not shown impossible; they depend on local concentration and shear that the present flow resolution does not supply.
+
+## Still open
+- Making the scheme (and 52 sections) the default: needs the game comparison and a rerun of the wave 19 sensitivity grid on the new scheme. The field ledger holds for 100 steps with 13 and with 52 sections (`sectionalValidation.test.ts`).
+- Breakup, local shear from the jet, and the interaction with floc promotion (nodes) and sediment were not validated.
