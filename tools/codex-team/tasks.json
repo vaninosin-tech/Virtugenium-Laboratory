@@ -3,45 +3,33 @@
   "nodeModulesFrom": "D:/Claude/virtugenium-lab-transfer/virtugenium-lab-transfer/node_modules",
   "jobs": [
     {
-      "id": "rone",
-      "prompt": "tools/codex-team/tasks/141-r1.md",
+      "id": "fone",
+      "prompt": "tools/codex-team/tasks/151-f1.md",
       "owns": [
-        "src/scenes/laboratory/lib/tubeBariumField.ts",
-        "src/scenes/laboratory/lib/tubeBariumField.test.ts",
-        "src/scenes/laboratory/lib/tubeBariumSediment.ts",
-        "src/scenes/laboratory/lib/tubePermanganateField.ts",
-        "src/scenes/laboratory/lib/tubePermanganateField.test.ts",
-        "src/scenes/laboratory/lib/tubeNOBubbles.ts",
-        "src/scenes/laboratory/lib/tubeMixingField.ts",
-        "src/scenes/laboratory/lib/testTubeContents.ts",
-        "src/scenes/laboratory/lib/tubeReactionVisuals.ts",
-        "tests/tubeReactionVisuals.test.ts",
-        "tests/night/wave15r1/",
-        "tests/_wave15/r1/",
-        "tests/_wave15/captureExperiments.mjs",
-        "tests/_wave15/compareExperiments.mjs",
-        "docs/night/wave15r1/",
-        "src/scenes/laboratory/lib/createCopperPile.ts",
-        "src/scenes/laboratory/lib/createCopperPile.test.ts",
-        "src/scenes/laboratory/lib/tubeCopperField.ts",
-        "src/scenes/laboratory/lib/tubeCopperField.test.ts"
+        "src/scenes/laboratory/lib/tubeSilverField.ts",
+        "src/scenes/laboratory/lib/tubeSilverField.test.ts",
+        "src/scenes/laboratory/lib/night/stage1/",
+        "src/scenes/laboratory/lib/silverStage.ts",
+        "src/scenes/laboratory/lib/tubePrecipitationPhysics.ts",
+        "src/scenes/laboratory/lib/tubeSilverSediment.ts",
+        "tests/night/wave3flocs/",
+        "tests/night/wave16f1/",
+        "docs/night/wave16f1/",
+        "docs/night/wave16shared/"
       ]
     },
     {
-      "id": "rtwo",
-      "prompt": "tools/codex-team/tasks/142-r2.md",
+      "id": "ftwo",
+      "prompt": "tools/codex-team/tasks/152-f2.md",
       "owns": [
-        "tests/_wave15/baselineRecord.mjs",
-        "tests/_wave15/buildComparison.mjs",
-        "tests/_wave15/runBaseline.mjs",
-        "tests/_wave13/regressionChecks.mjs",
-        "tests/_wave13/regressionAB.mjs",
-        "tests/_wave13/recordRun.mjs",
-        "tests/_wave13/analysis.mjs",
-        "tests/night/wave13c8/",
-        "tests/night/wave15r2/",
-        "docs/night/wave15r2/",
-        "src/scenes/laboratory/ui/DiagnosticTools.tsx"
+        "src/scenes/laboratory/lib/tubeSilverVolumeMaterial.ts",
+        "src/scenes/laboratory/lib/tubeSilverSediment.ts",
+        "src/scenes/laboratory/lib/tubeReactionVisuals.ts",
+        "tests/tubeReactionVisuals.test.ts",
+        "src/scenes/laboratory/lib/night/render/",
+        "tests/night/wave16f2/",
+        "tests/_wave16/",
+        "docs/night/wave16f2/"
       ]
     }
   ]
