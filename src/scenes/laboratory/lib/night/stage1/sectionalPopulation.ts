@@ -101,11 +101,17 @@ export class SectionalPopulation {
         const i = m.active[a], x = i % m.nx, y = Math.floor(i / m.nx) % m.ny, z = Math.floor(i / strideZ);
         const original = mass[i]; if (original <= 0) continue;
         let out = 0;
-        const faces = [x > 0 ? i - 1 : -1, x + 1 < m.nx ? i + 1 : -1,
-          y > 0 ? i - m.nx : -1, y + 1 < m.ny ? i + m.nx : -1,
-          z > 0 ? i - strideZ : -1, z + 1 < m.nz ? i + strideZ : -1];
         for (let side = 0; side < 6; side++) {
-          const j = faces[side]; if (j < 0 || !m.data[j]) continue;
+          let j: number;
+          switch (side) {
+            case 0: j = x > 0 ? i - 1 : -1; break;
+            case 1: j = x + 1 < m.nx ? i + 1 : -1; break;
+            case 2: j = y > 0 ? i - m.nx : -1; break;
+            case 3: j = y + 1 < m.ny ? i + m.nx : -1; break;
+            case 4: j = z > 0 ? i - strideZ : -1; break;
+            default: j = z + 1 < m.nz ? i + strideZ : -1;
+          }
+          if (j < 0 || !m.data[j]) continue;
           const axis = side >> 1, sign = side % 2 ? 1 : -1;
           const v = 0.5 * (flow[3 * i + axis] + flow[3 * j + axis]) + (axis === 1 ? slip : 0);
           const share = Math.max(0, sign * v) * dt / (axis === 0 ? dx : axis === 1 ? dy : dz);
