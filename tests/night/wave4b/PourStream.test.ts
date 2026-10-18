@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
+import { tubeVessel } from "../../../src/scenes/laboratory/lib/vesselGeometry";
 import { configureSilverStream, isStageOneSilverPour, shouldDrawStream, silverStreamEnd, streamGeometry, streamMaterial } from "../../../src/scenes/laboratory/ui/PourStream";
 
 describe("stage-one silver stream", () => {
@@ -7,7 +8,8 @@ describe("stage-one silver stream", () => {
     const root = new THREE.Matrix4().makeTranslation(0, 0.2, 0);
     const mouth = new THREE.Vector3(0, 0.35, 0);
     const end = silverStreamEnd(mouth, root, 2.5);
-    expect(end.y).toBeCloseTo(0.251, 3);
+    // Wave 14: the surface is the liquid height of 2.5 ml in the real 7 mm bore (18.574 mm), not the old 55 mm calibration.
+    expect(end.y).toBeCloseTo(0.2 + tubeVessel.heightFromVolume(2.5), 6);
     expect(end.y).toBeLessThan(mouth.y - 0.026);
     expect(shouldDrawStream(1, 0.12, true)).toBe(true);
     expect(shouldDrawStream(1, 0.12, false)).toBe(false);

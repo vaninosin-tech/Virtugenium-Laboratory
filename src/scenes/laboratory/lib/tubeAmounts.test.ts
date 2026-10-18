@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { deliver, resetTubeAmounts, seedTubeAmounts, syncBariumExtent,
   syncCopperProgress, syncPermanganateExtent, tubeAmount, tubeVisualFill } from "./tubeAmounts";
 import { pouredMl } from "./tubePourImpact";
+import { tubeVessel } from "./vesselGeometry";
 
 beforeEach(resetTubeAmounts);
 
@@ -25,8 +26,9 @@ describe("tube amounts", () => {
       expect(fill).toBeGreaterThanOrEqual(0);
       expect(fill).toBeLessThanOrEqual(1);
     }
-    expect(tubeVisualFill(2.5)).toBe(1);
-    expect(tubeVisualFill(3.5)).toBe(1);
+    // Wave 14: the visible fill is the liquid height in the real 7 mm bore over the 55 mm authored body, not the 2.5 ml calibration.
+    expect(tubeVisualFill(2.5)).toBeCloseTo(tubeVessel.heightFromVolume(2.5) / tubeVessel.cavityHeight, 12);
+    expect(tubeVisualFill(3.5)).toBeCloseTo(tubeVessel.heightFromVolume(3.5) / tubeVessel.cavityHeight, 12);
   });
   it("admits one fixed portion progressively and stops at 5 ml", () => {
     seedTubeAmounts("tube", ["bacl2"]);

@@ -242,9 +242,9 @@ describe('C6 conservative subgrid mixing', () => {
       const a = replay('off', undefined, 'LOW', false);
       const b = replay('off', false, 'LOW', false);
       expect(a.rows).toEqual(b.rows.map((r, i) => ({ ...r, stepMs: a.rows[i].stepMs })));
-      expect(a.rows[0].extent).toBeCloseTo(.015249504567502428, 12);
-      expect(a.rows[179].extent).toBeCloseTo(.25763636208322427, 12);
-      expect(a.rows[279].extent).toBeCloseTo(.3245663589282999, 12);
+      expect(a.rows[0].extent).toBeCloseTo(0.018406326453354584, 12) /* wave 14: re-pinned for the corrected 7 mm geometry */;
+      expect(a.rows[179].extent).toBeCloseTo(0.7979501906316301, 12) /* wave 14: corrected geometry */;
+      expect(a.rows[279].extent).toBeCloseTo(0.919120639459964, 12);
     } finally { delete (globalThis as any).__silverAgg; delete (globalThis as any).__silverSubgrid; delete (globalThis as any).__silverJetModel; vi.unstubAllGlobals(); }
   }, 120000);
 

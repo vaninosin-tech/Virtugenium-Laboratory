@@ -166,7 +166,7 @@ describe("stage 3 delivery through the real ledger", () => {
   });
 
   // tubeSilverField.inject loses increments after the meniscus crosses a voxel boundary.
-  it.fails("stops delivery halfway while remaining local species can continue reacting", () => {
+  it("stops delivery halfway while remaining local species can continue reacting", () => {
     const h = new DeliveryHarness();
     for (let t = 0; t <= 850; t += DT) h.step(t, { conserve: true });
     const stopped = deliveredMl(ID, "nacl"), extent = h.field.extent;

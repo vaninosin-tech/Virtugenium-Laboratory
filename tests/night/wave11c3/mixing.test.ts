@@ -137,10 +137,10 @@ describe('stage 3 mixing diagnostics',()=>{
         expect(r.rows[0].sourceMaxRadiusMm).toBeLessThanOrEqual(3.01);
       }
       const baseline=results.find(r=>r.config.name==='mix1')!;
-      expect(baseline.rows[0].extent).toBeCloseTo(0.015249504567502428, 12);
-      expect(baseline.rows[179].extent).toBeCloseTo(0.25763636208322427, 12);
-      expect(baseline.rows[279].extent).toBeCloseTo(0.3245663589282999, 12);
-      expect(baseline.rows[0].sourceCentroid[0]).toBeCloseTo(0.005764460955325063, 12);
+      expect(baseline.rows[0].extent).toBeCloseTo(0.018406326453354584, 12) /* wave 14: re-pinned for the corrected 7 mm geometry (more wet rows at the same volume change the first-step formation) */;
+      expect(baseline.rows[179].extent).toBeCloseTo(0.7979501906316301, 12) /* wave 14: corrected geometry (liquid 7-14 mm deep instead of 20-38 mm): the same delivery now reacts far more */;
+      expect(baseline.rows[279].extent).toBeCloseTo(0.919120639459964, 12);
+      expect(baseline.rows[0].sourceCentroid[0]).toBeCloseTo(0.00582363370720687, 12);
       writeFileSync(`${output}/summary.json`,JSON.stringify(results.map(({rows,...rest})=>({...rest,
         samples:[rows[0],rows[9],rows[19],rows[49],rows[79],rows[119],rows[179],rows[279]]})),null,2));
       expect(precipitatePair(1/1000,1/1000,1000,.0005,.05,0)).toBeGreaterThan(.0008);
