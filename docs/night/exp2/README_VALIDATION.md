@@ -15,3 +15,12 @@ Nothing in this branch has been seen in the real game. CPU slices and tables are
 6. Manual alternative: Windows Game Bar (Win+G) or OBS on the game window with the side camera, one take per configuration, same length.
 7. What to look at, in order: white AgCl forming; dense irregular regions; continued milkiness; stretching and deformation; narrowing and separation of regions; collective downward motion; bottom deposit; compaction of the deposit under additional loading. Send the videos, and the console lines `window.__silverDensity`, `window.__silverAgg`, `window.__silverDeposit` for each.
 8. Performance: run `node tests/_wave13/measureFpsPour.mjs` with `INIT` set to each configuration (median and p10 FPS, worst frame, solver peak); the CPU numbers in the reports are node timings on one core, not game numbers.
+
+## Acceptance gate A/B (what the script now writes)
+`node tests/_exp2/runValidation.mjs` (A and B, camera `game`, 60 s of simulation after the NaCl click, clock scale 0.5, so about 2 minutes of wall time per configuration plus the FPS runs). Per configuration, under `docs/night/exp2/validation/<name>/`:
+- `record/game/baseline.mp4` (continuous, frame times follow SIMULATION time), `record/game/frames/` (every captured frame), `trace.json` (in-page records with simulation and wall time).
+- `record/game/stills/t002s.jpg` ... `t060s.jpg` and `stills.json`: the captured frame nearest to 2, 5, 10, 20, 40, 60 s of simulation time after the click, with the actual simulation time of each (a missing time is reported, not invented).
+- `record/game/perf.json`: median FPS, p10 FPS, worst frame, frames over 50 and 100 ms for 0 to 10, 10 to 30, 30 to 60 s of simulation, and the flow-solver step cost (median, p99, max). These come from the recorded run (the screencast costs frames, so they are lower bounds).
+- `fps/`: three unrecorded pours from `measureFpsPour.mjs` (median FPS, p10, worst frame, solver peak) for the same flags.
+Check before judging: (1) the first stills show the tube from the side, horizontally, as in the accepted close-up (press Q in a normal game session to compare); (2) `window.__silverDensity` is `{model:'net'}` only for B and `window.__silverAgg` is 0 for both; (3) the AgNO3 volume in the tube before the pour is 2.5 mL. Send the two folders (or the `stills` and `perf.json` files plus the mp4s).
+These recordings show the existing rendered density and suspension; they say nothing about the MesoCloud rendering, which is not integrated.

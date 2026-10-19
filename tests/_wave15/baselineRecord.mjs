@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { stageMarkers } from "./comparisonCore.mjs";
@@ -45,6 +45,7 @@ for(const mode of modes){
           r.B={fineTotal:fine,occupiedFraction:occupied/(m.activeCount||1),occupiedDepthFraction:rows.size/m.ny,agTotal:ag,clTotal:cl,tracerTotal:tracer,extent:f.extent,fieldDelivered:f.delivered,wetTop,nx:m.nx,ny:m.ny,nz:m.nz,
             aggregateMass:f.denseMass??0,sedimentMass:f.sedimentField?.mass??0,aggregateCount:nodes.length,largestNodeMass:nodes.reduce((v,n)=>Math.max(v,n.mass),0),
             largestNodeRadiusMm:nodes.reduce((v,n)=>Math.max(v,radiusMm(n.mass)),0),meanNodeRadiusMm:nodes.length?nodes.reduce((v,n)=>v+radiusMm(n.mass),0)/nodes.length:0};}
+        if(f?.solver)r.S={stepMs:f.solver.lastStepMs,projMs:f.solver.lastProjectionMs};   // flow-solver step cost of the last field step
         run.trace.push(r);
         box.textContent=`sim ${sim.toFixed(0)} ms  elapsed ${run.clickSim===null?"pre-click":((sim-run.clickSim)/1000).toFixed(2)+" s"}\nA valid ${r.A.valid} delivered ${r.A.delivered.toFixed(3)}  B fine ${r.B?.fineTotal.toFixed(5)??"-"}\ncloud depth ${r.B?.occupiedDepthFraction.toFixed(2)??"-"}  stage ${r.A.valid?"impact":"before impact"}`;
         if(f&&run.clickSim!==null){const elapsed=sim-run.clickSim;for(const t of dumpAt)if(elapsed>=t&&!run.dumps.some(d=>d.t===t)){
@@ -87,6 +88,28 @@ for(const mode of modes){
     for(let i=0;i<timeline.length;i++){lines.push(`file '${timeline[i].fn}'`);if(i+1<timeline.length)lines.push(`duration ${Math.max(.01,(timeline[i+1].sim-timeline[i].sim)/1000)}`);}
     lines.push(`file '${timeline.at(-1).fn}'`);
     await writeFile(join(out,"frames","simulation.ffconcat"),lines.join("\n"));
+    // Representative stills at fixed elapsed SIMULATION times since the NaCl click, and frame-rate statistics from the in-page trace.
+    {
+      const stillsAt=JSON.parse(process.env.STILLS??"[2000,5000,10000,20000,40000,60000]");
+      await mkdir(join(out,"stills"),{recursive:true});const listing=[];
+      for(const t of stillsAt){
+        const target=data.clickSim+t;
+        if(!timeline.length||timeline.at(-1).sim<target){listing.push({requestedMs:t,missing:"the recording ended before this simulation time"});continue;}
+        const best=timeline.reduce((b,f)=>Math.abs(f.sim-target)<Math.abs(b.sim-target)?f:b);
+        await copyFile(join(out,"frames",best.fn),join(out,"stills",`t${String(t/1000).padStart(3,"0")}s.jpg`));
+        listing.push({requestedMs:t,actualSimElapsedMs:Math.round(best.sim-data.clickSim),frame:best.fn});
+      }
+      await writeFile(join(out,"stills","stills.json"),JSON.stringify(listing,null,1));
+      const raf=data.trace.filter(r=>r.kind==="raf").sort((a,b)=>a.perf-b.perf);
+      const stats=rows=>{const dts=[];for(let i=1;i<rows.length;i++)dts.push(rows[i].perf-rows[i-1].perf);if(!dts.length)return null;const fps=dts.map(d=>1000/d).sort((a,b)=>a-b),sorted=[...dts].sort((a,b)=>a-b);
+        return {frames:dts.length,medianFps:fps[Math.floor(fps.length/2)],p10Fps:fps[Math.floor(fps.length*0.1)],worstFrameMs:sorted.at(-1),over50ms:dts.filter(d=>d>50).length,over100ms:dts.filter(d=>d>100).length};};
+      const windows=[[0,10000],[10000,30000],[30000,60000],[0,Infinity]];
+      const steps=data.trace.filter(r=>r.S&&r.kind==="tick").map(r=>r.S.stepMs).filter(Number.isFinite).sort((a,b)=>a-b);
+      await writeFile(join(out,"perf.json"),JSON.stringify({camera:mode,clockScale:slow,
+        note:"requestAnimationFrame intervals in wall time while the page ran with the clock scale above and the screencast was recording (the recording costs frames: these are lower bounds; use tests/_wave13/measureFpsPour.mjs for the unrecorded figure).",
+        windows:windows.map(([a,b])=>({fromSimMsAfterClick:a,toSimMsAfterClick:b,...stats(raf.filter(r=>r.sim-data.clickSim>=a&&r.sim-data.clickSim<b))})),
+        flowSolverStep:{samples:steps.length,medianMs:steps[Math.floor(steps.length/2)],p99Ms:steps[Math.floor(steps.length*.99)],maxMs:steps.at(-1)}},null,1));
+    }
     const ffmpeg=process.env.FFMPEG??"C:/Users/Aiyrell/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-9.0.2-full_build/bin/ffmpeg.exe";
     const movie=spawnSync(ffmpeg,["-y","-v","error","-safe","0","-i","simulation.ffconcat","-fps_mode","vfr","-c:v","libx264","-pix_fmt","yuv420p",join(out,"baseline.mp4")],{cwd:join(out,"frames"),encoding:"utf8"});
     if(movie.error||movie.status!==0)throw new Error(`ffmpeg baseline: ${movie.error??movie.stderr}`);

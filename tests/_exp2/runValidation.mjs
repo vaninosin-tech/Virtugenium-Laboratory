@@ -32,7 +32,7 @@ for (const key of only) {
   console.log(`\n=== ${config.name} (INIT: ${config.init || "none"}) ===`);
   const started = Date.now();
   const result = spawnSync(process.execPath, ["tests/_wave15/baselineRecord.mjs"], { stdio: "inherit",
-    env: { ...process.env, OUT: join(out, "record"), BOTH: process.env.BOTH ?? "0", CAMERA: process.env.CAMERA ?? "game", INIT: config.init, URL: url, DURATION_MS: duration, SLOW: slow } });
+    env: { ...process.env, OUT: join(out, "record"), BOTH: process.env.BOTH ?? "0", CAMERA: process.env.CAMERA ?? "game", INIT: config.init, URL: url, DURATION_MS: duration, SLOW: slow, DUMPAT: process.env.DUMPAT ?? "[2000,5000,10000,20000,40000,60000]" } });
   if (process.env.FPS !== "0") {   // frame rate, worst frame and solver cost of the same pour (3 runs), same flags
     console.log(`--- ${config.name}: FPS (tests/_wave13/measureFpsPour.mjs)`);
     spawnSync(process.execPath, ["tests/_wave13/measureFpsPour.mjs"], { stdio: "inherit", env: { ...process.env, NAME: config.name, OUT: join(out, "fps"), RUNS: process.env.RUNS ?? "3", INIT: config.init, URL: url } });
