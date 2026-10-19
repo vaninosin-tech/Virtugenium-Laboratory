@@ -1,7 +1,7 @@
 export type EntityId = string;
 
-/** `sandbox` is TEMPORARY, for looking at the reactions — see `src/scenes/laboratory/sandbox/`. */
-export type AppMode = "training" | "classic" | "clean" | "sandbox";
+/** The sandbox mode was cut out (archive/sandbox/, docs/RESTORE_EXPERIMENTS_2_3_SANDBOX.md). */
+export type AppMode = "training" | "classic" | "clean";
 
 export type Screen =
   | "main-menu"

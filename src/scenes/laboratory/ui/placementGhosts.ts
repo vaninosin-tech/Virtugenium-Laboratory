@@ -1,6 +1,5 @@
 import * as THREE from "three";
 
-import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import { currentDropZone, getDragTargetState, useDragTargetStore, type DragTargetId } from "../lib/dragTargets";
 import { HAND_GHOST } from "../lib/handGhost";
 import { heldClampPose } from "../lib/heldClampPose";
@@ -232,8 +231,6 @@ function tableSpot(held: Extract<HeldItem, { kind: "tray" }>, out: THREE.Matrix4
 function hoodSpot(held: Extract<HeldItem, { kind: "tray" }>, out: THREE.Matrix4): THREE.Matrix4 | null {
   hoodMatrix(out);
   if (held.what === "bottle") {
-    // The sandbox lays its bottles out along the back wall instead.
-    if (useLaboratoryStore.getState().mode === "sandbox") return null;
     const [x, y, z] = hoodBottleLocal(useReagentStorageStore.getState().fumeHoodItems.length);
     return out.multiply(translation(x, y, z));
   }

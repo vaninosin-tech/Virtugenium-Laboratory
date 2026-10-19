@@ -3,7 +3,6 @@ import { useMemo } from "react";
 import * as THREE from "three";
 
 import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
-import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 import { TUBE_CLAMP_PIVOT, useBunsenStandScene } from "../lib/bunsenStandAssembly";
 import { EQUIPMENT, type Position3 } from "../lib/layout";
 import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
@@ -21,7 +20,7 @@ import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
 import { SpiritBurner } from "./SpiritBurner";
 import { StandStation } from "./StandStation";
 import { HOOD_AWAY_FROM_PLAYER, HOOD_LONE_LAMP_POSITION, HOOD_STAND_ROTATION_Y } from "./equipmentPlaces";
-import { HOOD_RACK_LOCAL, HOOD_STAND_LOCAL, HOOD_WORKTOP_Y, hoodBottleLocal } from "../lib/hoodLayout";
+import { HOOD_RACK_LOCAL, HOOD_STAND_LOCAL, hoodBottleLocal } from "../lib/hoodLayout";
 import { takeTargetEvents } from "./standTargetEvents";
 import { useHandStore } from "../lib/useHandStore";
 import { ArrivalFlight, GlassRim, PourMotion } from "./StandMotion";
@@ -41,7 +40,6 @@ const DEF = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
  * clips the sash or the side panels.
  */
 // The left part of the worktop is the carried tray's (VL-017) — see `hoodLayout.ts`.
-const WORKTOP_Y = HOOD_WORKTOP_Y;
 const RACK_LOCAL: Position3 = HOOD_RACK_LOCAL;
 const STAND_LOCAL: Position3 = HOOD_STAND_LOCAL;
 
@@ -83,21 +81,6 @@ function StandInFumeHood() {
 }
 
 /**
- * TEMP sandbox: all nine bottles along the back wall — see
- * `sandbox/setupSandbox.ts`. Split around the stand (hood-local X 0.18..0.42)
- * rather than one even row: a bottle standing behind the stand puts its
- * click hitbox in front of the stand's own and swallows the click that
- * should start heating.
- */
-const SANDBOX_BOTTLE_Z = -0.17;
-const SANDBOX_BOTTLE_X = [-0.58, -0.47, -0.36, -0.25, -0.14, -0.03, 0.47, 0.575, 0.68];
-const sandboxBottlePosition = (index: number): Position3 => [
-  SANDBOX_BOTTLE_X[index] ?? 0.55,
-  WORKTOP_Y,
-  SANDBOX_BOTTLE_Z,
-];
-
-/**
  * Everything the player carried in through «Перенести», rendered inside the
  * fume hood. Mounted as its own group at the hood's furniture transform
  * rather than as a child of `FumeHood`'s cloned GLB, so moving furniture in
@@ -113,7 +96,6 @@ export function FumeHoodWorkArea() {
   const hoodItems = useReagentStorageStore((state) => state.fumeHoodItems);
   const standInHood = useBunsenStandStorageStore((state) => state.onFumeHood);
   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
-  const sandbox = useLaboratoryStore((state) => state.mode === "sandbox");
   const crackZone = useHeatingStore((state) => (state.phase === "cracked" ? state.crackZone : null));
   // A tube heated in the hand is drawn over the lamp meanwhile (`HandHeatRig`, VL-020).
   const heatedInHandId = useHeatingStore((state) =>
@@ -211,11 +193,7 @@ export function FumeHoodWorkArea() {
               instanceId={item.instanceId}
               pourPointHeight={POUR_POINT_HEIGHT[reagent.containerType]}
               pourSource={{ reagentId: item.reagentId, location: "fumeHood" }}
-              position={
-                sandbox
-                  ? sandboxBottlePosition(index)
-                  : hoodBottleLocal(index)
-              }
+              position={hoodBottleLocal(index)}
             >
               <ReagentStaticDisplay
                 // Without `hoverable` the display renders no hitbox, and every

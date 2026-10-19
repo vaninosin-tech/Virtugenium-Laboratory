@@ -39,7 +39,6 @@ const MODE_LABELS: Record<AppMode, string> = {
   training: "Обучение",
   classic: "Классический",
   clean: "Чистый эксперимент",
-  sandbox: "Песочница",
 };
 
 /** Each stage stays on screen at least this long, so cached assets don't flash the whole list by in one frame. */

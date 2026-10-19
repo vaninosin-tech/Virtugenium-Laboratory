@@ -52,14 +52,6 @@ describe("useLaboratoryStore", () => {
     expect(useLaboratoryStore.getState().tabletOpen).toBe(false);
   });
 
-  it("в песочнице планшет закрывается и без опыта", () => {
-    useLaboratoryStore.setState({ mode: "sandbox", selectedExperimentId: null });
-    useLaboratoryStore.getState().openTablet();
-    useLaboratoryStore.getState().closeTablet();
-    expect(useLaboratoryStore.getState().tabletOpen).toBe(false);
-    useLaboratoryStore.setState({ mode: "training" });
-  });
-
   it("добавляет предметы в инвентарь без повторов и удаляет их", () => {
     const actions = useLaboratoryStore.getState();
 

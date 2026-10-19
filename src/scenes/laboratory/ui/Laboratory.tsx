@@ -37,8 +37,6 @@ import { ControlsHint, HeldItemHint } from "./HandHints";
 import { PourMotion } from "./StandMotion";
 import { POUR_POINT_HEIGHT, standBusy } from "../lib/useStandMotionStore";
 import { SceneStepAutoAdvance } from "../../../features/tablet/lib/SceneStepAutoAdvance";
-import { SandboxPanel } from "../sandbox/SandboxPanel";
-import { setupSandbox, teardownSandbox } from "../sandbox/setupSandbox";
 import { LabRoom } from "./LabRoom";
 import { LabTrayInstance } from "./LabTrayInstance";
 import { LightingRuntime } from "./LightingRuntime";
@@ -572,14 +570,9 @@ export function Laboratory() {
     // texture draw on this same promise for correctness — this call is
     // purely a speed optimization, not the guarantee.
     void loadCabinetFonts();
-    const sandbox = useLaboratoryStore.getState().mode === "sandbox";
-    if (sandbox) setupSandbox();
     // The lab starts with the tablet open on the experiment list; it cannot
     // be closed until one is chosen (`closeTablet`).
-    else if (!useLaboratoryStore.getState().selectedExperimentId) useLaboratoryStore.getState().openTablet("tasks");
-    return () => {
-      if (sandbox) teardownSandbox();
-    };
+    if (!useLaboratoryStore.getState().selectedExperimentId) useLaboratoryStore.getState().openTablet("tasks");
     // Entering the scene always starts from the general overview, regardless
     // of where a previous visit left off — run once on mount only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -725,7 +718,6 @@ export function Laboratory() {
       <HeldItemHint />
       <ControlsHint />
       <LabNoticeOverlay />
-      <SandboxPanel />
       <SceneStepAutoAdvance />
       {/* The tube close-up has its own way out («Отойти» / «Отойти от
           штатива»), and these buttons sat right over the bottom of the tube,

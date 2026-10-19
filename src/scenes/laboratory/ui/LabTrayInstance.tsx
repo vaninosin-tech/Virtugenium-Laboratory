@@ -39,15 +39,13 @@ const TRAY_RACK_FOOTPRINT = {
   maxZ: TRAY_RACK_ANCHOR.z + 0.185,
 } as const;
 import { hoodTrayWorldPose } from "../lib/hoodLayout";
-import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
 
 /**
  * Whether the tray goes along to this zone: to every cabinet (held up), and
  * to the fume hood (set down on its worktop, `hoodTrayWorldPose`) loaded or
- * not (VL-017) — but not in the sandbox, whose hood is laid out without it.
+ * not (VL-017).
  */
-const trayHeldAt = (id: HotspotTargetId | null): boolean =>
-  isTrayHeldEligible(id) && !(id === "fume-hood" && useLaboratoryStore.getState().mode === "sandbox");
+const trayHeldAt = (id: HotspotTargetId | null): boolean => isTrayHeldEligible(id);
 import { useStandHintStore } from "../lib/useStandHintStore";
 
 const MODEL_PATH = "/assets/models/LabTray_Metal.glb";
