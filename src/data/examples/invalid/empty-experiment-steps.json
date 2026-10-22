@@ -1,0 +1,85 @@
+{
+  "version": "1.0.0",
+  "items": [
+    {
+      "id": "reagent-copper-sulfate",
+      "category": "reagent",
+      "name": "Сульфат меди(II)",
+      "description": "Водный раствор сульфата меди(II)",
+      "assetId": "asset-reagent-bottle",
+      "formula": "CuSO4",
+      "state": "aqueous",
+      "color": "blue",
+      "transparent": true,
+      "hazardIds": [
+        "harmful"
+      ]
+    },
+    {
+      "id": "reagent-sodium-hydroxide",
+      "category": "reagent",
+      "name": "Гидроксид натрия",
+      "description": "Водный раствор гидроксида натрия",
+      "assetId": "asset-reagent-bottle",
+      "formula": "NaOH",
+      "state": "aqueous",
+      "color": "colorless",
+      "transparent": true,
+      "hazardIds": [
+        "corrosive"
+      ]
+    },
+    {
+      "id": "glassware-test-tube",
+      "category": "glassware",
+      "name": "Пробирка",
+      "description": "Стеклянная лабораторная пробирка",
+      "assetId": "asset-test-tube",
+      "kind": "test-tube",
+      "capacityMl": 20
+    },
+    {
+      "id": "equipment-holder",
+      "category": "equipment",
+      "name": "Держатель пробирки",
+      "description": "Держатель для безопасной работы с пробиркой",
+      "assetId": "asset-holder",
+      "kind": "holder",
+      "attachmentPointIds": [
+        "grip",
+        "test-tube-slot"
+      ]
+    },
+    {
+      "id": "safety-goggles",
+      "category": "safety",
+      "name": "Защитные очки",
+      "description": "Средство индивидуальной защиты глаз",
+      "assetId": "asset-goggles",
+      "kind": "goggles"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "experiment-copper-hydroxide",
+      "title": "Получение гидроксида меди(II)",
+      "description": "Получение осадка гидроксида меди(II)",
+      "requiredItemIds": [
+        "reagent-copper-sulfate",
+        "reagent-sodium-hydroxide",
+        "glassware-test-tube",
+        "safety-goggles"
+      ],
+      "steps": [],
+      "equations": [
+        {
+          "id": "equation-copper-hydroxide",
+          "molecular": "CuSO4 + 2NaOH -> Cu(OH)2 + Na2SO4",
+          "completeIonic": "Cu2+ + SO4^2- + 2Na+ + 2OH- -> Cu(OH)2 + 2Na+ + SO4^2-",
+          "netIonic": "Cu2+ + 2OH- -> Cu(OH)2"
+        }
+      ],
+      "maximumScore": 6
+    }
+  ]
+}

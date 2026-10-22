@@ -1,0 +1,130 @@
+/* Smooth open / close / section changes for the tablet UI */
+
+@keyframes tablet-overlay-in {
+  from {
+    opacity: 0.72;
+    transform: translate(calc(-100vw - 24px), -50%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+@keyframes tablet-overlay-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+  to {
+    opacity: 0;
+    transform: translate(calc(-100vw - 24px), -50%);
+  }
+}
+
+@keyframes tablet-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tablet-dialog-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tablet-overlay-shell {
+  transform-origin: center center;
+  will-change: transform, opacity;
+}
+
+.tablet-overlay-shell.is-entering {
+  animation: tablet-overlay-in 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.tablet-overlay-shell.is-exiting {
+  animation: tablet-overlay-out 0.48s cubic-bezier(0.4, 0, 0.2, 1) both;
+  pointer-events: none;
+}
+
+.tablet-section-pane {
+  animation: tablet-section-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@keyframes tablet-stage-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.tablet-stage-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: tablet-stage-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.tablet-task-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: tablet-stage-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.tablet-dialog-fade {
+  animation: tablet-dialog-in 0.22s ease-out both;
+}
+
+@keyframes tablet-score-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tablet-score-appear {
+  animation: tablet-score-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tablet-overlay-shell.is-entering,
+  .tablet-overlay-shell.is-exiting,
+  .tablet-section-pane,
+  .tablet-stage-pane,
+  .tablet-task-pane,
+  .tablet-dialog-fade,
+  .tablet-score-appear,
+  .tablet-holo-root,
+  .tablet-holo-root.is-exiting,
+  .tablet-holo-root.is-entering,
+  .tablet-holo-goal {
+    animation: none !important;
+    transition: none !important;
+  }
+}

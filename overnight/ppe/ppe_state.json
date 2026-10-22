@@ -1,0 +1,49 @@
+{
+  "iteration": 1,
+  "best_iteration": 1,
+  "best_total_score": 96,
+  "visual_score": 36,
+  "visual_max": 40,
+  "top_visual_defects": [
+    "interior wall material reads close in tone to body material under studio lighting",
+    "header text is small/subtle at QA render resolution"
+  ],
+  "total_score": 96,
+  "final_status": "PASS",
+  "glb_exported": true,
+  "glb_path": "D:\\virtugenium-lab\\public\\assets\\models\\PPECabinet.glb",
+  "deterministic_score": 60,
+  "deterministic_max": 60,
+  "deterministic_breakdown": {
+    "dimensions": 12,
+    "required_hierarchy": 8,
+    "door_hinge_handle": 12,
+    "top_storage": 8,
+    "coat_rail": 5,
+    "no_ppe_props": 8,
+    "plinth": 3,
+    "geometry_budget": 4
+  },
+  "deterministic_failures": [],
+  "critical_failures": 0,
+  "ppe_prop_count": 0,
+  "details": {
+    "dimensions": {
+      "width": 0.699999988079071,
+      "depth": 0.5060000419616699,
+      "height": 2.0,
+      "pass": true
+    },
+    "missing_nodes": [],
+    "hinge_side": "left",
+    "handle_side": "right",
+    "door_motion_test": "ok",
+    "top_storage": "ok",
+    "coat_rail_z": 1.4500000476837158,
+    "ppe_prop_hits": [],
+    "ppe_prop_count": 0,
+    "plinth_floor_z": 0.0,
+    "triangle_count": 376,
+    "material_count": 6
+  }
+}

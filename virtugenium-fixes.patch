@@ -1,0 +1,2132 @@
+diff --git b/src/scenes/laboratory/lib/autoCarry.test.ts b/src/scenes/laboratory/lib/autoCarry.test.ts
+new file mode 100644
+index 0000000..6cf31ed
+--- /dev/null
++++ b/src/scenes/laboratory/lib/autoCarry.test.ts
+@@ -0,0 +1,59 @@
++import { beforeEach, describe, expect, it } from "vitest";
++
++import { autoCarryStep } from "./autoCarry";
++import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
++import { useBurnerStore } from "./useBurnerStore";
++import { useHeatingStore } from "./useHeatingStore";
++
++const standAt = (onTray: boolean, onWorkbench: boolean, onFumeHood = false) =>
++  useBunsenStandStorageStore.setState({ onTray, onWorkbench, onFumeHood, attachedTubeSlotIndex: null });
++
++beforeEach(() => {
++  standAt(true, false);
++  useBurnerStore.setState({ place: "tray", phase: "capped", lit: false });
++});
++
++describe("the stand and the lamp carry themselves", () => {
++  it("set themselves down where the player arrives", () => {
++    autoCarryStep(null, "workbench");
++    expect(useBunsenStandStorageStore.getState()).toMatchObject({ onTray: false, onWorkbench: true, onFumeHood: false });
++    expect(useBurnerStore.getState().place).toBe("workbench");
++  });
++
++  it("do the same in the hood", () => {
++    autoCarryStep(null, "fumeHood");
++    expect(useBunsenStandStorageStore.getState()).toMatchObject({ onTray: false, onWorkbench: false, onFumeHood: true });
++    expect(useBurnerStore.getState().place).toBe("fumeHood");
++  });
++
++  it("go back on the tray when the player leaves", () => {
++    standAt(false, true);
++    useBurnerStore.setState({ place: "workbench" });
++    autoCarryStep("workbench", null);
++    expect(useBunsenStandStorageStore.getState().onTray).toBe(true);
++    expect(useBurnerStore.getState().place).toBe("tray");
++  });
++
++  it("leave behind a stand with a tube in its clamp", () => {
++    standAt(false, true);
++    useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
++    autoCarryStep("workbench", null);
++    expect(useBunsenStandStorageStore.getState()).toMatchObject({ onTray: false, onWorkbench: true });
++  });
++
++  it("leave behind the lamp while it is heated over", () => {
++    useBurnerStore.setState({ place: "workbench", phase: "lit", lit: true });
++    useHeatingStore.setState({ active: true });
++    autoCarryStep("workbench", null);
++    expect(useBurnerStore.getState()).toMatchObject({ place: "workbench", lit: true });
++    useHeatingStore.setState({ active: false });
++  });
++
++  it("take only what stands at the place being left", () => {
++    standAt(false, false, true);
++    useBurnerStore.setState({ place: "fumeHood" });
++    autoCarryStep("workbench", null);
++    expect(useBunsenStandStorageStore.getState().onFumeHood).toBe(true);
++    expect(useBurnerStore.getState().place).toBe("fumeHood");
++  });
++});
+diff --git b/src/scenes/laboratory/lib/autoCarry.ts b/src/scenes/laboratory/lib/autoCarry.ts
+new file mode 100644
+index 0000000..dce9d22
+--- /dev/null
++++ b/src/scenes/laboratory/lib/autoCarry.ts
+@@ -0,0 +1,26 @@
++import { lampFromTray, lampToTray, standFromTray, standToTray, type CarryPlace } from "./trayCarry";
++import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
++import { useBurnerStore } from "./useBurnerStore";
++import { useHeatingStore } from "./useHeatingStore";
++
++/**
++ * The stand and the spirit lamp carry themselves: coming to the table or the
++ * hood sets them down there off the tray, leaving takes them back onto it.
++ * Bottles and tubes stay the player's to take (VL-017/018).
++ *
++ * Leaving leaves behind whatever is in use — a stand with a tube in its
++ * clamp, a lamp while it is heated over — rather than refusing with a notice
++ * on every walk away.
++ */
++export function autoCarryStep(left: CarryPlace | null, arrived: CarryPlace | null): void {
++  if (left) {
++    const stand = useBunsenStandStorageStore.getState();
++    const standHere = left === "workbench" ? stand.onWorkbench : stand.onFumeHood;
++    if (standHere && stand.attachedTubeSlotIndex === null) standToTray(left);
++    if (useBurnerStore.getState().place === left && !useHeatingStore.getState().active) lampToTray(left);
++  }
++  if (arrived) {
++    if (useBunsenStandStorageStore.getState().onTray) standFromTray(arrived);
++    if (useBurnerStore.getState().place === "tray") lampFromTray(arrived);
++  }
++}
+diff --git b/src/scenes/laboratory/lib/autoCarryRuntime.ts b/src/scenes/laboratory/lib/autoCarryRuntime.ts
+new file mode 100644
+index 0000000..e851163
+--- /dev/null
++++ b/src/scenes/laboratory/lib/autoCarryRuntime.ts
+@@ -0,0 +1,16 @@
++import { autoCarryStep } from "./autoCarry";
++import { trayUnloadPlace } from "./trayUnloadPlace";
++import { useSceneInteractionStore } from "./useSceneInteractionStore";
++
++/** Watches where the player stands and moves the stand and lamp on every change; returns the unsubscribe. */
++export function startAutoCarry(): () => void {
++  let previous = trayUnloadPlace();
++  autoCarryStep(null, previous);
++  return useSceneInteractionStore.subscribe(() => {
++    const now = trayUnloadPlace();
++    if (now === previous) return;
++    const left = previous;
++    previous = now;
++    autoCarryStep(left, now);
++  });
++}
+diff --git a/src/scenes/laboratory/lib/bunsenStandGeometry.ts b/src/scenes/laboratory/lib/bunsenStandGeometry.ts
+index 1a4f3d5..dea64f0 100644
+--- a/src/scenes/laboratory/lib/bunsenStandGeometry.ts
++++ b/src/scenes/laboratory/lib/bunsenStandGeometry.ts
+@@ -1,11 +1,13 @@
+ /** Measurements of the three-part stand — see `bunsenStandAssembly.ts`. Kept free of loaders so stores and node tests can import them. */
+ 
+ /**
+- * Boss height on the rod. The tube hanging from it has its bottom 13.5 cm up,
+- * a couple of centimetres clear of the spirit lamp's flame tip: on the stand
+- * the tube is held, not heated; heating takes the clamp off (`HeldClampRig`).
++ * Boss height on the rod. The clamp holds the tube by its top, 2.5 cm below
++ * the mouth (`TUBE_RING_INSERT_DEPTH`), so the tube hanging from it has its
++ * bottom 13.5 cm up, a couple of centimetres clear of the spirit lamp's flame
++ * tip: on the stand the tube is held, not heated; heating takes the clamp off
++ * (`HeldClampRig`). The rod is 30 cm tall.
+  */
+-export const CLAMP_MOUNT_HEIGHT = 0.235;
++export const CLAMP_MOUNT_HEIGHT = 0.26;
+ /** `ClampHandleChannel` in `ClampMount`'s own space: the handle passes beside the rod. */
+ export const CLAMP_CHANNEL_OFFSET_Z = 0.018;
+ /** `TubeClamp_TubeAxis` along the clamp's handle. */
+diff --git a/src/scenes/laboratory/lib/devSetupExperiment.ts b/src/scenes/laboratory/lib/devSetupExperiment.ts
+index f9b32af..efbca7b 100644
+--- a/src/scenes/laboratory/lib/devSetupExperiment.ts
++++ b/src/scenes/laboratory/lib/devSetupExperiment.ts
+@@ -92,8 +92,9 @@ export function devSetupExperimentOne(): void {
+     attachedTubeSlotIndex: 0,
+   });
+ 
++  // Capped: the lamp opens and lights only when the player heats the tube.
+   useBurnerStore.setState({ place: "fumeHood", returnRequest: null });
+-  useBurnerStore.getState().setLit(true);
++  useBurnerStore.getState().setLit(false);
+   useHeatingStore.getState().reset();
+ 
+   const scene = useSceneInteractionStore.getState();
+diff --git b/src/scenes/laboratory/lib/equipmentPlacement.ts b/src/scenes/laboratory/lib/equipmentPlacement.ts
+new file mode 100644
+index 0000000..71308b5
+--- /dev/null
++++ b/src/scenes/laboratory/lib/equipmentPlacement.ts
+@@ -0,0 +1,124 @@
++import * as THREE from "three";
++import { create } from "zustand";
++
++import { hoodWorldToLocal, HOOD_STAND_LOCAL } from "./hoodLayout";
++import type { Position3 } from "./layout";
++import type { StandAction } from "./standTableActions";
++import { standBusy } from "./useStandMotionStore";
++import { overTableTray } from "./tableTray";
++import { lampToTray, standToTray } from "./trayCarry";
++import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
++import { useBurnerStore } from "./useBurnerStore";
++import { useFurniturePositionStore } from "./useFurniturePositionStore";
++import { useHandStore, takeIntoHand, type HeldItem } from "./useHandStore";
++import { useHeatingStore } from "./useHeatingStore";
++import { useLabNoticeStore } from "./useLabNoticeStore";
++import type { TubeLocation } from "./useTestTubeStorageStore";
++import { activeWorktopZones } from "./worktopBounds";
++
++/** The worktop obstacles the stand and the lamp are (`StandStation`, `SpiritBurner`) — what they are kept off. */
++export const STAND_OBSTACLE_ID = "stand-base";
++export const LAMP_OBSTACLE_ID = "spirit-burner";
++
++/** A flat spot on a worktop: table-local at the table, hood-local in the hood (X, Z). */
++export interface Spot {
++  readonly x: number;
++  readonly z: number;
++}
++
++/**
++ * Where the player has set the stand and the lamp down (VL-018). `null` — the
++ * place they come to by themselves: the stand on the table keeps its own
++ * persisted spot (`useBunsenStandStorageStore.tablePosition`); the rest start
++ * at their default and stay wherever they were last put.
++ */
++interface EquipmentPlacementState {
++  readonly standHood: Spot | null;
++  readonly lampTable: Spot | null;
++  readonly lampHood: Spot | null;
++  place: (what: "stand" | "lamp", location: TubeLocation, world: THREE.Vector3) => void;
++}
++
++export const useEquipmentPlacementStore = create<EquipmentPlacementState>((set) => ({
++  standHood: null,
++  lampTable: null,
++  lampHood: null,
++  place: (what, location, world) => {
++    if (location === "workbench") {
++      const [tx, , tz] = useFurniturePositionStore.getState().getOverride("table").position;
++      const spot = { x: world.x - tx, z: world.z - tz };
++      if (what === "stand") useBunsenStandStorageStore.getState().setTablePosition(spot.x, spot.z);
++      else set({ lampTable: spot });
++      return;
++    }
++    const [x, , z] = hoodWorldToLocal(world);
++    if (what === "stand") set({ standHood: { x, z } });
++    else set({ lampHood: { x, z } });
++  },
++}));
++
++/** The hood-local default of the stand, and (for the lamp) where `lampLayout` puts it beside the stand — see `FumeHoodWorkArea`. */
++export const DEFAULT_HOOD_STAND: Spot = { x: HOOD_STAND_LOCAL[0], z: HOOD_STAND_LOCAL[2] };
++
++/** When the last piece of equipment was set down: its carrier must not glide it back to where it was lifted from. */
++export const EQUIPMENT_PLACED = { at: 0 };
++
++/** Whether `point` is over the tray at `place` — the table's, or the hood's. */
++export function overTrayAt(place: TubeLocation, point: THREE.Vector3): boolean {
++  if (place === "workbench") return overTableTray(point);
++  const found = activeWorktopZones().find((zone) => zone.id === "hood-tray");
++  if (!found) return false;
++  const { object, minX, maxX, minZ, maxZ } = found.rect;
++  const local = object.worldToLocal(point.clone());
++  return local.x > minX && local.x < maxX && local.z > minZ && local.z < maxZ;
++}
++
++const instanceIdOf = (what: "stand" | "lamp") => (what === "stand" ? STAND_OBSTACLE_ID : LAMP_OBSTACLE_ID);
++
++/** Takes the stand or the lamp into the hand (the right button, on it). False if it cannot be carried now. */
++export function takeEquipment(what: "stand" | "lamp", location: TubeLocation): boolean {
++  if (useHandStore.getState().held || standBusy() || useHeatingStore.getState().active) return false;
++  if (what === "lamp" && useBurnerStore.getState().phase !== "capped") {
++    useLabNoticeStore.getState().show("Сначала закройте спиртовку колпачком", "refusal");
++    return false;
++  }
++  takeIntoHand({ kind: "equipment", what, location, instanceId: instanceIdOf(what) }, [0, 0, 0]);
++  return true;
++}
++
++/** What a click does with the stand or the lamp in the hand, at `point` over the worktop. */
++export function equipmentHandAction(
++  held: Extract<HeldItem, { kind: "equipment" }>,
++  point: THREE.Vector3,
++  placeAt: THREE.Vector3,
++): StandAction {
++  const { what, location } = held;
++  const subject = { kind: what === "stand" ? "stand" : "lamp", place: location } as const;
++  if (overTrayAt(location, point)) {
++    const clamped = what === "stand" && useBunsenStandStorageStore.getState().attachedTubeSlotIndex !== null;
++    if (clamped) return { label: "Сначала выньте пробирку из лапки", blocked: true, part: "tray", run: () => {}, subject };
++    return {
++      label: "Поставить на поднос",
++      blocked: false,
++      part: "tray",
++      subject,
++      run: () => void (what === "stand" ? standToTray(location) : lampToTray(location)),
++    };
++  }
++  return {
++    label: location === "workbench" ? "Поставить сюда" : "Поставить сюда, в вытяжном шкафу",
++    blocked: false,
++    part: "place",
++    subject,
++    run: () => {
++      EQUIPMENT_PLACED.at = Date.now();
++      useEquipmentPlacementStore.getState().place(what, location, placeAt);
++    },
++  };
++}
++
++/** The hood-local default spot of the lamp: beside the stand's default (`lampLayout` in the stand's turned frame). */
++export function hoodLampDefault(standFrame: Position3, standYaw: number, lampInStandFrame: Position3): Spot {
++  const offset = new THREE.Vector3(...lampInStandFrame).applyAxisAngle(new THREE.Vector3(0, 1, 0), standYaw);
++  return { x: standFrame[0] + offset.x, z: standFrame[2] + offset.z };
++}
+diff --git a/src/scenes/laboratory/lib/hoodLayout.ts b/src/scenes/laboratory/lib/hoodLayout.ts
+index 16ac09c..c52037a 100644
+--- a/src/scenes/laboratory/lib/hoodLayout.ts
++++ b/src/scenes/laboratory/lib/hoodLayout.ts
+@@ -38,6 +38,22 @@ export function hoodBottleLocal(index: number): Position3 {
+ const HOOD = EQUIPMENT.find((equipment) => equipment.id === "fume-hood")!;
+ const UP = new THREE.Vector3(0, 1, 0);
+ 
++/** A point in the fume hood's own space, in the world, and the hood's yaw — from its live (calibrated) transform. */
++export function hoodLocalToWorld(local: Position3, out: THREE.Vector3): number {
++  const override = useFurniturePositionStore.getState().getOverride(HOOD.id);
++  const yaw = override.rotationY ?? HOOD.rotationY;
++  out.set(...local).applyAxisAngle(UP, yaw).add(new THREE.Vector3(...override.position));
++  return yaw;
++}
++
++/** The inverse: a world point as the hood's own (X, Y, Z) — for remembering where something was set down in it. */
++export function hoodWorldToLocal(world: THREE.Vector3): Position3 {
++  const override = useFurniturePositionStore.getState().getOverride(HOOD.id);
++  const yaw = override.rotationY ?? HOOD.rotationY;
++  const local = world.clone().sub(new THREE.Vector3(...override.position)).applyAxisAngle(UP, -yaw);
++  return [local.x, local.y, local.z];
++}
++
+ /** The tray's world pose on the hood's worktop, from the hood's live (calibrated) transform. */
+ export function hoodTrayWorldPose(position: THREE.Vector3, quaternion: THREE.Quaternion): void {
+   const override = useFurniturePositionStore.getState().getOverride(HOOD.id);
+diff --git b/src/scenes/laboratory/lib/hoverInfo.test.ts b/src/scenes/laboratory/lib/hoverInfo.test.ts
+new file mode 100644
+index 0000000..e5d3278
+--- /dev/null
++++ b/src/scenes/laboratory/lib/hoverInfo.test.ts
+@@ -0,0 +1,53 @@
++import { beforeEach, describe, expect, it } from "vitest";
++
++import { describeSubject, subjectOfTarget } from "./hoverInfo";
++import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
++import { useBurnerStore } from "./useBurnerStore";
++import { useTestTubeStorageStore } from "./useTestTubeStorageStore";
++
++beforeEach(() => {
++  useTestTubeStorageStore.setState({
++    trayTestTubes: [{ instanceId: "tray-1", contents: [] }],
++    workbenchTestTubes: [{ instanceId: "w0", contents: ["cu", "hno3"] }, { instanceId: "w1", contents: [] }],
++    fumeHoodTestTubes: [],
++  });
++  useBunsenStandStorageStore.setState({ onTray: false, onWorkbench: true, onFumeHood: false, attachedTubeSlotIndex: null });
++  useBurnerStore.setState({ place: "workbench", phase: "capped", lit: false });
++});
++
++describe("what the hover names", () => {
++  it("says where a jar is and what is in it", () => {
++    const info = describeSubject({ kind: "bottle", reagentId: "nacl", place: "tray" });
++    expect(info?.title).toMatch(/· на подносе$/);
++    expect(info?.state).toMatch(/NaCl$/);
++    expect(describeSubject({ kind: "bottle", reagentId: "nacl", place: "fumeHood" })?.title).toMatch(/в вытяжном шкафу$/);
++  });
++
++  it("tells a tube in the rack from one in the clamp, and what it holds", () => {
++    expect(describeSubject({ kind: "tube", place: "workbench", index: 1 })).toMatchObject({
++      title: "Пробирка · в штативе для пробирок, на столе",
++      state: "пустая",
++    });
++    useBunsenStandStorageStore.setState({ attachedTubeSlotIndex: 0 });
++    const clamped = describeSubject({ kind: "tube", place: "workbench", index: 0 });
++    expect(clamped?.title).toBe("Пробирка · в лапке штатива, на столе");
++    expect(clamped?.state).toContain(" + ");
++  });
++
++  it("finds a tray tube by its id, and nothing once it has gone", () => {
++    expect(describeSubject({ kind: "tube", place: "tray", instanceId: "tray-1" })?.title).toBe("Пробирка · на подносе");
++    expect(describeSubject({ kind: "tube", place: "tray", instanceId: "gone" })).toBeNull();
++  });
++
++  it("gives the lamp's and the stand's state", () => {
++    expect(describeSubject({ kind: "lamp", place: "workbench" })?.state).toBe("закрыта колпачком");
++    useBurnerStore.setState({ phase: "lit", lit: true });
++    expect(describeSubject({ kind: "lamp", place: "workbench" })?.state).toBe("горит");
++    expect(describeSubject({ kind: "stand", place: "workbench" })?.state).toBe("лапка пуста");
++  });
++
++  it("names the subject of a stand target by itself", () => {
++    expect(subjectOfTarget({ kind: "bottle", location: "fumeHood", reagentId: "cu" })).toEqual({ kind: "bottle", reagentId: "cu", place: "fumeHood" });
++    expect(subjectOfTarget({ kind: "burner" })).toEqual({ kind: "lamp", place: "workbench" });
++  });
++});
+diff --git b/src/scenes/laboratory/lib/hoverInfo.ts b/src/scenes/laboratory/lib/hoverInfo.ts
+new file mode 100644
+index 0000000..d35ffaa
+--- /dev/null
++++ b/src/scenes/laboratory/lib/hoverInfo.ts
+@@ -0,0 +1,114 @@
++import { REAGENTS, type ReagentContainerConfig } from "../../../entities/laboratory/reagents";
++
++import { reagentName } from "./mixingRules";
++import { standLocation } from "./standStationActions";
++import type { StandTarget } from "./standTableActions";
++import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
++import { useBurnerStore } from "./useBurnerStore";
++import { useTestTubeStorageStore, type StoredTestTube } from "./useTestTubeStorageStore";
++import { useTubeReactionStore } from "./tubeReactions";
++
++/** Where a thing under the cursor is: on the table, in the hood, or riding the tray. */
++export type HintPlace = "workbench" | "fumeHood" | "tray";
++
++/**
++ * What the caption names: the thing under the cursor and where it is. The
++ * text is read off the live scene every frame (`describeSubject`), so it is
++ * right the moment a click moves the thing.
++ */
++export type HintSubject =
++  | { readonly kind: "bottle"; readonly reagentId: string; readonly place: HintPlace }
++  /** A tube: by `instanceId` when known (anywhere), else by its `index` in the rack at `place`. */
++  | { readonly kind: "tube"; readonly place: HintPlace; readonly instanceId?: string; readonly index?: number }
++  | { readonly kind: "rack"; readonly place: HintPlace }
++  | { readonly kind: "stand"; readonly place: HintPlace }
++  | { readonly kind: "lamp"; readonly place: HintPlace };
++
++export interface HintInfo {
++  /** «Азотная кислота · на столе» */
++  readonly title: string;
++  /** «раствор, HNO₃» — what it is and what is in it; null when there is nothing to add. */
++  readonly state: string | null;
++}
++
++const PLACE_TEXT: Record<HintPlace, string> = {
++  workbench: "на столе",
++  fumeHood: "в вытяжном шкафу",
++  tray: "на подносе",
++};
++
++const reagentConfig = (id: string): ReagentContainerConfig | undefined =>
++  (REAGENTS as Record<string, ReagentContainerConfig | undefined>)[id];
++
++const tubeList = (place: HintPlace): readonly StoredTestTube[] => {
++  const state = useTestTubeStorageStore.getState();
++  return place === "tray" ? state.trayTestTubes : place === "workbench" ? state.workbenchTestTubes : state.fumeHoodTestTubes;
++};
++
++/** The subject a stand target's caption is about, so the table objects need not name it themselves. */
++export function subjectOfTarget(target: StandTarget): HintSubject | null {
++  switch (target.kind) {
++    case "bottle":
++      return { kind: "bottle", reagentId: target.reagentId, place: target.location };
++    case "rack-tube":
++      return { kind: "tube", place: target.location, index: target.index };
++    case "clamped-tube": {
++      const place = standLocation();
++      const index = useBunsenStandStorageStore.getState().attachedTubeSlotIndex;
++      return place && index !== null ? { kind: "tube", place, index } : null;
++    }
++    case "burner": {
++      const place = useBurnerStore.getState().place;
++      return place === "shelf" ? null : { kind: "lamp", place };
++    }
++  }
++}
++
++const LAMP_STATE = { capped: "закрыта колпачком", open: "открыта, не горит", lit: "горит" } as const;
++
++function describeTube(subject: Extract<HintSubject, { kind: "tube" }>): HintInfo | null {
++  const tubes = tubeList(subject.place);
++  const index = subject.instanceId === undefined ? subject.index ?? -1 : tubes.findIndex((tube) => tube.instanceId === subject.instanceId);
++  const tube = tubes[index];
++  if (!tube) return null;
++  const stand = useBunsenStandStorageStore.getState();
++  const clamped = subject.place !== "tray" && stand.attachedTubeSlotIndex === index && standLocation() === subject.place;
++  const where = clamped
++    ? `в лапке штатива, ${subject.place === "workbench" ? "на столе" : "в вытяжке"}`
++    : subject.place === "tray"
++      ? PLACE_TEXT.tray
++      : `в штативе для пробирок, ${subject.place === "workbench" ? "на столе" : "в вытяжке"}`;
++  const contents = tube.contents.length === 0 ? "пустая" : tube.contents.map(reagentName).join(" + ");
++  const temperature = useTubeReactionStore.getState().chemistryById[tube.instanceId]?.temperature ?? 0;
++  const heat = temperature > 0.6 ? ", горячая" : temperature > 0.15 ? ", тёплая" : "";
++  return { title: `Пробирка · ${where}`, state: `${contents}${heat}` };
++}
++
++/** The caption's name-and-state lines for what is under the cursor, or null if it is no longer there. */
++export function describeSubject(subject: HintSubject): HintInfo | null {
++  switch (subject.kind) {
++    case "bottle": {
++      const config = reagentConfig(subject.reagentId);
++      const form = config?.contentsKind === "solid" ? "твёрдое вещество" : "раствор";
++      return { title: `${reagentName(subject.reagentId)} · ${PLACE_TEXT[subject.place]}`, state: config ? `${form}, ${config.formula}` : form };
++    }
++    case "tube":
++      return describeTube(subject);
++    case "rack": {
++      const count = tubeList(subject.place).length;
++      return { title: `Штатив для пробирок · ${PLACE_TEXT[subject.place]}`, state: count === 0 ? "пробирок нет" : `пробирок: ${count}` };
++    }
++    case "stand": {
++      const clamped = useBunsenStandStorageStore.getState().attachedTubeSlotIndex !== null;
++      return {
++        title: `Штатив с лапкой · ${PLACE_TEXT[subject.place]}`,
++        state: subject.place === "tray" ? null : clamped ? "в лапке пробирка" : "лапка пуста",
++      };
++    }
++    case "lamp":
++      return {
++        title: `Спиртовка · ${PLACE_TEXT[subject.place]}`,
++        state: subject.place === "tray" ? null : LAMP_STATE[useBurnerStore.getState().phase],
++      };
++  }
++}
+diff --git b/src/scenes/laboratory/lib/placedFrom.ts b/src/scenes/laboratory/lib/placedFrom.ts
+new file mode 100644
+index 0000000..d99345a
+--- /dev/null
++++ b/src/scenes/laboratory/lib/placedFrom.ts
+@@ -0,0 +1,25 @@
++import type { Position3 } from "./layout";
++
++/** A put-down older than this was for an item that never mounted — dropped, not played late. */
++const STALE_MS = 1000;
++
++const pending = new Map<string, { readonly world: Position3; readonly at: number }>();
++
++/**
++ * A bottle was just set down from the hand into a new place (off the tray,
++ * onto the table or into the hood): remember where it was, so the display
++ * that now stands there (`PourMotion`) flies it in from that spot instead of
++ * showing it already at rest. Plain module state: read once, on the item's
++ * next frame — never a reason to re-render.
++ */
++export function notePlacedFrom(instanceId: string, world: Position3): void {
++  pending.set(instanceId, { world, at: Date.now() });
++}
++
++/** Where `instanceId` was set down from, once; null if it was not (or too long ago). */
++export function takePlacedFrom(instanceId: string): Position3 | null {
++  const entry = pending.get(instanceId);
++  if (!entry) return null;
++  pending.delete(instanceId);
++  return Date.now() - entry.at <= STALE_MS ? entry.world : null;
++}
+diff --git a/src/scenes/laboratory/lib/pressToTake.ts b/src/scenes/laboratory/lib/pressToTake.ts
+index ffc7aa1..72b0ad0 100644
+--- a/src/scenes/laboratory/lib/pressToTake.ts
++++ b/src/scenes/laboratory/lib/pressToTake.ts
+@@ -3,29 +3,35 @@ import { HAND } from "./useHandStore";
+ /** How far (px) the mouse moves with the button down before a press is a drag, not a click. */
+ const DRAG_SLOP_PX = 6;
+ 
++/** `MouseEvent.button` values: dragging is on the right button, a click-to-carry on the left. */
++const LEFT_BUTTON = 0;
++const RIGHT_BUTTON = 2;
++
+ /**
+- * A press on something that can be taken into the hand (VL-018): dragged —
+- * it is taken at once and carried while the button stays down, and set
+- * down where it is let go (`HandController`); clicked — it is taken and
+- * carried with the button up, and set down by the next click (VL-015).
++ * A press on something that can be taken into the hand (VL-018): dragged with
++ * the RIGHT button — it is taken at once and carried while the button stays
++ * down, and set down where it is let go (`HandController`); clicked with the
++ * LEFT — it is taken and carried with the button up, and set down by the next
++ * click (VL-015). A right click without a drag does nothing.
+  *
+  * @param take takes it into the hand; false if it cannot be taken now
+  */
+ export function pressToTake(event: { readonly button: number; readonly clientX: number; readonly clientY: number }, take: () => boolean): void {
+-  if (event.button !== 0) return;
++  if (event.button !== LEFT_BUTTON && event.button !== RIGHT_BUTTON) return;
++  const drags = event.button === RIGHT_BUTTON;
+   const { clientX, clientY } = event;
+   const cleanup = () => {
+     window.removeEventListener("pointermove", handleMove);
+     window.removeEventListener("pointerup", handleUp);
+   };
+   const handleMove = (move: PointerEvent) => {
+-    if (Math.hypot(move.clientX - clientX, move.clientY - clientY) < DRAG_SLOP_PX) return;
++    if (!drags || Math.hypot(move.clientX - clientX, move.clientY - clientY) < DRAG_SLOP_PX) return;
+     cleanup();
+     if (take()) HAND.dragging = true;
+   };
+   const handleUp = () => {
+     cleanup();
+-    take();
++    if (!drags) take();
+   };
+   window.addEventListener("pointermove", handleMove);
+   window.addEventListener("pointerup", handleUp);
+diff --git a/src/scenes/laboratory/lib/standTableActions.test.ts b/src/scenes/laboratory/lib/standTableActions.test.ts
+index d7d7571..2aa8885 100644
+--- a/src/scenes/laboratory/lib/standTableActions.test.ts
++++ b/src/scenes/laboratory/lib/standTableActions.test.ts
+@@ -1,12 +1,16 @@
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
+-import { heatInHandAction, runStandAction, standActionFor } from "./standTableActions";
++import * as THREE from "three";
++
++import { fillTubeAction, heatInHandAction, runStandAction, standActionFor } from "./standTableActions";
+ import { useBunsenStandStorageStore } from "./useBunsenStandStorageStore";
+ import { useBurnerStore } from "./useBurnerStore";
+ import { useHeatingStore } from "./useHeatingStore";
+ import { POUR_COMMIT_MS, POUR_MS, useStandMotionStore } from "./useStandMotionStore";
++import { useReagentStorageStore } from "./useReagentStorageStore";
+ import { useTestTubeDragStore } from "./useTestTubeDragStore";
++import { registerWorktopObstacle } from "./worktopBounds";
+ import { useTestTubeStorageStore, type StoredTestTube } from "./useTestTubeStorageStore";
+ 
+ const EXP1 = "experiment-copper-nitric-acid";
+@@ -176,3 +180,35 @@ describe("stand actions on the table (VL-014)", () => {
+     expect(standActionFor(rackTube(0))).toBeNull();
+   });
+ });
++
++describe("a tube in the hand brought to a jar", () => {
++  const JAR_AT = { x: 0.5, z: 0.2, r: 0.04 };
++  let unregister: () => void;
++
++  beforeEach(() => {
++    useReagentStorageStore.setState({
++      fumeHoodItems: [
++        { instanceId: "jar-hno3", reagentId: "hno3", containerType: "clear250", cabinetId: "cabinet-acids", slotIndex: 0 },
++        { instanceId: "jar-cu", reagentId: "cu", containerType: "wide120", cabinetId: "cabinet-simple", slotIndex: 1 },
++      ],
++    });
++    unregister = registerWorktopObstacle("jar-hno3", { get: () => [{ kind: "circle", ...JAR_AT }] });
++  });
++  afterEach(() => unregister());
++
++  const at = (x: number, z: number) => new THREE.Vector3(x, 1, z);
++
++  it("fills on a click — nothing pours by itself — and only when it is near enough", () => {
++    expect(fillTubeAction("fumeHood", 1, at(0.9, 0.2))).toBeNull();
++    const near = fillTubeAction("fumeHood", 1, at(0.55, 0.2));
++    expect(near).toMatchObject({ label: "Налить HNO₃ в пробирку", blocked: false, part: "jar" });
++    expect(hoodTubes()[1].contents).toEqual([]);
++    near!.run();
++    expect(hoodTubes()[1].contents).toEqual(["hno3"]);
++  });
++
++  it("refuses a reagent the tube already has", () => {
++    useTestTubeStorageStore.setState({ fumeHoodTestTubes: [tube("t0", "hno3"), tube("t1")] });
++    expect(fillTubeAction("fumeHood", 0, at(0.55, 0.2))).toMatchObject({ blocked: true, label: "HNO₃ уже в пробирке" });
++  });
++});
+diff --git a/src/scenes/laboratory/lib/standTableActions.ts b/src/scenes/laboratory/lib/standTableActions.ts
+index 4770d13..7b7fd0c 100644
+--- a/src/scenes/laboratory/lib/standTableActions.ts
++++ b/src/scenes/laboratory/lib/standTableActions.ts
+@@ -15,8 +15,12 @@ import { useHeatingStore } from "./useHeatingStore";
+ import { useLabNoticeStore } from "./useLabNoticeStore";
+ import { useStandStationStore } from "./useStandStationStore";
+ import { CLAMP_TUBE_MOUTH, standBusy, useStandMotionStore } from "./useStandMotionStore";
+-import { takeIntoHand, useHandStore, type HeldItem } from "./useHandStore";
++import { equipmentHandAction } from "./equipmentPlacement";
++import { HAND, takeIntoHand, useHandStore, type HeldItem } from "./useHandStore";
+ import { overTableTray } from "./tableTray";
++import type { HintSubject } from "./hoverInfo";
++import { obstacleCircle } from "./worktopBounds";
++import { useReagentStorageStore } from "./useReagentStorageStore";
+ import { bottleToTray } from "./trayCarry";
+ import { toggleTubePick, useTestTubeDragStore } from "./useTestTubeDragStore";
+ import { useTestTubeStorageStore, type StoredTestTube, type TubeLocation } from "./useTestTubeStorageStore";
+@@ -49,11 +53,14 @@ export interface StandAction {
+   readonly blocked: boolean;
+   /** @param origin where the clicked object is in the world, when known — a tube flies from there */
+   readonly run: (origin?: Position3) => void;
+-  /** What a held item is brought to for this — the tray has no snap pose and no outline of its own. */
+-  readonly part?: "tray";
++  /** What a held item is brought to for this when it is not the stand — the tray, a jar: no snap pose and no outline of their own. */
++  readonly part?: "tray" | "jar" | "place";
++  /** What the action is done to or with, named next to the hand: the jar, the clamped tube, the lamp. */
++  readonly subject?: HintSubject;
+ }
+ 
+ const NOTHING = () => {};
++const withSubject = (result: StandAction, subject: HintSubject): StandAction => ({ ...result, subject });
+ const blocked = (label: string): StandAction => ({ label, blocked: true, run: NOTHING });
+ const action = (label: string, run: (origin?: Position3) => void): StandAction => ({ label, blocked: false, run });
+ 
+@@ -206,7 +213,7 @@ export function clickWorkbenchRackTube(index: number, instanceId: string, origin
+ const MAGNET_REACH = 0.13;
+ 
+ /** The stand target a held item becomes when brought to the stand. */
+-function heldAsTarget(held: Exclude<HeldItem, { kind: "tray" }>): StandTarget {
++function heldAsTarget(held: Exclude<HeldItem, { kind: "tray" | "equipment" }>): StandTarget {
+   if (held.kind === "bottle") {
+     return { kind: "bottle", location: held.location, reagentId: held.reagentId, instanceId: held.instanceId };
+   }
+@@ -221,9 +228,16 @@ function heldAsTarget(held: Exclude<HeldItem, { kind: "tray" }>): StandTarget {
+ export function handActionFor(held: HeldItem, point: THREE.Vector3): StandAction | null {
+   // Off the tray: set down where the player stands (`trayHandAction`, VL-017).
+   if (held.kind === "tray") return null;
++  // The stand or the lamp: set down on the worktop, or on the tray (the live hand point is where it lands).
++  if (held.kind === "equipment") return equipmentHandAction(held, point, HAND.point);
+   // A bare tube brought to the lamp's flame (VL-020). The workbench rack's
+   // carried tube asks the same from its own carry (`InspectableTestTubeSlot`).
+   if (held.kind === "tube" && nearFlame(held.location, point)) return heatInHandAction(held.location, held.index);
++  // A tube brought to a jar: a click fills it.
++  if (held.kind === "tube") {
++    const fill = fillTubeAction(held.location, held.index, point);
++    if (fill) return fill;
++  }
+   // A bottle from the bench brought over the tray on the table goes onto it (VL-017).
+   if (held.kind === "bottle" && held.location === "workbench" && overTableTray(point)) {
+     return { label: "Поставить на поднос", blocked: false, part: "tray", run: () => void bottleToTray("workbench", held.instanceId) };
+@@ -232,7 +246,58 @@ export function handActionFor(held: HeldItem, point: THREE.Vector3): StandAction
+   const dx = point.x - CLAMP_TUBE_MOUTH.point.x;
+   const dz = point.z - CLAMP_TUBE_MOUTH.point.z;
+   if (Math.hypot(dx, dz) > MAGNET_REACH) return null;
+-  return standActionFor(heldAsTarget(held), { fromHand: true });
++  const result = standActionFor(heldAsTarget(held), { fromHand: true });
++  if (!result) return null;
++  // Named by what the item is brought to: the tube in the clamp, or the stand while its clamp is empty.
++  const place = standLocation();
++  const clampedIndex = useBunsenStandStorageStore.getState().attachedTubeSlotIndex;
++  if (!place) return result;
++  return withSubject(result, clampedIndex === null ? { kind: "stand", place } : { kind: "tube", place, index: clampedIndex });
++}
++
++/** How far past a jar's footprint (m) a tube in the hand still counts as brought to it. */
++const JAR_REACH_MARGIN = 0.04;
++
++/** The reagent jar a tube at `point` has been brought to, at `location` — the nearest one, if any is near enough. */
++export function jarNearTube(location: TubeLocation, point: THREE.Vector3): { readonly instanceId: string; readonly reagentId: string } | null {
++  const storage = useReagentStorageStore.getState();
++  const jars = location === "workbench" ? storage.workbenchItems : storage.fumeHoodItems;
++  let best: { instanceId: string; reagentId: string } | null = null;
++  let bestGap = Infinity;
++  for (const jar of jars) {
++    const circle = obstacleCircle(jar.instanceId);
++    if (!circle) continue;
++    const gap = Math.hypot(point.x - circle.x, point.z - circle.z) - circle.r;
++    if (gap < JAR_REACH_MARGIN && gap < bestGap) {
++      bestGap = gap;
++      best = { instanceId: jar.instanceId, reagentId: jar.reagentId };
++    }
++  }
++  return best;
++}
++
++/**
++ * A tube in the hand brought to a reagent jar: a click puts the reagent in
++ * it (the player confirms with the left button, nothing pours by itself).
++ * Refused like the stand's pour is — a reagent this experiment does not use,
++ * or one the tube already has; a wrong order is the player's to make.
++ */
++export function fillTubeAction(location: TubeLocation, index: number, point: THREE.Vector3): StandAction | null {
++  if (useHeatingStore.getState().active || standBusy()) return null;
++  const tube = tubesAt(location)[index];
++  const jar = tube ? jarNearTube(location, point) : null;
++  if (!tube || !jar) return null;
++  const { reagentId } = jar;
++  const withPart = (result: StandAction): StandAction => ({
++    ...result,
++    part: "jar",
++    subject: { kind: "bottle", reagentId, place: location },
++  });
++  if (tube.contents.includes(reagentId)) return withPart(blocked(`${formula(reagentId)} уже в пробирке`));
++  const foreign = foreignIn([reagentId]);
++  if (foreign) return withPart(blocked(foreignLabel(foreign)));
++  const verb = reagentConfig(reagentId)?.contentsKind === "solid" ? "Насыпать" : "Налить";
++  return withPart(action(`${verb} ${formula(reagentId)} в пробирку`, () => void tryAddToTube(location, index, reagentId)));
+ }
+ 
+ /** The hover caption for something that can be taken into the hand. */
+@@ -283,7 +348,7 @@ export function heatInHandAction(location: TubeLocation, index: number): StandAc
+   if (!tube) return null;
+   if (!needsHeat(tube.contents)) return blocked(NOTHING_TO_HEAT);
+   const { instanceId } = tube;
+-  return action("Нагреть пробирку над спиртовкой", () => {
++  return withSubject(action("Нагреть пробирку над спиртовкой", () => {
+     // Out of the hand: the hand lets go and the tube is held in the flame instead (`HandHeatRig`).
+     if (useTestTubeDragStore.getState().heldInstanceId === instanceId) useTestTubeDragStore.getState().releaseIfHeld(instanceId);
+     useHandStore.getState().release();
+@@ -295,5 +360,5 @@ export function heatInHandAction(location: TubeLocation, index: number): StandAc
+       const points = penalty.charged ? ` (${penalty.rule.points})` : "";
+       useLabNoticeStore.getState().show(`Ошибка: пробирку греют в руке, а не в лапке штатива${points}`, "error");
+     }
+-  });
++  }), { kind: "lamp", place: location });
+ }
+diff --git a/src/scenes/laboratory/lib/tableTray.ts b/src/scenes/laboratory/lib/tableTray.ts
+index 696a5fe..d415405 100644
+--- a/src/scenes/laboratory/lib/tableTray.ts
++++ b/src/scenes/laboratory/lib/tableTray.ts
+@@ -24,7 +24,7 @@ export function overTableTray(point: THREE.Vector3): boolean {
+ 
+ /**
+  * Live while a workbench rack tube is carried (`InspectableTestTubeSlot`):
+- * whether it is over the tray right now, or under the lamp's flame (VL-020)
+- * — for the hand's caption.
++ * whether it is over the tray right now, under the lamp's flame (VL-020) or
++ * brought to a reagent jar, and where it is — for the hand's caption.
+  */
+-export const WORKBENCH_CARRY = { overTray: false, nearFlame: false };
++export const WORKBENCH_CARRY = { overTray: false, nearFlame: false, nearJar: false, point: new THREE.Vector3() };
+diff --git a/src/scenes/laboratory/lib/trayUnloadPlace.ts b/src/scenes/laboratory/lib/trayUnloadPlace.ts
+index 9b36e0f..7a54048 100644
+--- a/src/scenes/laboratory/lib/trayUnloadPlace.ts
++++ b/src/scenes/laboratory/lib/trayUnloadPlace.ts
+@@ -1,6 +1,9 @@
+ import { bottleFromTray, lampFromTray, standFromTray, tubeFromTray, unloadLabel, type CarryPlace } from "./trayCarry";
+ import type { StandAction } from "./standTableActions";
++import { notePlacedFrom } from "./placedFrom";
+ import { takeIntoHand, type HeldItem } from "./useHandStore";
++import { useStandMotionStore } from "./useStandMotionStore";
++import { useTestTubeStorageStore } from "./useTestTubeStorageStore";
+ import { useSceneInteractionStore } from "./useSceneInteractionStore";
+ import { useStandHintStore } from "./useStandHintStore";
+ 
+@@ -40,10 +43,17 @@ export function trayHandAction(held: Extract<HeldItem, { kind: "tray" }>): Stand
+     label: unloadLabel(place),
+     blocked: false,
+     part: "tray",
+-    run: () => {
+-      if (held.what === "bottle") bottleFromTray(held.instanceId, place);
+-      else if (held.what === "tube") tubeFromTray(held.instanceId, place);
+-      else if (held.what === "stand") standFromTray(place);
++    // `origin`: where the item is in the world, in the hand — it is seen flying from there to its place.
++    run: (origin) => {
++      if (held.what === "bottle") {
++        if (origin) notePlacedFrom(held.instanceId, origin);
++        bottleFromTray(held.instanceId, place);
++      } else if (held.what === "tube") {
++        if (tubeFromTray(held.instanceId, place) && origin) {
++          const tubes = place === "workbench" ? useTestTubeStorageStore.getState().workbenchTestTubes : useTestTubeStorageStore.getState().fumeHoodTestTubes;
++          useStandMotionStore.getState().arriveInRack(place, tubes.length - 1, origin);
++        }
++      } else if (held.what === "stand") standFromTray(place);
+       else lampFromTray(place);
+     },
+   };
+diff --git a/src/scenes/laboratory/lib/useBunsenStandStorageStore.ts b/src/scenes/laboratory/lib/useBunsenStandStorageStore.ts
+index 10ac3eb..aeafd3c 100644
+--- a/src/scenes/laboratory/lib/useBunsenStandStorageStore.ts
++++ b/src/scenes/laboratory/lib/useBunsenStandStorageStore.ts
+@@ -63,8 +63,8 @@ export function tableRingOffsetXZ(): readonly [number, number] {
+ export const TUBE_RING_LOCAL_OFFSET: Position3 = [CLAMP_TUBE_AXIS_X, CLAMP_MOUNT_HEIGHT, CLAMP_CHANNEL_OFFSET_Z];
+ /** How close a held tube needs to get to the ring's centre to "clip in" on release — same spirit as `InspectableTestTubeSlot`'s own `FILL_PROXIMITY_RADIUS` for reagent jars. */
+ export const TUBE_RING_ATTACH_RADIUS = 0.1;
+-/** How far below the ring's own centre the attached tube's (bottom-pivoted) origin sits — mostly hanging through/below the ring with its neck poking a little above it, matching how it read in the Blender verification render. */
+-export const TUBE_RING_INSERT_DEPTH = 0.1;
++/** How far below the ring's own centre the attached tube's (bottom-pivoted) origin sits: the 15 cm tube is held by its top, the ring 2.5 cm under the mouth, which stays where it was (0.285 m) for the pouring bottle. */
++export const TUBE_RING_INSERT_DEPTH = 0.125;
+ 
+ // v3: the stand moved to the middle of the work area (VL-018) — an old saved spot is in the bottles' row.
+ const STORAGE_KEY = "vg-bunsen-stand-table-position-v4";
+diff --git a/src/scenes/laboratory/lib/useHandStore.ts b/src/scenes/laboratory/lib/useHandStore.ts
+index 39319c7..13133c1 100644
+--- a/src/scenes/laboratory/lib/useHandStore.ts
++++ b/src/scenes/laboratory/lib/useHandStore.ts
+@@ -2,6 +2,7 @@ import * as THREE from "three";
+ import { create } from "zustand";
+ 
+ import type { ContainerType } from "../../../entities/laboratory/reagents/types";
++import type { HintSubject } from "./hoverInfo";
+ import type { Position3 } from "./layout";
+ import type { TubeLocation } from "./useTestTubeStorageStore";
+ 
+@@ -32,7 +33,14 @@ export type HeldItem =
+    * Something taken off the tray at the table or the hood, to be put down
+    * there in its usual place (VL-017) — or back on the tray with RMB.
+    */
+-  | { readonly kind: "tray"; readonly what: "bottle" | "tube" | "stand" | "lamp"; readonly instanceId: string };
++  | { readonly kind: "tray"; readonly what: "bottle" | "tube" | "stand" | "lamp"; readonly instanceId: string }
++  /**
++   * The stand or the spirit lamp, carried by the right button over the
++   * worktop it stands on and set down anywhere there, or on the tray. Its
++   * `instanceId` is the worktop obstacle it is (`stand-base`, `spirit-burner`),
++   * so it is kept off everything but itself.
++   */
++  | { readonly kind: "equipment"; readonly what: "stand" | "lamp"; readonly location: TubeLocation; readonly instanceId: string };
+ 
+ /**
+  * The hand, as plain mutable state read and written every frame (never a
+@@ -61,7 +69,7 @@ export const HAND = {
+   /** Where the hand is on screen, in CSS px, for the caption next to the item. */
+   screen: new THREE.Vector2(),
+   /** What a click would do right now — `handActionFor`, refreshed every frame. */
+-  action: null as { readonly label: string; readonly blocked: boolean } | null,
++  action: null as { readonly label: string; readonly blocked: boolean; readonly subject?: HintSubject } | null,
+   /**
+    * Just taken: the hand starts where the item is (VL-018), not in the middle
+    * of the screen — the stand stands there now, and an item flown to it was
+diff --git a/src/scenes/laboratory/lib/useStandHintStore.ts b/src/scenes/laboratory/lib/useStandHintStore.ts
+index d2f45ba..165fd02 100644
+--- a/src/scenes/laboratory/lib/useStandHintStore.ts
++++ b/src/scenes/laboratory/lib/useStandHintStore.ts
+@@ -1,5 +1,6 @@
+ import { create } from "zustand";
+ 
++import type { HintSubject } from "./hoverInfo";
+ import type { StandTarget } from "./standTableActions";
+ 
+ /**
+@@ -13,10 +14,16 @@ interface StandHintState {
+   readonly target: StandTarget | null;
+   /** Identity of whoever set `target`, so a late `pointerout` from one object can't clear another's hint. */
+   readonly owner: string | null;
+-  /** A plain caption instead of a stand action — e.g. «Поставить на стол» over something on the tray. */
++  /**
++   * A plain caption instead of a stand action — e.g. «Поставить на стол» over
++   * something on the tray. Empty: the object is only named (its place and
++   * state), no click does anything.
++   */
+   readonly label: string | null;
++  /** What the cursor is over, named in the caption's first lines; for a stand target it follows from the target. */
++  readonly subject: HintSubject | null;
+   show: (owner: string, target: StandTarget) => void;
+-  showLabel: (owner: string, label: string) => void;
++  showLabel: (owner: string, label: string, subject?: HintSubject) => void;
+   hide: (owner: string) => void;
+ }
+ 
+@@ -24,7 +31,9 @@ export const useStandHintStore = create<StandHintState>((set) => ({
+   target: null,
+   owner: null,
+   label: null,
+-  show: (owner, target) => set({ owner, target, label: null }),
+-  showLabel: (owner, label) => set({ owner, label, target: null }),
+-  hide: (owner) => set((state) => (state.owner === owner ? { owner: null, target: null, label: null } : state)),
++  subject: null,
++  show: (owner, target) => set({ owner, target, label: null, subject: null }),
++  showLabel: (owner, label, subject) => set({ owner, label, target: null, subject: subject ?? null }),
++  hide: (owner) =>
++    set((state) => (state.owner === owner ? { owner: null, target: null, label: null, subject: null } : state)),
+ }));
+diff --git a/src/scenes/laboratory/lib/worktopBounds.ts b/src/scenes/laboratory/lib/worktopBounds.ts
+index 231611a..22b195d 100644
+--- a/src/scenes/laboratory/lib/worktopBounds.ts
++++ b/src/scenes/laboratory/lib/worktopBounds.ts
+@@ -75,6 +75,14 @@ export function registerWorktopObstacle(id: string, source: ObstacleSource): ()
+   };
+ }
+ 
++/** The footprint of the thing registered as `id`, if it is a circle on the worktop right now — where a jar stands. */
++export function obstacleCircle(id: string): { readonly x: number; readonly z: number; readonly r: number } | null {
++  for (const obstacle of OBSTACLES.get(id)?.get() ?? []) {
++    if (obstacle.kind === "circle") return obstacle;
++  }
++  return null;
++}
++
+ /** Shown in the scene: it and every parent visible. */
+ export function shownInWorld(object: THREE.Object3D): boolean {
+   for (let current: THREE.Object3D | null = object; current; current = current.parent) {
+diff --git a/src/scenes/laboratory/sandbox/SandboxPanel.tsx b/src/scenes/laboratory/sandbox/SandboxPanel.tsx
+index 656c62d..844af23 100644
+--- a/src/scenes/laboratory/sandbox/SandboxPanel.tsx
++++ b/src/scenes/laboratory/sandbox/SandboxPanel.tsx
+@@ -40,7 +40,7 @@ export function SandboxPanel() {
+     <div style={panelStyle}>
+       <strong style={titleStyle}>Песочница (временный режим)</strong>
+       <span style={hintStyle}>
+-        Наведите на предмет — подпись скажет, что сделает клик. Склянка — налить в пробирку в лапке; пробирка в лапке — нагреть, если спиртовка горит, иначе вернуть в стойку; штатив — рассмотреть.
++        Наведите на предмет — подпись скажет, что сделает клик. Склянка — налить в пробирку в лапке; пробирка в лапке — нагреть (спиртовка откроется и зажжётся сама), если в ней идёт реакция с нагревом, иначе вернуть в стойку; штатив — рассмотреть.
+       </span>
+ 
+       <span>
+diff --git a/src/scenes/laboratory/sandbox/setupSandbox.ts b/src/scenes/laboratory/sandbox/setupSandbox.ts
+index ec5f4eb..3771b55 100644
+--- a/src/scenes/laboratory/sandbox/setupSandbox.ts
++++ b/src/scenes/laboratory/sandbox/setupSandbox.ts
+@@ -36,7 +36,7 @@ const freshTube = () => ({ instanceId: `sandbox-tube-${tubeSerial++}`, contents:
+ 
+ /**
+  * Puts every reagent of all four experiments into the fume hood, an empty
+- * tube in the stand over a lit burner, and flies the camera there. No
++ * tube in the stand beside a capped burner, and flies the camera there. No
+  * assignment is selected, so `judgeMix` allows any combination and no
+  * penalty rule applies.
+  */
+@@ -73,8 +73,9 @@ export function setupSandbox(): void {
+     attachedTubeSlotIndex: 0,
+   });
+ 
++  // Capped: the lamp opens and lights only when the player heats the tube.
+   useBurnerStore.setState({ place: "fumeHood", returnRequest: null });
+-  useBurnerStore.getState().setLit(true);
++  useBurnerStore.getState().setLit(false);
+   useHeatingStore.getState().reset();
+   useTubeReactionStore.getState().reset();
+   useSceneInteractionStore.getState().requestFocus(FUME_HOOD_ID);
+@@ -82,7 +83,7 @@ export function setupSandbox(): void {
+ 
+ /**
+  * Takes the sandbox's setup back out, so a real attempt started afterwards
+- * does not find nine bottles and a lit burner already in the hood. The scene
++ * does not find nine bottles and a burner already in the hood. The scene
+  * stores outlive the lab screen, hence this rather than relying on unmount.
+  */
+ export function teardownSandbox(): void {
+diff --git a/src/scenes/laboratory/ui/BunsenStandWorkbenchDisplay.tsx b/src/scenes/laboratory/ui/BunsenStandWorkbenchDisplay.tsx
+index fb687d7..38e9615 100644
+--- a/src/scenes/laboratory/ui/BunsenStandWorkbenchDisplay.tsx
++++ b/src/scenes/laboratory/ui/BunsenStandWorkbenchDisplay.tsx
+@@ -1,8 +1,9 @@
+ import { useEffect, useMemo, useRef, useState } from "react";
+-import { useThree, type ThreeEvent } from "@react-three/fiber";
++import { type ThreeEvent } from "@react-three/fiber";
+ import * as THREE from "three";
+ 
+ import { TUBE_CLAMP_PIVOT, useBunsenStandScene } from "../lib/bunsenStandAssembly";
++import { useStandHintStore } from "../lib/useStandHintStore";
+ import { cancelDeferredDispose, deferDispose } from "../lib/deferredDispose";
+ import { CAMERA_TARGETS, type Position3 } from "../lib/layout";
+ import {
+@@ -19,8 +20,10 @@ import { createHoverHitboxGeometry, disableRaycast } from "./ReagentContainerIns
+ import { ReagentHoverRim } from "./ReagentHoverRim";
+ import { SpiritBurner } from "./SpiritBurner";
+ import { StandStation, lampLayout } from "./StandStation";
+-import { overTableTray } from "../lib/tableTray";
+-import { standToTray } from "../lib/trayCarry";
++import { takeEquipment, useEquipmentPlacementStore } from "../lib/equipmentPlacement";
++import { pressToTake } from "../lib/pressToTake";
++import { useHandStore } from "../lib/useHandStore";
++import { EquipmentCarrier } from "./EquipmentCarrier";
+ 
+ /**
+  * "Away from the player" at the table: the table viewpoint's own look
+@@ -31,8 +34,10 @@ const AWAY_AT_TABLE = new THREE.Vector3(Math.sin(CAMERA_TARGETS.table.yaw), 0, -
+   .normalize()
+   // In the stand's own space: it stands turned round on the table (`STAND_TABLE_YAW`).
+   .applyAxisAngle(new THREE.Vector3(0, 1, 0), -STAND_TABLE_YAW);
+-/** A press that moves the stand less than this is a click (walk up to it), not a drag. */
+-const CLICK_SLOP = 0.004;
++/** The stand's base: half its width — how far a carried stand is kept off other things on the worktop. */
++const STAND_RADIUS = 0.06;
++/** The spirit lamp: 7.6 cm across. */
++const LAMP_RADIUS = 0.038;
+ 
+ /**
+  * The stand's final resting place вЂ” rendered once `useBunsenStandStorageStore`'s
+@@ -50,9 +55,7 @@ const CLICK_SLOP = 0.004;
+  */
+ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly tableWorldPosition: Position3 }) {
+   const scene = useBunsenStandScene();
+-  const { camera, gl } = useThree();
+   const [hovered, setHovered] = useState(false);
+-  const [dragging, setDragging] = useState(false);
+ 
+   const tablePosition = useBunsenStandStorageStore((state) => state.tablePosition);
+   const attachedTubeSlotIndex = useBunsenStandStorageStore((state) => state.attachedTubeSlotIndex);
+@@ -104,6 +107,7 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
+   }, [hoverHitboxGeometry]);
+ 
+   const groupRef = useRef<THREE.Group>(null);
++  const carried = useHandStore((state) => state.held?.kind === "equipment" && state.held.what === "stand" && state.held.location === "workbench");
+   const worldY = tableWorldPosition[1] + counterSurfaceY + STAND_BASE_BOTTOM_OFFSET;
+ 
+   // Kept in sync with the live store position whenever NOT actively
+@@ -112,7 +116,6 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
+   // `group.position` directly every frame, the same "don't fight the drag
+   // with a declarative prop" rule `DraggableWorkbenchReagent` follows.
+   useEffect(() => {
+-    if (dragging) return;
+     const group = groupRef.current;
+     if (!group) return;
+     group.position.set(
+@@ -120,76 +123,23 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
+       worldY,
+       tableWorldPosition[2] + tablePosition.z,
+     );
+-  }, [dragging, tablePosition, tableWorldPosition, worldY]);
++  }, [tablePosition, tableWorldPosition, worldY]);
+ 
++  // The right button takes the stand into the hand (VL-018): carried over the
++  // worktop and set down anywhere on it, or on the tray — the same as a jar.
++  // A carried tube's own click decides release-vs-attach by proximity to the
++  // ring, so while a tube is carried the stand is not to be grabbed.
+   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+-    // Deliberately does NOT mark itself as "pressed" for the held tube's own
+-    // click-drop listener the way a jar's `handlePointerDown` does (see
+-    // `markPickablePressed`'s doc) вЂ” the stand's hitbox covers the whole
+-    // physical model, including right over `TubeRing`, and that listener's
+-    // own ring-proximity check (`nearRingRef`) is what decides whether a
+-    // click there attaches the tube instead of dropping it; marking this
+-    // press "handled" here would short-circuit that check before it ever
+-    // ran, breaking the attach gesture.
+-    if (event.button !== 0 || tubeHeld) return;
++    if (event.button !== 2 || tubeHeld) return;
+     event.stopPropagation();
+-    const group = groupRef.current;
+-    if (!group) return;
+-
+-    const raycaster = new THREE.Raycaster();
+-    const dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+-      new THREE.Vector3(0, 1, 0),
+-      new THREE.Vector3(0, worldY, 0),
+-    );
+-    const dragPoint = new THREE.Vector3();
+-    const rect = gl.domElement.getBoundingClientRect();
+-    const ndcAt = (clientX: number, clientY: number) =>
+-      new THREE.Vector2(
+-        ((clientX - rect.left) / rect.width) * 2 - 1,
+-        -((clientY - rect.top) / rect.height) * 2 + 1,
+-      );
+-
+-    raycaster.setFromCamera(ndcAt(event.clientX, event.clientY), camera);
+-    if (!raycaster.ray.intersectPlane(dragPlane, dragPoint)) return;
+-    const planeOffset = group.position.clone().sub(dragPoint);
+-    const pressedAt = group.position.clone();
+-
+-    setDragging(true);
+-    document.body.style.cursor = "grabbing";
+-
+-    const handleMove = (moveEvent: PointerEvent) => {
+-      raycaster.setFromCamera(ndcAt(moveEvent.clientX, moveEvent.clientY), camera);
+-      if (!raycaster.ray.intersectPlane(dragPlane, dragPoint)) return;
+-      group.position.set(dragPoint.x + planeOffset.x, worldY, dragPoint.z + planeOffset.z);
+-    };
+-    const handleUp = () => {
+-      window.removeEventListener("pointermove", handleMove);
+-      window.removeEventListener("pointerup", handleUp);
+-      setDragging(false);
+-      document.body.style.cursor = "auto";
+-      if (group.position.distanceTo(pressedAt) < CLICK_SLOP) {
+-        // A click, not a drag: nothing — there is no close-up of the stand any more (VL-020).
+-        group.position.copy(pressedAt);
+-        return;
+-      }
+-      // Dropped on the tray on the table: onto it (VL-017); the lamp stays where it is (VL-020).
+-      if (overTableTray(group.position)) {
+-        group.position.copy(pressedAt);
+-        standToTray("workbench");
+-        return;
+-      }
+-      useBunsenStandStorageStore
+-        .getState()
+-        .setTablePosition(group.position.x - tableWorldPosition[0], group.position.z - tableWorldPosition[2]);
+-    };
+-    window.addEventListener("pointermove", handleMove);
+-    window.addEventListener("pointerup", handleUp);
++    pressToTake(event.nativeEvent, () => takeEquipment("stand", "workbench"));
+   };
+ 
+   return (
+     <group ref={groupRef} rotation={[0, STAND_TABLE_YAW, 0]}>
++     <EquipmentCarrier what="stand" location="workbench" radius={STAND_RADIUS}>
+       <primitive object={instance} />
+-      <ReagentHoverRim object={instance} active={hovered || dragging} />
++      <ReagentHoverRim object={instance} active={hovered || carried} />
+       <mesh
+         geometry={hoverHitboxGeometry}
+         onPointerDown={handlePointerDown}
+@@ -197,16 +147,19 @@ export function BunsenStandWorkbenchDisplay({ tableWorldPosition }: { readonly t
+           event.stopPropagation();
+           if (!tubeHeld) document.body.style.cursor = "grab";
+           setHovered(true);
++          useStandHintStore.getState().showLabel("stand-table", "", { kind: "stand", place: "workbench" });
+         }}
+         onPointerOut={(event) => {
+           event.stopPropagation();
+           document.body.style.cursor = "auto";
+           setHovered(false);
++          useStandHintStore.getState().hide("stand-table");
+         }}
+       >
+         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+       </mesh>
+       <StandStation location="workbench" away={AWAY_AT_TABLE} tube={clampedTube} crackZone={crackZone} />
++     </EquipmentCarrier>
+     </group>
+   );
+ }
+@@ -227,16 +180,20 @@ const LAMP_TABLE_SPOT = (() => {
+ /** The spirit lamp on the table, in its own place — whether the stand is on the table or not. */
+ export function LoneSpiritLampOnWorkbench({ tableWorldPosition }: { readonly tableWorldPosition: Position3 }) {
+   const counterSurfaceY = useWorkbenchReagentAreaStore((state) => state.config.originY);
++  // Where the player last set it down, or its own spot.
++  const spot = useEquipmentPlacementStore((state) => state.lampTable) ?? LAMP_TABLE_SPOT;
+   return (
+     <group
+       position={[
+-        tableWorldPosition[0] + LAMP_TABLE_SPOT.x,
++        tableWorldPosition[0] + spot.x,
+         tableWorldPosition[1] + counterSurfaceY,
+-        tableWorldPosition[2] + LAMP_TABLE_SPOT.z,
++        tableWorldPosition[2] + spot.z,
+       ]}
+       rotation={[0, STAND_TABLE_YAW, 0]}
+     >
+-      <SpiritBurner position={[0, 0, 0]} place="workbench" />
++      <EquipmentCarrier what="lamp" location="workbench" radius={LAMP_RADIUS}>
++        <SpiritBurner position={[0, 0, 0]} place="workbench" />
++      </EquipmentCarrier>
+     </group>
+   );
+ }
+diff --git a/src/scenes/laboratory/ui/CameraRig.tsx b/src/scenes/laboratory/ui/CameraRig.tsx
+index 8c3cdd7..55b6674 100644
+--- a/src/scenes/laboratory/ui/CameraRig.tsx
++++ b/src/scenes/laboratory/ui/CameraRig.tsx
+@@ -28,7 +28,8 @@ import { useFumeHoodControlsStore } from "../lib/useFumeHoodControlsStore";
+ import { useFurniturePositionStore, type FurnitureId } from "../lib/useFurniturePositionStore";
+ import { escapeTakenByHand } from "../lib/useHandStore";
+ import { useHeatingStore } from "../lib/useHeatingStore";
+-import { TUBE_FOCUS, useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
++import { LAMP_FLAME } from "../lib/lampFlame";
++import { useTubeCloseUpStore } from "../lib/useTubeCloseUpStore";
+ import { useHotspotObjectsStore } from "../lib/useHotspotObjectsStore";
+ import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
+ import { useReagentPickablesStore, type ReagentPickableId } from "../lib/useReagentPickablesStore";
+@@ -42,16 +43,16 @@ import { constrainOnWorktop } from "../lib/worktopBounds";
+ 
+ const POSITION_DAMPING = 0.28;
+ 
+-/** Fallback lean-in along the view ray, for when no tube focus is published. */
++/** Fallback lean-in along the view ray, for when no lamp flame is published. */
+ const HEAT_DOLLY_DISTANCE = 0.32;
+ const HEAT_DOLLY_DAMPING = 6;
+ /**
+- * Camera-to-tube distance in the close-up. The tube is 15 cm tall; at the
+- * inspection FOV this fills most of the screen height — bubbles, copper and
+- * gas are centimetres and millimetres across and read as specks any further
+- * out — with the flame below and a few centimetres of gas above the mouth.
++ * Heating leans in on the spirit lamp (not the tube): camera-to-flame
++ * distance, and how far above the flame's hot spot the view is aimed so the
++ * wick, the flame and the bottom of the heated tube are all in frame.
+  */
+-const TUBE_CLOSE_UP_DISTANCE = 0.26;
++const BURNER_CLOSE_UP_DISTANCE = 0.3;
++const BURNER_FOCUS_LIFT = 0.03;
+ const YAW_SENSITIVITY = 0.0028;
+ const PITCH_SENSITIVITY = 0.0022;
+ /**
+@@ -320,6 +321,7 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
+   const closeUpPosition = useRef(new THREE.Vector3());
+   const closeUpMatrix = useRef(new THREE.Matrix4());
+   const closeUpQuaternion = useRef(new THREE.Quaternion());
++  const burnerFocus = useRef(new THREE.Vector3());
+   /** Always cast through the screen center (NDC 0,0) — the crosshair never moves, Pointer Lock moves the camera's own look direction instead. */
+   const hoverRaycaster = useRef(new THREE.Raycaster());
+   /**
+@@ -902,12 +904,13 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
+     });
+ 
+     const handlePointerDown = (event: MouseEvent) => {
+-      // Right-drag orbit at the table — checked before even the dev-menu
+-      // branch below, so a right-click always starts an orbit rather than
+-      // being mistaken for a furniture/reagent pick (that branch never
+-      // itself checks `event.button`). See `TABLE_PITCH_LOOK_RANGE`'s doc.
++      // Middle-drag orbit at the table (the right button drags items) —
++      // checked before even the dev-menu branch below, so a middle-click
++      // always starts an orbit rather than being mistaken for a
++      // furniture/reagent pick (that branch never itself checks
++      // `event.button`). See `TABLE_PITCH_LOOK_RANGE`'s doc.
+       if (
+-        event.button === 2 &&
++        event.button === 1 &&
+         useSceneInteractionStore.getState().activeTargetId === "table" &&
+         useSceneInteractionStore.getState().cabinetPhase === "room"
+       ) {
+@@ -1312,13 +1315,10 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
+       tableOrbitDragging.current = false;
+     };
+ 
+-    // Without this, releasing the right button at the table would pop the
+-    // browser's own context menu on top of the canvas.
+-    const handleContextMenu = (event: MouseEvent) => {
+-      if (useSceneInteractionStore.getState().activeTargetId === "table") {
+-        event.preventDefault();
+-      }
+-    };
++    // The right button drags items (at the table and in the hood): without
++    // this, releasing it would pop the browser's own context menu on top of
++    // the canvas.
++    const handleContextMenu = (event: MouseEvent) => event.preventDefault();
+ 
+     element.addEventListener("mousedown", handlePointerDown);
+     element.addEventListener("mousemove", handleMouseMove);
+@@ -1539,9 +1539,11 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
+       // Settled — hold position/orientation exactly, apart from the tube
+       // close-up (heating, or the player looking at the tube), which blends
+       // off this held pose and back onto it.
+-      // No close-up of the stand's tube any more (VL-020): heating is watched
+-      // from the zone's own view. The blend below only ever unwinds an old one.
+-      const closeUp = false;
++      // Heating leans in on the spirit lamp (VL-020 dropped the stand's tube
++      // close-up); the blend below unwinds it when heating ends.
++      const closeUp = useHeatingStore.getState().active && LAMP_FLAME.valid;
++      burnerFocus.current.copy(LAMP_FLAME.point);
++      burnerFocus.current.y += BURNER_FOCUS_LIFT;
+       if (closeUp && !heatBasePosition.current) {
+         heatBasePosition.current = camera.position.clone();
+         heatBaseQuaternion.current.copy(camera.quaternion);
+@@ -1550,16 +1552,16 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
+       if (heatBasePosition.current) {
+         heatDolly.current = THREE.MathUtils.damp(heatDolly.current, closeUp ? 1 : 0, HEAT_DOLLY_DAMPING, delta);
+         const base = heatBasePosition.current;
+-        if (TUBE_FOCUS.valid) {
+-          // Approach the tube along the line it is seen on, and turn to
+-          // face it — the stand is off-centre in the hood, so a straight
++        if (LAMP_FLAME.valid) {
++          // Approach the flame along the line it is seen on, and turn to
++          // face it — the lamp is off-centre in the hood, so a straight
+           // dolly along the view ray would leave it at the screen's edge.
+           closeUpPosition.current
+-            .subVectors(base, TUBE_FOCUS.point)
++            .subVectors(base, burnerFocus.current)
+             .normalize()
+-            .multiplyScalar(TUBE_CLOSE_UP_DISTANCE)
+-            .add(TUBE_FOCUS.point);
+-          closeUpMatrix.current.lookAt(closeUpPosition.current, TUBE_FOCUS.point, camera.up);
++            .multiplyScalar(BURNER_CLOSE_UP_DISTANCE)
++            .add(burnerFocus.current);
++          closeUpMatrix.current.lookAt(closeUpPosition.current, burnerFocus.current, camera.up);
+           closeUpQuaternion.current.setFromRotationMatrix(closeUpMatrix.current);
+           camera.position.lerpVectors(base, closeUpPosition.current, heatDolly.current);
+           camera.quaternion.slerpQuaternions(heatBaseQuaternion.current, closeUpQuaternion.current, heatDolly.current);
+@@ -1621,16 +1623,18 @@ export function CameraRig({ onResumeMouseLook }: { readonly onResumeMouseLook: (
+       camera.position.z + directionZ,
+     );
+ 
+-    // No lean-in to the stand any more (VL-020); the damping below only ever settles it back.
+-    const standCloseUp = false;
+-    tableDolly.current = THREE.MathUtils.damp(tableDolly.current, standCloseUp ? 1 : 0, HEAT_DOLLY_DAMPING, delta);
+-    if (tableDolly.current > 0.001 && TUBE_FOCUS.valid) {
++    // Heating at the table leans in on the spirit lamp; the damping settles it back afterwards.
++    const burnerCloseUp = useHeatingStore.getState().active && LAMP_FLAME.valid;
++    burnerFocus.current.copy(LAMP_FLAME.point);
++    burnerFocus.current.y += BURNER_FOCUS_LIFT;
++    tableDolly.current = THREE.MathUtils.damp(tableDolly.current, burnerCloseUp ? 1 : 0, HEAT_DOLLY_DAMPING, delta);
++    if (tableDolly.current > 0.001 && LAMP_FLAME.valid) {
+       closeUpPosition.current
+-        .subVectors(base, TUBE_FOCUS.point)
++        .subVectors(base, burnerFocus.current)
+         .normalize()
+-        .multiplyScalar(TUBE_CLOSE_UP_DISTANCE)
+-        .add(TUBE_FOCUS.point);
+-      closeUpMatrix.current.lookAt(closeUpPosition.current, TUBE_FOCUS.point, camera.up);
++        .multiplyScalar(BURNER_CLOSE_UP_DISTANCE)
++        .add(burnerFocus.current);
++      closeUpMatrix.current.lookAt(closeUpPosition.current, burnerFocus.current, camera.up);
+       closeUpQuaternion.current.setFromRotationMatrix(closeUpMatrix.current);
+       camera.position.lerpVectors(base, closeUpPosition.current, tableDolly.current);
+       camera.quaternion.slerp(closeUpQuaternion.current, tableDolly.current);
+diff --git b/src/scenes/laboratory/ui/EquipmentCarrier.tsx b/src/scenes/laboratory/ui/EquipmentCarrier.tsx
+new file mode 100644
+index 0000000..411b534
+--- /dev/null
++++ b/src/scenes/laboratory/ui/EquipmentCarrier.tsx
+@@ -0,0 +1,83 @@
++import { useFrame } from "@react-three/fiber";
++import { useRef, type ReactNode } from "react";
++import * as THREE from "three";
++
++import { EQUIPMENT_PLACED } from "../lib/equipmentPlacement";
++import { HAND, useHandStore } from "../lib/useHandStore";
++import type { TubeLocation } from "../lib/useTestTubeStorageStore";
++
++/** How high the carried stand or lamp is lifted over the worktop — clear of it, its shadow right under it. */
++const CARRY_LIFT = 0.03;
++/** How closely it follows the hand (1/s, exponential) — smooths the mouse's jerks. */
++const FOLLOW_RATE = 20;
++/** How fast it glides back to where it was lifted from, when put back (1/s). */
++const HOME_RATE = 12;
++/** Seconds after being set down in a new place in which it simply stays there (its place has already moved). */
++const PLACED_WINDOW_MS = 300;
++
++const tmp = { target: new THREE.Vector3(), local: new THREE.Vector3(), world: new THREE.Vector3() };
++
++/**
++ * Lets the stand or the lamp be carried (VL-018): wrap it at its place — this
++ * group's origin is where it stands. While `what` at `location` is the item in
++ * the hand it follows the hand over the worktop, a little lifted; put back,
++ * it glides home; set down somewhere new, its place has moved already
++ * (`useEquipmentPlacementStore`) and it just stays.
++ *
++ * @param radius half its width — how far it is kept off other things on the worktop
++ */
++export function EquipmentCarrier({
++  what,
++  location,
++  radius,
++  children,
++}: {
++  readonly what: "stand" | "lamp";
++  readonly location: TubeLocation;
++  readonly radius: number;
++  readonly children: ReactNode;
++}) {
++  const groupRef = useRef<THREE.Group>(null);
++  const motion = useRef({ wasHeld: false, cur: new THREE.Vector3() });
++  const held = useHandStore((state) => state.held?.kind === "equipment" && state.held.what === what && state.held.location === location);
++
++  useFrame((_, rawDelta) => {
++    const group = groupRef.current;
++    const parent = group?.parent;
++    if (!group || !parent) return;
++    const delta = Math.min(rawDelta, 0.1);
++    const m = motion.current;
++    parent.updateWorldMatrix(true, false);
++    // Where it stands: the origin of the group it is wrapped in.
++    const home = parent.getWorldPosition(tmp.world);
++
++    if (held) {
++      HAND.home.copy(home);
++      HAND.homeValid = true;
++      HAND.radius = radius;
++      if (!m.wasHeld) m.cur.copy(home);
++      m.wasHeld = true;
++      tmp.target.copy(HAND.valid ? HAND.point : home);
++      tmp.target.y = home.y + CARRY_LIFT;
++      m.cur.lerp(tmp.target, 1 - Math.exp(-FOLLOW_RATE * delta));
++      HAND.itemPos.copy(m.cur);
++      HAND.itemPosValid = true;
++      group.position.copy(parent.worldToLocal(tmp.local.copy(m.cur)));
++      return;
++    }
++    if (!m.wasHeld && group.position.lengthSq() === 0) return;
++    if (m.wasHeld) {
++      m.wasHeld = false;
++      // Set down in a new place: it is standing there already.
++      if (Date.now() - EQUIPMENT_PLACED.at < PLACED_WINDOW_MS) {
++        group.position.set(0, 0, 0);
++        return;
++      }
++    }
++    // Put back: glide to where it stood.
++    group.position.multiplyScalar(Math.exp(-HOME_RATE * delta));
++    if (group.position.lengthSq() < 1e-8) group.position.set(0, 0, 0);
++  });
++
++  return <group ref={groupRef}>{children}</group>;
++}
+diff --git a/src/scenes/laboratory/ui/FumeHoodWorkArea.tsx b/src/scenes/laboratory/ui/FumeHoodWorkArea.tsx
+index 70e96a6..663e350 100644
+--- a/src/scenes/laboratory/ui/FumeHoodWorkArea.tsx
++++ b/src/scenes/laboratory/ui/FumeHoodWorkArea.tsx
+@@ -16,6 +16,9 @@ import { computeTubeSlotLocalOffset, useTestTubeStorageStore } from "../lib/useT
+ import { LabTestTubeInstance } from "./LabTestTubeInstance";
+ import { LabTestTubeRackInstance } from "./LabTestTubeRackInstance";
+ import { ReagentStaticDisplay } from "./ReagentStaticDisplay";
++import { DEFAULT_HOOD_STAND, hoodLampDefault, takeEquipment, useEquipmentPlacementStore } from "../lib/equipmentPlacement";
++import { pressToTake } from "../lib/pressToTake";
++import { EquipmentCarrier } from "./EquipmentCarrier";
+ import { SpiritBurner } from "./SpiritBurner";
+ import { StandStation, lampLayout } from "./StandStation";
+ import { HOOD_RACK_LOCAL, HOOD_STAND_LOCAL, HOOD_WORKTOP_Y, hoodBottleLocal } from "../lib/hoodLayout";
+@@ -64,6 +67,11 @@ const AWAY_FROM_PLAYER = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Ve
+ 
+ /** The lamp's own spot in the hood (VL-020) — where it used to stand beside the stand, in the stand's frame. */
+ const LONE_LAMP_POSITION = lampLayout(AWAY_FROM_PLAYER).lamp;
++/** …and in the hood's own space, where the player may set it elsewhere (`useEquipmentPlacementStore`). */
++const DEFAULT_HOOD_LAMP = hoodLampDefault(STAND_LOCAL, STAND_ROTATION_Y, LONE_LAMP_POSITION);
++/** Half the width of the stand's base / the 7.6 cm lamp — how far a carried one is kept off other things. */
++const STAND_BASE_RADIUS = 0.06;
++const LAMP_RADIUS = 0.038;
+ 
+ /** A tube's mouth above its base — the 15 cm `LabTestTube.glb`. */
+ const TUBE_MOUTH_HEIGHT = 0.15;
+@@ -93,6 +101,21 @@ function StandInFumeHood() {
+       object={instance}
+       // Still swallows the click, so it never falls through to what stands behind the stand.
+       onClick={(event: ThreeEvent<MouseEvent>) => event.stopPropagation()}
++      // The right button takes it into the hand (VL-018).
++      onPointerDown={(event: ThreeEvent<PointerEvent>) => {
++        if (event.button !== 2) return;
++        event.stopPropagation();
++        pressToTake(event.nativeEvent, () => takeEquipment("stand", "fumeHood"));
++      }}
++      // Named on hover — where it stands and what is in its clamp.
++      onPointerOver={(event: ThreeEvent<PointerEvent>) => {
++        event.stopPropagation();
++        useStandHintStore.getState().showLabel("stand-hood", "", { kind: "stand", place: "fumeHood" });
++      }}
++      onPointerOut={(event: ThreeEvent<PointerEvent>) => {
++        event.stopPropagation();
++        useStandHintStore.getState().hide("stand-hood");
++      }}
+     />
+   );
+ }
+@@ -135,6 +158,8 @@ export function FumeHoodWorkArea() {
+     state.active && state.target.mode === "hand" && state.target.location === "fumeHood" ? state.target.instanceId : null,
+   );
+   const lampInHood = useBurnerStore((state) => state.place === "fumeHood");
++  const standSpot = useEquipmentPlacementStore((state) => state.standHood) ?? DEFAULT_HOOD_STAND;
++  const lampSpot = useEquipmentPlacementStore((state) => state.lampHood) ?? DEFAULT_HOOD_LAMP;
+   const heldId = useHandStore((state) => state.held?.instanceId ?? null);
+   const rackArrival = useStandMotionStore((state) => (state.rackArrival?.location === "fumeHood" ? state.rackArrival : null));
+ 
+@@ -177,21 +202,25 @@ export function FumeHoodWorkArea() {
+       )}
+ 
+       {standInHood && (
+-        <group position={STAND_LOCAL} rotation={[0, STAND_ROTATION_Y, 0]}>
+-          <StandInFumeHood />
+-          <StandStation
+-            location="fumeHood"
+-            away={AWAY_FROM_PLAYER}
+-            tube={clampedIndex === null ? undefined : hoodTubes[clampedIndex]}
+-            crackZone={crackZone}
+-          />
++        <group position={[standSpot.x, STAND_LOCAL[1], standSpot.z]} rotation={[0, STAND_ROTATION_Y, 0]}>
++          <EquipmentCarrier what="stand" location="fumeHood" radius={STAND_BASE_RADIUS}>
++            <StandInFumeHood />
++            <StandStation
++              location="fumeHood"
++              away={AWAY_FROM_PLAYER}
++              tube={clampedIndex === null ? undefined : hoodTubes[clampedIndex]}
++              crackZone={crackZone}
++            />
++          </EquipmentCarrier>
+         </group>
+       )}
+ 
+-      {/* In its own place beside the stand's, with the stand or without it (VL-020). */}
++      {/* In its own place beside the stand's, with the stand or without it (VL-020) — or where the player set it. */}
+       {lampInHood && (
+-        <group position={STAND_LOCAL} rotation={[0, STAND_ROTATION_Y, 0]}>
+-          <SpiritBurner position={LONE_LAMP_POSITION} place="fumeHood" />
++        <group position={[lampSpot.x, STAND_LOCAL[1], lampSpot.z]} rotation={[0, STAND_ROTATION_Y, 0]}>
++          <EquipmentCarrier what="lamp" location="fumeHood" radius={LAMP_RADIUS}>
++            <SpiritBurner position={[0, 0, 0]} place="fumeHood" />
++          </EquipmentCarrier>
+         </group>
+       )}
+ 
+diff --git a/src/scenes/laboratory/ui/HandController.tsx b/src/scenes/laboratory/ui/HandController.tsx
+index f5bfa75..826409b 100644
+--- a/src/scenes/laboratory/ui/HandController.tsx
++++ b/src/scenes/laboratory/ui/HandController.tsx
+@@ -2,7 +2,7 @@ import { useFrame, useThree } from "@react-three/fiber";
+ import { useEffect, useMemo, useRef } from "react";
+ import * as THREE from "three";
+ 
+-import { handActionFor, heatInHandAction, standActionFor } from "../lib/standTableActions";
++import { fillTubeAction, handActionFor, heatInHandAction, standActionFor } from "../lib/standTableActions";
+ import { HAND, useHandStore, type HeldItem } from "../lib/useHandStore";
+ import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+ import { WORKBENCH_CARRY } from "../lib/tableTray";
+@@ -83,12 +83,14 @@ export function HandController() {
+       // From where the item is drawn (snapped beside its target), not the bare hand.
+       const from = HAND.itemPosValid ? HAND.itemPos : HAND.point;
+       action.run([from.x, from.y, from.z]);
+-      letGo();
++      // Filling a tube from a jar leaves it in the hand, for the next reagent.
++      if (action.part !== "jar") letGo();
+     };
+-    // Dragged (`HAND.dragging`): letting go sets it down — does what a click
+-    // would there, or, anywhere else, puts it back where it was taken from.
++    // Dragged with the right button (`HAND.dragging`): letting go sets it down —
++    // does what a click would there, or, anywhere else, puts it back where it
++    // was taken from.
+     const handleUp = (event: MouseEvent) => {
+-      if (event.button !== 0 || !HAND.dragging || held.kind === "workbench-tube") return;
++      if (event.button !== 2 || !HAND.dragging || held.kind === "workbench-tube") return;
+       event.stopPropagation();
+       event.preventDefault();
+       HAND.dragging = false;
+@@ -186,18 +188,19 @@ export function HandController() {
+       // Over its worktop and off everything on it (VL-018). The magnet still
+       // answers to the bare hand: the item snaps beside the tube it is kept off.
+       HAND.rawPoint.copy(s.hit);
+-      constrainOnWorktop(s.hit, HAND.radius, HAND.home, new Set([held.instanceId]));
++      // A carried stand is also kept off nothing it carries itself: the tube in its clamp.
++      constrainOnWorktop(s.hit, HAND.radius, HAND.home, new Set(held.kind === "equipment" && held.what === "stand" ? [held.instanceId, "clamped-tube"] : [held.instanceId]));
+       HAND.point.copy(s.hit);
+       HAND.valid = true;
+       const action = held.kind === "tray" ? trayHandAction(held) : handActionFor(held, HAND.rawPoint);
+-      HAND.action = action ? { label: action.label, blocked: action.blocked } : null;
++      HAND.action = action ? { label: action.label, blocked: action.blocked, subject: action.subject } : null;
+       // A bottle always aims at the tube in the clamp; a tube at the clamp
+       // while it is empty, else at the tube in it (to pour into).
+       const clampTaken = useBunsenStandStorageStore.getState().attachedTubeSlotIndex !== null;
+       useHandStore
+         .getState()
+         .setAim(
+-          action && action.part !== "tray"
++          action && !action.part
+             ? { part: held.kind === "bottle" || clampTaken ? "tube" : "clamp", refused: action.blocked }
+             : null,
+         );
+@@ -228,13 +231,16 @@ const shadowMaterials = SHADOW_OPACITY.map(
+ );
+ 
+ /** The workbench carry clamps by itself near the ring; the hand only says so. */
+-function workbenchTubeHint(held: Extract<HeldItem, { kind: "workbench-tube" }>): { label: string; blocked: boolean } | null {
++function workbenchTubeHint(held: Extract<HeldItem, { kind: "workbench-tube" }>): NonNullable<typeof HAND.action> | null {
+   if (WORKBENCH_CARRY.nearFlame) {
+     // Under the lamp's flame (VL-020): what a click does there, or why not.
+     const heat = heatInHandAction("workbench", held.index);
+-    if (heat) return { label: heat.label, blocked: heat.blocked };
++    if (heat) return { label: heat.label, blocked: heat.blocked, subject: heat.subject };
+   }
+   if (WORKBENCH_CARRY.overTray) return { label: "Поставить на поднос", blocked: false };
++  // Brought to a reagent jar: what a click will put in (or why it won't).
++  const fill = WORKBENCH_CARRY.nearJar ? fillTubeAction("workbench", held.index, WORKBENCH_CARRY.point) : null;
++  if (fill) return { label: fill.label, blocked: fill.blocked, subject: fill.subject };
+   const near = useTestTubeDragStore.getState().isNearHolder;
+   if (near) return { label: "Поставить обратно в штатив для пробирок", blocked: false };
+   const clamp = standActionFor({ kind: "rack-tube", location: "workbench", index: held.index }, { fromHand: true });
+diff --git a/src/scenes/laboratory/ui/HandGhosts.tsx b/src/scenes/laboratory/ui/HandGhosts.tsx
+index 6073e28..86f635e 100644
+--- a/src/scenes/laboratory/ui/HandGhosts.tsx
++++ b/src/scenes/laboratory/ui/HandGhosts.tsx
+@@ -8,7 +8,11 @@ import { useBunsenStandStorageStore } from "../lib/useBunsenStandStorageStore";
+ import { HAND, useHandStore, type HeldItem } from "../lib/useHandStore";
+ import { nextFreeTraySlot, useReagentStorageStore } from "../lib/useReagentStorageStore";
+ import { CLAMP_TUBE_MOUTH } from "../lib/useStandMotionStore";
++import { hoodBottleLocal, hoodLocalToWorld } from "../lib/hoodLayout";
++import { trayUnloadPlace } from "../lib/trayUnloadPlace";
++import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
+ import { computeTrayReagentPosition, useTrayReagentAreaStore } from "../lib/useTrayReagentAreaStore";
++import { computeWorkbenchReagentSlotOffsets, useWorkbenchReagentAreaStore } from "../lib/useWorkbenchReagentAreaStore";
+ 
+ /** The 15 cm tube: its origin is at its base, this far below its mouth. */
+ const TUBE_LENGTH = 0.15;
+@@ -48,6 +52,12 @@ export function HandGhosts() {
+       at: new THREE.Vector3(),
+       tray: new THREE.Matrix4(),
+       clamp: new THREE.Matrix4(),
++      landing: new THREE.Matrix4(),
++      landAt: new THREE.Vector3(),
++      landQuaternion: new THREE.Quaternion(),
++      landScale: new THREE.Vector3(),
++      innerQuaternion: new THREE.Quaternion(),
++      innerEuler: new THREE.Euler(),
+     }),
+     [],
+   );
+@@ -75,6 +85,7 @@ export function HandGhosts() {
+     HAND_GHOST.from.decompose(s.position, s.quaternion, s.scale);
+     const tray = traySpot(held, s);
+     const clamp = clampSpot(held, s);
++    const landing = trayBottleLanding(held, s);
+ 
+     // Where it ends up if let go now: on the tray, in the clamp — or, with
+     // nothing to do here, back where it was taken from. Pouring, it is the
+@@ -85,7 +96,8 @@ export function HandGhosts() {
+     if (aim?.part === "tube") now = null;
+     else if (aim?.part === "clamp" && clamp) now = clamp;
+     else if (action && !action.blocked && tray && WORKBENCH_TRAY_LABEL.test(action.label)) now = tray;
+-    else if (action && !action.blocked && held.kind === "tray") now = null;
++    // Off the tray: where it will stand once set down — its next place on the table, or in the hood.
++    else if (action && !action.blocked && held.kind === "tray") now = landing;
+ 
+     show(slots.now, now);
+     show(slots.from, now === HAND_GHOST.from ? null : HAND_GHOST.from);
+@@ -128,6 +140,49 @@ function traySpot(
+   return s.tray.compose(s.at, s.quaternion, s.scale);
+ }
+ 
++/**
++ * A bottle off the tray, set down where the player stands: its next place in
++ * the table's row of jars, or in the hood's column (the same slot
++ * `WorkbenchReagentDisplayArea` / `FumeHoodWorkArea` will give it). The
++ * outline is the item's own, resized and turned the way it stands there.
++ */
++function trayBottleLanding(
++  held: HeldItem,
++  s: {
++    landing: THREE.Matrix4;
++    landAt: THREE.Vector3;
++    landQuaternion: THREE.Quaternion;
++    landScale: THREE.Vector3;
++    innerQuaternion: THREE.Quaternion;
++    innerEuler: THREE.Euler;
++  },
++): THREE.Matrix4 | null {
++  const part = HAND_GHOST.shape?.[0];
++  const place = trayUnloadPlace();
++  if (held.kind !== "tray" || held.what !== "bottle" || !part || !place) return null;
++  // How the glass sits in the carried item now: its size and its turn.
++  part.matrix.decompose(s.landAt, s.innerQuaternion, s.landScale);
++  const innerScale = Math.max(s.landScale.x, 1e-6);
++  const innerYaw = s.innerEuler.setFromQuaternion(s.innerQuaternion, "YXZ").y;
++  let yaw: number;
++  let scale = 1;
++  if (place === "workbench") {
++    const config = useWorkbenchReagentAreaStore.getState().config;
++    const count = useReagentStorageStore.getState().workbenchItems.length + 1;
++    if (count > config.maxDisplaySlots) return null;
++    const offset = computeWorkbenchReagentSlotOffsets(config, count)[count - 1];
++    const table = useFurniturePositionStore.getState().getOverride("table").position;
++    s.landAt.set(table[0] + offset[0], table[1] + offset[1], table[2] + offset[2]);
++    yaw = config.rotationY;
++    scale = config.scale;
++  } else {
++    yaw = hoodLocalToWorld(hoodBottleLocal(useReagentStorageStore.getState().fumeHoodItems.length), s.landAt);
++  }
++  s.landQuaternion.setFromAxisAngle(UP, yaw - innerYaw);
++  s.landScale.setScalar(scale / innerScale);
++  return s.landing.compose(s.landAt, s.landQuaternion, s.landScale);
++}
++
+ /** A tube may go into the empty clamp. */
+ function clampSpot(
+   held: HeldItem,
+diff --git a/src/scenes/laboratory/ui/HandHints.tsx b/src/scenes/laboratory/ui/HandHints.tsx
+index 5a5bd24..c2ecf2d 100644
+--- a/src/scenes/laboratory/ui/HandHints.tsx
++++ b/src/scenes/laboratory/ui/HandHints.tsx
+@@ -1,6 +1,7 @@
+ import { useEffect, useRef, type CSSProperties } from "react";
+ 
+ import { useLaboratoryStore } from "../../../stores/laboratory/useLaboratoryStore";
++import { describeSubject } from "../lib/hoverInfo";
+ import { HAND, useHandStore } from "../lib/useHandStore";
+ import { useHeatingStore } from "../lib/useHeatingStore";
+ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
+@@ -21,10 +22,21 @@ const OFFSET_Y = 26;
+  */
+ export function HeldItemHint() {
+   const boxRef = useRef<HTMLDivElement>(null);
++  const titleRef = useRef<HTMLDivElement>(null);
++  const stateRef = useRef<HTMLDivElement>(null);
++  const actionRef = useRef<HTMLDivElement>(null);
+ 
+   useEffect(() => {
+     const box = boxRef.current;
+-    if (!box) return;
++    const title = titleRef.current;
++    const state = stateRef.current;
++    const actionLine = actionRef.current;
++    if (!box || !title || !state || !actionLine) return;
++    const setText = (element: HTMLElement, text: string | null) => {
++      const shown = text !== null && text !== "";
++      if (element.style.display !== (shown ? "block" : "none")) element.style.display = shown ? "block" : "none";
++      if (shown && element.textContent !== text) element.textContent = text;
++    };
+     let frame = 0;
+     const refresh = () => {
+       frame = requestAnimationFrame(refresh);
+@@ -35,7 +47,14 @@ export function HeldItemHint() {
+       }
+       box.style.display = "block";
+       box.style.transform = `translate(${HAND.screen.x + OFFSET_X}px, ${HAND.screen.y + OFFSET_Y}px)`;
+-      if (box.textContent !== action.label) box.textContent = action.label;
++      // What it is brought to — «NaCl · в вытяжном шкафу», its state — above what a click does.
++      const info = action.subject ? describeSubject(action.subject) : null;
++      setText(title, info?.title ?? null);
++      setText(state, info?.state ?? null);
++      setText(actionLine, action.label);
++      actionLine.style.borderTop = info ? "1px solid rgba(148, 163, 184, 0.25)" : "none";
++      actionLine.style.marginTop = info ? "3px" : "0";
++      actionLine.style.paddingTop = info ? "3px" : "0";
+       const tone = action.blocked ? "blocked" : "action";
+       if (box.dataset.tone !== tone) {
+         box.dataset.tone = tone;
+@@ -47,7 +66,13 @@ export function HeldItemHint() {
+     return () => cancelAnimationFrame(frame);
+   }, []);
+ 
+-  return <div ref={boxRef} style={hintStyle} data-testid="held-hint" />;
++  return (
++    <div ref={boxRef} style={hintStyle} data-testid="held-hint">
++      <div ref={titleRef} style={{ fontWeight: 700 }} />
++      <div ref={stateRef} style={{ fontWeight: 500, fontSize: 12, opacity: 0.75 }} />
++      <div ref={actionRef} />
++    </div>
++  );
+ }
+ 
+ interface Row {
+@@ -111,6 +136,7 @@ export function ControlsHint() {
+   } else {
+     rows = [
+       { controls: ["lmb"], at: "по предмету", what: "взять" },
++      { controls: ["rmb"], at: "по предмету", what: "перетащить" },
+       { controls: ["hover"], at: "наведите", what: "подсказка" },
+       { controls: ["esc"], what: "к обзору" },
+     ];
+diff --git a/src/scenes/laboratory/ui/InspectableTestTubeSlot.tsx b/src/scenes/laboratory/ui/InspectableTestTubeSlot.tsx
+index 83ad225..7f75442 100644
+--- a/src/scenes/laboratory/ui/InspectableTestTubeSlot.tsx
++++ b/src/scenes/laboratory/ui/InspectableTestTubeSlot.tsx
+@@ -16,7 +16,7 @@ import {
+ import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
+ import { useHeatingStore } from "../lib/useHeatingStore";
+ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
+-import { clickWorkbenchRackTube, heatInHandAction, nearFlame } from "../lib/standTableActions";
++import { clickWorkbenchRackTube, fillTubeAction, heatInHandAction, jarNearTube, nearFlame } from "../lib/standTableActions";
+ import { useStandHintStore } from "../lib/useStandHintStore";
+ import { useStandMotionStore } from "../lib/useStandMotionStore";
+ import { HAND, useHandStore } from "../lib/useHandStore";
+@@ -265,7 +265,15 @@ export function InspectableTestTubeSlot({
+         consumePickablePressed();
+         return;
+       }
+-      if (consumePickablePressed()) return;
++      // A click on a jar itself still means «fill», not «drop the tube».
++      const pressedJar = consumePickablePressed();
++      // Brought to a reagent jar: the click puts the reagent in, the tube stays in the hand.
++      const fill = WORKBENCH_CARRY.nearJar ? fillTubeAction("workbench", index, WORKBENCH_CARRY.point) : null;
++      if (fill) {
++        if (!fill.blocked) fill.run();
++        return;
++      }
++      if (pressedJar) return;
+       // Close enough to the ring (see the `useFrame` proximity check above)
+       // вЂ” clip in instead of dropping back into the rack. Captures this
+       // exact world pose (not just the slot index) so `AttachedTube` can fly
+@@ -519,6 +527,9 @@ export function InspectableTestTubeSlot({
+       WORKBENCH_CARRY.overTray = overTrayRef.current;
+       // Under the lamp's flame: a click heats it there, in the hand (VL-020).
+       WORKBENCH_CARRY.nearFlame = nearFlame("workbench", tubeWorldPos);
++      // Brought to a reagent jar: a click fills it (`fillTubeAction`).
++      WORKBENCH_CARRY.point.copy(tubeWorldPos);
++      WORKBENCH_CARRY.nearJar = jarNearTube("workbench", tubeWorldPos) !== null;
+ 
+       const bunsenState = useBunsenStandStorageStore.getState();
+       if (bunsenState.onWorkbench) {
+diff --git a/src/scenes/laboratory/ui/LabTrayInstance.tsx b/src/scenes/laboratory/ui/LabTrayInstance.tsx
+index 619b281..ecde0cf 100644
+--- a/src/scenes/laboratory/ui/LabTrayInstance.tsx
++++ b/src/scenes/laboratory/ui/LabTrayInstance.tsx
+@@ -603,7 +603,7 @@ export function LabTrayInstance({
+               // Taken on the press already; the click that ends it is not a «back to the shelf».
+               onActivate={() => trayUnloadPlace() !== null}
+               onHoverChange={(hovered) => {
+-                if (hovered && trayUnloadPlace()) useStandHintStore.getState().showLabel(item.id, TAKE_FROM_TRAY);
++                if (hovered && trayUnloadPlace()) useStandHintStore.getState().showLabel(item.id, TAKE_FROM_TRAY, { kind: "bottle", reagentId: item.reagent.id, place: "tray" });
+                 else useStandHintStore.getState().hide(item.id);
+               }}
+             />
+@@ -639,7 +639,7 @@ export function LabTrayInstance({
+             if (!trayUnloadPlace()) return;
+             event.stopPropagation();
+             document.body.style.cursor = "pointer";
+-            useStandHintStore.getState().showLabel(item.instanceId, TAKE_FROM_TRAY);
++            useStandHintStore.getState().showLabel(item.instanceId, TAKE_FROM_TRAY, { kind: "tube", place: "tray", instanceId: item.instanceId });
+           }}
+           onPointerOut={() => {
+             useStandHintStore.getState().hide(item.instanceId);
+diff --git a/src/scenes/laboratory/ui/Laboratory.tsx b/src/scenes/laboratory/ui/Laboratory.tsx
+index 73adfb6..4ba3549 100644
+--- a/src/scenes/laboratory/ui/Laboratory.tsx
++++ b/src/scenes/laboratory/ui/Laboratory.tsx
+@@ -100,6 +100,7 @@ import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
+ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
+ import { QUALITY_LEVELS, useRuntimeQualityStore } from "../lib/useRuntimeQualityStore";
+ import { pressToTake } from "../lib/pressToTake";
++import { startAutoCarry } from "../lib/autoCarryRuntime";
+ 
+ /** Exponential-smoothing time constant for a workbench jar gliding to a new grid slot after the table's jar count changes — see `DraggableWorkbenchReagent`'s doc. */
+ const GRID_REFLOW_TIME_CONSTANT_S = 0.18;
+@@ -276,7 +277,7 @@ function DraggableWorkbenchReagent({
+     group.position.z = tablePosition[2] + smoothed[1];
+   });
+   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+-    if (event.button !== 0) return;
++    if (event.button !== 0 && event.button !== 2) return;
+     event.stopPropagation();
+     // A pour (maybe this very jar's) is under way at the stand.
+     if (standBusy()) return;
+@@ -522,6 +523,9 @@ export function Laboratory() {
+     document.addEventListener("mousedown", handleMouseDown);
+     return () => document.removeEventListener("mousedown", handleMouseDown);
+   }, []);
++  // The stand and the lamp set themselves down where the player arrives and
++  // go back on the tray when they leave.
++  useEffect(() => startAutoCarry(), []);
+   const gameCanvasRef = useRef<HTMLCanvasElement | null>(null);
+ 
+   const resumeMouseLook = useCallback(() => {
+diff --git a/src/scenes/laboratory/ui/SpiritBurner.tsx b/src/scenes/laboratory/ui/SpiritBurner.tsx
+index 73179a9..552b807 100644
+--- a/src/scenes/laboratory/ui/SpiritBurner.tsx
++++ b/src/scenes/laboratory/ui/SpiritBurner.tsx
+@@ -3,7 +3,10 @@ import { useFrame, type ThreeEvent } from "@react-three/fiber";
+ import { useEffect, useMemo, useRef } from "react";
+ import * as THREE from "three";
+ 
++import { takeEquipment } from "../lib/equipmentPlacement";
+ import { LAMP_FLAME } from "../lib/lampFlame";
++import { pressToTake } from "../lib/pressToTake";
++import { HAND, useHandStore } from "../lib/useHandStore";
+ import { lampToTray } from "../lib/trayCarry";
+ import { useBurnerStore } from "../lib/useBurnerStore";
+ import type { TubeLocation } from "../lib/useTestTubeStorageStore";
+@@ -210,8 +213,16 @@ export function SpiritBurner({
+       position={position as unknown as [number, number, number]}
+       // Click and caption both come from `standTableActions` (VL-014).
+       {...standTargetEvents("spirit-burner", { kind: "burner" })}
++      // The right button takes it into the hand: dragged, carried over the worktop and set down.
++      onPointerDown={(event: ThreeEvent<PointerEvent>) => {
++        if (event.button !== 2 || useHandStore.getState().held) return;
++        event.stopPropagation();
++        pressToTake(event.nativeEvent, () => takeEquipment("lamp", place));
++      }}
+       onContextMenu={(event: ThreeEvent<MouseEvent>) => {
+         event.stopPropagation();
++        // The release that ends a carry also raises a context menu — it is not «on the tray».
++        if (Date.now() - HAND.releasedAt < 400) return;
+         if (useBurnerStore.getState().phase === "capped") lampToTray(place);
+       }}
+     >
+diff --git a/src/scenes/laboratory/ui/StandActionHint.tsx b/src/scenes/laboratory/ui/StandActionHint.tsx
+index e2d68bb..c7391c1 100644
+--- a/src/scenes/laboratory/ui/StandActionHint.tsx
++++ b/src/scenes/laboratory/ui/StandActionHint.tsx
+@@ -1,5 +1,6 @@
+ import { useEffect, useRef, type CSSProperties } from "react";
+ 
++import { describeSubject, subjectOfTarget } from "../lib/hoverInfo";
+ import { standActionFor, takeLabel } from "../lib/standTableActions";
+ import { useHandStore } from "../lib/useHandStore";
+ import { useSceneInteractionStore } from "../lib/useSceneInteractionStore";
+@@ -10,10 +11,11 @@ const CURSOR_OFFSET_X = 18;
+ const CURSOR_OFFSET_Y = 20;
+ 
+ /**
+- * The caption next to the cursor over a table object: what clicking it will
+- * do («Прилить HNO₃ в пробирку в лапке»), or in red, why nothing will
+- * («Сначала закрепите пробирку в лапке штатива»). This replaces the stand's
+- * action menu — the player reads the action off the object itself.
++ * The caption next to the cursor over a table object: what it is and where
++ * it is («Азотная кислота · на столе»), its state («раствор, HNO₃»), and what
++ * clicking it will do («Прилить HNO₃ в пробирку в лапке»), or in red, why
++ * nothing will («Сначала закрепите пробирку в лапке штатива»). This replaces
++ * the stand's action menu — the player reads the action off the object itself.
+  *
+  * Position and text are written straight to the DOM (mousemove / one rAF
+  * loop) rather than through React state: both change far more often than
+@@ -21,10 +23,21 @@ const CURSOR_OFFSET_Y = 20;
+  */
+ export function StandActionHint() {
+   const boxRef = useRef<HTMLDivElement>(null);
++  const titleRef = useRef<HTMLDivElement>(null);
++  const stateRef = useRef<HTMLDivElement>(null);
++  const actionRef = useRef<HTMLDivElement>(null);
+ 
+   useEffect(() => {
+     const box = boxRef.current;
+-    if (!box) return;
++    const title = titleRef.current;
++    const state = stateRef.current;
++    const actionLine = actionRef.current;
++    if (!box || !title || !state || !actionLine) return;
++    const setText = (element: HTMLElement, text: string | null) => {
++      const shown = text !== null && text !== "";
++      if (element.style.display !== (shown ? "block" : "none")) element.style.display = shown ? "block" : "none";
++      if (shown && element.textContent !== text) element.textContent = text;
++    };
+     // The 3D scene only hears the cursor leave an object while the cursor
+     // is over the canvas: once the tablet or any panel is in the way (or the
+     // camera flew off) no `pointerout` comes. So the caption shows only over
+@@ -45,7 +58,7 @@ export function StandActionHint() {
+     let shownFor: unknown = null;
+     const refresh = () => {
+       frame = requestAnimationFrame(refresh);
+-      const { target, label, owner } = useStandHintStore.getState();
++      const { target, label, owner, subject: named } = useStandHintStore.getState();
+       // A new object under the cursor has just set its own cursor in its
+       // `pointerover`; forget the tone so ours is applied over it.
+       const showing = target ?? owner;
+@@ -56,29 +69,37 @@ export function StandActionHint() {
+       // Bottles and rack tubes are taken into the hand; the stand's own parts act.
+       const takeable = target?.kind === "bottle" || target?.kind === "rack-tube";
+       const take = takeable ? takeLabel(target) : null;
+-      const next =
+-        !overScene || useHandStore.getState().held
+-          ? null
+-          : label
+-            ? { label, blocked: false }
+-            : !target
+-              ? null
+-              : takeable
+-            ? take
+-              ? { label: take, blocked: false }
+-              : null
+-            : standActionFor(target);
+-      if (!next) {
++      const hidden = !overScene || useHandStore.getState().held;
++      const next = hidden
++        ? null
++        : label
++          ? { label, blocked: false }
++          : !target
++            ? null
++            : takeable
++              ? take
++                ? { label: take, blocked: false }
++                : null
++              : standActionFor(target);
++      const subject = hidden ? null : named ?? (target ? subjectOfTarget(target) : null);
++      const info = subject ? describeSubject(subject) : null;
++      if (!next && !info) {
+         if (box.style.display !== "none") box.style.display = "none";
+         return;
+       }
+       box.style.display = "block";
+-      if (box.textContent !== next.label) box.textContent = next.label;
+-      const tone = next.blocked ? "blocked" : "action";
++      setText(title, info?.title ?? null);
++      setText(state, info?.state ?? null);
++      setText(actionLine, next?.label ?? null);
++      // The rule between name and action only when there is a name above it.
++      actionLine.style.borderTop = info ? ACTION_RULE : "none";
++      actionLine.style.marginTop = info ? "3px" : "0";
++      actionLine.style.paddingTop = info ? "3px" : "0";
++      const tone = next ? (next.blocked ? "blocked" : "action") : "info";
+       if (box.dataset.tone !== tone) {
+         box.dataset.tone = tone;
+         Object.assign(box.style, TONES[tone]);
+-        document.body.style.cursor = next.blocked ? "not-allowed" : "pointer";
++        document.body.style.cursor = next ? (next.blocked ? "not-allowed" : "pointer") : "auto";
+       }
+     };
+     window.addEventListener("mousemove", handleMove);
+@@ -90,14 +111,26 @@ export function StandActionHint() {
+     };
+   }, []);
+ 
+-  return <div ref={boxRef} style={boxStyle} data-testid="stand-hint" />;
++  return (
++    <div ref={boxRef} style={boxStyle} data-testid="stand-hint">
++      <div ref={titleRef} style={titleStyle} />
++      <div ref={stateRef} style={stateStyle} />
++      <div ref={actionRef} style={actionStyle} />
++    </div>
++  );
+ }
+ 
+-const TONES: Record<"action" | "blocked", Partial<CSSStyleDeclaration>> = {
++const TONES: Record<"action" | "blocked" | "info", Partial<CSSStyleDeclaration>> = {
++  info: { borderColor: "rgba(148, 163, 184, 0.45)", color: "#e6f6ff" },
+   action: { borderColor: "rgba(56, 189, 248, 0.55)", color: "#e6f6ff" },
+   blocked: { borderColor: "rgba(248, 113, 113, 0.7)", color: "#fecaca" },
+ };
+ 
++const titleStyle: CSSProperties = { fontWeight: 700 };
++const stateStyle: CSSProperties = { fontWeight: 500, fontSize: 12, opacity: 0.75 };
++const ACTION_RULE = "1px solid rgba(148, 163, 184, 0.25)";
++const actionStyle: CSSProperties = {};
++
+ const boxStyle: CSSProperties = {
+   position: "fixed",
+   left: 0,
+diff --git a/src/scenes/laboratory/ui/StandMotion.tsx b/src/scenes/laboratory/ui/StandMotion.tsx
+index ac1f003..c2a025b 100644
+--- a/src/scenes/laboratory/ui/StandMotion.tsx
++++ b/src/scenes/laboratory/ui/StandMotion.tsx
+@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+ import * as THREE from "three";
+ 
+ import type { Position3 } from "../lib/layout";
++import { takePlacedFrom } from "../lib/placedFrom";
+ import { HAND, useHandStore } from "../lib/useHandStore";
+ import { constrainOnWorktop, registerWorktopObstacle, shownInWorld } from "../lib/worktopBounds";
+ import { publishGhostShape } from "../lib/handGhost";
+@@ -155,6 +156,8 @@ export function PourMotion({
+     cur: new THREE.Vector3(),
+     curQuat: new THREE.Quaternion(),
+     capOff: 0,
++    /** Flying in from the hand after being set down here: the cap stays on. */
++    arrived: false,
+     wasHeld: false,
+     wasPouring: false,
+     /** Going home: where from, how far along (0..1; −1 — not going home), in how long. */
+@@ -286,6 +289,17 @@ export function PourMotion({
+ 
+     const elapsed = pour ? Date.now() - pour.at : Infinity;
+     const pouring = !!pour && elapsed < POUR_MS && CLAMP_TUBE_MOUTH.valid;
++    // Just set down here from the hand (off the tray): it starts where the
++    // hand let go and goes home like any released item, capped all the way.
++    const placedFrom = !m.away && !held && !pouring ? takePlacedFrom(instanceId) : null;
++    if (placedFrom) {
++      measure(group);
++      m.away = true;
++      m.arrived = true;
++      m.cur.set(...placedFrom);
++      m.curQuat.copy(s.restQuat);
++      m.homeT = -1;
++    }
+     if (!m.away && !held && !pouring) {
+       // At its place and staying there.
+       m.cur.copy(s.rest);
+@@ -413,7 +427,7 @@ export function PourMotion({
+ 
+     // The cap: off while the bottle is away from its place, back on once it is home.
+     const home = !held && !pouring && m.cur.equals(s.rest);
+-    m.capOff = THREE.MathUtils.clamp(m.capOff + (home || keepCap ? -1 : 1) * (delta / CAP_SECONDS), 0, 1);
++    m.capOff = THREE.MathUtils.clamp(m.capOff + (home || keepCap || m.arrived ? -1 : 1) * (delta / CAP_SECONDS), 0, 1);
+     if (r.cap?.parent) {
+       group.updateWorldMatrix(false, true);
+       r.cap.getWorldPosition(s.onBottle);
+@@ -428,6 +442,7 @@ export function PourMotion({
+     if (home && m.capOff === 0) {
+       // Home, capped: back to standing still.
+       m.away = false;
++      m.arrived = false;
+       if (r.cap) {
+         r.cap.position.copy(r.capPosition);
+         r.cap.quaternion.copy(r.capQuaternion);
+diff --git a/src/scenes/laboratory/ui/TrayEquipmentDisplay.tsx b/src/scenes/laboratory/ui/TrayEquipmentDisplay.tsx
+index 8b16e93..2111695 100644
+--- a/src/scenes/laboratory/ui/TrayEquipmentDisplay.tsx
++++ b/src/scenes/laboratory/ui/TrayEquipmentDisplay.tsx
+@@ -117,7 +117,7 @@ export function TrayEquipmentDisplay({
+         if (useReagentInspectionStore.getState().inspectedId !== null) return;
+         document.body.style.cursor = "pointer";
+         setHovered(true);
+-        if (trayUnloadPlace()) useStandHintStore.getState().showLabel(owner, TAKE_FROM_TRAY);
++        if (trayUnloadPlace()) useStandHintStore.getState().showLabel(owner, TAKE_FROM_TRAY, { kind: what, place: "tray" });
+       }}
+       onPointerMove={(event) => {
+         // Onto the lamp inside the stand's hitbox, the lamp is the one lit; off it, the stand again.
+@@ -126,7 +126,7 @@ export function TrayEquipmentDisplay({
+         if (onLamp === !hovered) return;
+         setHovered(!onLamp);
+         if (onLamp) useStandHintStore.getState().hide(owner);
+-        else if (trayUnloadPlace()) useStandHintStore.getState().showLabel(owner, TAKE_FROM_TRAY);
++        else if (trayUnloadPlace()) useStandHintStore.getState().showLabel(owner, TAKE_FROM_TRAY, { kind: what, place: "tray" });
+       }}
+       onPointerOut={(event) => {
+         event.stopPropagation();
+diff --git a/src/scenes/laboratory/ui/WorkbenchTestTubeRackInstance.tsx b/src/scenes/laboratory/ui/WorkbenchTestTubeRackInstance.tsx
+index d550e2d..7a8230d 100644
+--- a/src/scenes/laboratory/ui/WorkbenchTestTubeRackInstance.tsx
++++ b/src/scenes/laboratory/ui/WorkbenchTestTubeRackInstance.tsx
+@@ -3,6 +3,7 @@ import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+ import * as THREE from "three";
+ 
+ import { useFurniturePositionStore } from "../lib/useFurniturePositionStore";
++import { useStandHintStore } from "../lib/useStandHintStore";
+ import { useReagentInspectionStore } from "../lib/useReagentInspectionStore";
+ import { useReagentPickablesStore } from "../lib/useReagentPickablesStore";
+ import { useStopperHolderStore } from "../lib/useStopperHolderStore";
+@@ -242,7 +243,7 @@ export function WorkbenchTestTubeRackInstance() {
+   // still brings the rack up to look at.
+   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+     const group = groupRef.current;
+-    if (!group || anyInspected || event.button !== 0) return;
++    if (!group || anyInspected || (event.button !== 0 && event.button !== 2)) return;
+     if (useHandStore.getState().held || useTestTubeDragStore.getState().heldInstanceId !== null) return;
+     // The tube nearest the cursor on screen — the rack's hitbox is one box,
+     // and the tubes stick up out of it.
+@@ -361,11 +362,15 @@ export function WorkbenchTestTubeRackInstance() {
+       onPointerDown={handlePointerDown}
+       onPointerOver={(event) => {
+         event.stopPropagation();
+-        if (!anyInspected && !anyTubeHeld) setHovered(true);
++        if (!anyInspected && !anyTubeHeld) {
++          setHovered(true);
++          useStandHintStore.getState().showLabel("rack-table", "", { kind: "rack", place: "workbench" });
++        }
+       }}
+       onPointerOut={(event) => {
+         event.stopPropagation();
+         setHovered(false);
++        useStandHintStore.getState().hide("rack-table");
+       }}
+       hoverActive={anyTubeHeld ? isNearHolder : hovered && !anyInspected}
+     >

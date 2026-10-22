@@ -1,0 +1,28 @@
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+html {
+  overscroll-behavior: none;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  /* Every overlay without its own font (zone label, heating panel, notices)
+     fell back to the browser's serif default. Loaded by tabletFonts.css. */
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+}
+
+canvas {
+  display: block;
+  border: 0;
+  outline: none;
+}

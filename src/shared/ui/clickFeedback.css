@@ -1,0 +1,36 @@
+/* Rings spreading from the click point — see `ClickFeedback`. */
+.vg-click-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+@keyframes vg-click-ring {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.25);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.vg-click-ring {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid #7dd3fc;
+  /* The same dark outline the cursor and the hint glyphs have. */
+  box-shadow:
+    0 0 0 1.5px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1.5px rgba(0, 0, 0, 0.6);
+  animation: vg-click-ring 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.vg-click-ring.is-text {
+  border-color: #f97316;
+}

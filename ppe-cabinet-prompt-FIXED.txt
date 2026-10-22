@@ -1,0 +1,1008 @@
+STRICT AUTONOMOUS PPE CABINET BUILD — EMPTY STORAGE CABINET ONLY.
+
+Use Blender MCP.
+
+PROJECT ROOT:
+
+D:\virtugenium-lab
+
+MANDATORY DONOR / BASE MODEL:
+
+D:\virtugenium-lab\blender-source\ReagentCabinet_MASTER.blend
+
+TARGET SOURCE:
+
+D:\virtugenium-lab\blender-source\PPECabinet_MASTER.blend
+
+AUTHORITATIVE VISUAL REFERENCE:
+
+D:\virtugenium-lab\references\PPECabinet_FINAL_REFERENCE.png
+
+TARGET EXPORT:
+
+D:\virtugenium-lab\public\assets\models\PPECabinet.glb
+
+STATE:
+
+D:\virtugenium-lab\overnight\ppe\ppe_state.json
+
+PASS MARKER:
+
+D:\virtugenium-lab\overnight\ppe\ppe.done
+
+STOP MARKER:
+
+D:\virtugenium-lab\overnight\ppe\ppe.stop
+
+FINAL REPORT:
+
+D:\virtugenium-lab\overnight\ppe\ppe_final_report.md
+
+==================================================
+0. CRITICAL EXECUTION RULE
+==================================================
+
+This PPE cabinet MUST be derived from the existing approved
+ReagentCabinet_MASTER design family.
+
+The external PowerShell runner creates PPECabinet_MASTER.blend
+as a COPY of ReagentCabinet_MASTER.blend before the first iteration
+if the target does not yet exist.
+
+Therefore:
+
+DO NOT modify ReagentCabinet_MASTER.blend.
+
+Work only in:
+
+D:\virtugenium-lab\blender-source\PPECabinet_MASTER.blend
+
+Preserve useful approved visual language from the reagent cabinet:
+
+- body construction;
+- panel thickness language;
+- graphite trim;
+- recessed plinth;
+- approved handle design;
+- approved category/header plaque design;
+- clean laboratory furniture proportions.
+
+BUT the PPE cabinet is NOT another reagent cabinet.
+
+Remove donor systems that do not belong.
+
+==================================================
+1. CRITICAL — DO NOT MODEL PPE CONTENTS
+==================================================
+
+DO NOT model:
+
+- lab coat;
+- goggles;
+- gloves;
+- glove box;
+- hanger;
+- mannequin;
+- helmet;
+- respirator;
+- mask;
+- shoes;
+- first-aid supplies;
+- disinfectant;
+- documents;
+- any other PPE or prop.
+
+The cabinet must be EMPTY.
+
+The visual reference may show a coat, goggles, gloves or other content.
+IGNORE ALL PPE/PROP CONTENT visible in the reference.
+
+Use the reference ONLY for:
+
+- narrow cabinet proportions;
+- one-door silhouette;
+- upper split storage layout;
+- horizontal coat rail placement;
+- general furniture design.
+
+The final Blender asset and GLB must contain NO modeled PPE props.
+
+==================================================
+2. STRICT LOW-TOKEN MODE
+==================================================
+
+Use minimum Blender MCP calls.
+
+No narration.
+No design alternatives.
+No repeated project audits.
+No repeated intermediate renders.
+No unrelated file inspection.
+
+ONE implementation/evaluation iteration per Claude invocation.
+
+At the end of each invocation:
+- update ppe_state.json;
+- STOP.
+
+The PowerShell runner will invoke the next iteration if needed.
+
+MAXIMUM ITERATIONS: 8.
+
+==================================================
+3. FIXED OVERALL DIMENSIONS
+==================================================
+
+Target real-world dimensions:
+
+WIDTH:
+0.700 m ± 0.015 m
+
+DEPTH:
+0.500 m ± 0.015 m
+
+HEIGHT:
+2.000 m ± 0.020 m
+
+1 Blender unit = 1 meter.
+
+Root origin:
+floor center.
+
+Front faces world -Y.
+
+Do NOT make the cabinet 1.2 m wide.
+
+The PPE cabinet must be noticeably NARROWER than the reagent cabinets.
+
+==================================================
+4. INTERNAL STORAGE PURPOSE
+==================================================
+
+The cabinet is prepared for ONLY THREE FUTURE gameplay items:
+
+- lab coat;
+- goggles;
+- gloves.
+
+These future items are NOT modeled now.
+
+Create only empty storage geometry / anchors for them.
+
+Required functional layout:
+
+TOP LEFT:
+empty compartment reserved for goggles.
+
+TOP RIGHT:
+empty compartment reserved for gloves.
+
+BELOW TOP COMPARTMENTS:
+one horizontal coat rail reserved for a future lab coat.
+
+MAIN LOWER INTERIOR:
+empty hanging space.
+
+Do NOT add additional shelves below the coat rail.
+
+==================================================
+5. UPPER TWO-COMPARTMENT STORAGE
+==================================================
+
+Create exactly ONE upper storage zone split into EXACTLY TWO compartments
+by one central vertical divider.
+
+Required logical objects:
+
+PPE_TopShelf
+PPE_TopDivider
+PPE_GogglesSlot
+PPE_GlovesSlot
+
+LEFT upper compartment:
+
+PPE_GogglesSlot
+
+RIGHT upper compartment:
+
+PPE_GlovesSlot
+
+The two compartments should be visually similar in width.
+
+Target upper storage clear height:
+
+approximately 0.28–0.34 m.
+
+The slot objects may be EMPTY/anchor/helper nodes for runtime placement.
+
+They must NOT contain modeled goggles or gloves.
+
+==================================================
+6. COAT RAIL
+==================================================
+
+Directly BELOW the upper two-compartment storage,
+install ONE horizontal coat rail.
+
+Required object:
+
+PPE_CoatRail
+
+The rail spans most of the usable internal cabinet width.
+
+It must be:
+
+- horizontal;
+- graphite;
+- structurally plausible;
+- mounted into left/right interior sides.
+
+Suggested vertical location:
+
+approximately Z = 1.45–1.55 m,
+adjusted to real interior clearances.
+
+The rail must remain below the upper compartments.
+
+DO NOT create a coat.
+DO NOT create a hanger.
+
+==================================================
+7. MAIN HANGING SPACE
+==================================================
+
+Below PPE_CoatRail leave one clean EMPTY vertical hanging zone.
+
+This space is reserved for a future runtime lab-coat asset.
+
+Do NOT add:
+
+- extra shelves;
+- drawers;
+- hooks;
+- shoes;
+- bins;
+- props.
+
+The main interior should remain visually simple and open.
+
+==================================================
+8. SINGLE SOLID FRONT DOOR
+==================================================
+
+The PPE cabinet has EXACTLY ONE front door.
+
+NOT two doors.
+
+NOT glass double doors.
+
+NOT upper + lower doors.
+
+NOT drawers.
+
+Required objects:
+
+PPECabinet_DoorPivot_Left
+PPECabinet_Door
+PPECabinet_Handle
+
+The door is a FULL-HEIGHT SOLID SWING DOOR
+covering the main front opening.
+
+==================================================
+9. DOOR HINGE / OPENING DIRECTION — CRITICAL
+==================================================
+
+The door is LEFT-HINGED.
+
+HINGES / PIVOT AXIS:
+LEFT vertical side of the cabinet.
+
+HANDLE:
+RIGHT side of the door.
+
+The free RIGHT edge swings outward.
+
+From the front view:
+
+LEFT = hinge side.
+
+RIGHT = handle side.
+
+Do NOT mirror this.
+
+==================================================
+10. DOOR PIVOT
+==================================================
+
+PPECabinet_DoorPivot_Left must be positioned on the actual
+LEFT vertical hinge axis.
+
+PPECabinet_Door and PPECabinet_Handle must move with this pivot.
+
+Closed angle:
+0 degrees.
+
+Open QA angle:
+approximately 95–110 degrees outward.
+
+The door must rotate around the LEFT side,
+NOT around its center.
+
+==================================================
+11. DOOR DESIGN
+==================================================
+
+Use a solid light off-white door.
+
+No large glass panel.
+No decorative window.
+No multiple sections.
+
+Use the approved reagent-cabinet manufacturing language:
+
+- clean panel thickness;
+- subtle bevel;
+- realistic perimeter reveal;
+- professional fit.
+
+Target visible door-to-frame gap:
+
+approximately 3–4 mm.
+
+==================================================
+12. HANDLE — ACTUAL REAGENT CABINET DESIGN
+==================================================
+
+Use the ACTUAL approved reagent-cabinet handle design.
+
+Known donor lower-handle family includes:
+
+LowerHandle_Left
+LowerHandle_Left_Bar
+LowerHandle_Left_LegTop
+LowerHandle_Left_LegBottom
+
+Reuse actual donor geometry where available in the copied target
+or library-load it from ReagentCabinet_MASTER.blend if required.
+
+Do NOT create a primitive stick.
+
+The PPE cabinet uses exactly ONE handle.
+
+Place it vertically on the RIGHT side of the single door.
+
+Preserve:
+
+- main bar;
+- mounting legs;
+- graphite material;
+- believable stand-off from door.
+
+==================================================
+13. HEADER / PLAQUE
+==================================================
+
+Use the reagent cabinet's ACTUAL approved plaque design.
+
+Known donor plaque objects include:
+
+CategoryLabelPlate
+CategoryLabelAccent
+
+Adapt donor plaque geometry to the narrow PPE cabinet.
+
+Text EXACTLY:
+
+СИЗ
+
+ONE LINE.
+
+Centered.
+
+Use the approved dark plaque style.
+
+Accent:
+
+#22B8C7
+
+Keep the plaque proportionate to a 700 mm-wide cabinet.
+
+==================================================
+14. REMOVE REAGENT-CABINET-SPECIFIC FEATURES
+==================================================
+
+Remove / omit all donor systems that do not belong in the PPE cabinet:
+
+- upper reagent glass double doors;
+- Door_Left / Door_Right reagent-door behavior;
+- ChangeShutter;
+- Shutter_BottomBar;
+- Shutter_Housing;
+- Shutter_Guides;
+- ControlPanel;
+- Page_Display;
+- reagent lower-door pair;
+- reagent shelf layout;
+- chemical category mechanics;
+- chemical containers;
+- unrelated reagent-specific geometry.
+
+Do NOT leave hidden duplicate donor systems inside the final GLB.
+
+==================================================
+15. BASE / PLINTH
+==================================================
+
+Keep a solid recessed plinth.
+
+No exposed legs.
+
+Use graphite / dark neutral material.
+
+Target plinth height:
+
+approximately 0.07–0.09 m.
+
+==================================================
+16. MATERIAL LANGUAGE
+==================================================
+
+Main body / door:
+
+approximately #E4E7E6
+
+Interior:
+
+neutral light-to-medium gray.
+
+Structural graphite / rail / handle / trim:
+
+approximately #30363A
+
+Plinth:
+
+approximately #252A2E
+
+Plaque:
+
+dark graphite / near-black
+
+Accent:
+
+#22B8C7
+
+Keep sufficient tonal separation between interior surfaces.
+
+==================================================
+17. STABLE RUNTIME HIERARCHY
+==================================================
+
+Required stable nodes:
+
+PPECabinet_Root
+PPECabinet_Body
+PPECabinet_DoorPivot_Left
+PPECabinet_Door
+PPECabinet_Handle
+PPECabinet_Header
+PPECabinet_HeaderText
+PPECabinet_HeaderAccent
+PPE_TopShelf
+PPE_TopDivider
+PPE_GogglesSlot
+PPE_GlovesSlot
+PPE_CoatRail
+
+Optional helper/anchor:
+
+PPE_CoatAnchor
+
+ABSOLUTELY FORBIDDEN runtime nodes:
+
+PPE_LabCoat
+PPE_Goggles
+PPE_Gloves
+
+or any modeled PPE-prop equivalents.
+
+==================================================
+18. DONOR PROVENANCE
+==================================================
+
+Set on PPECabinet_Root:
+
+["donor_source"] =
+"D:\\virtugenium-lab\\blender-source\\ReagentCabinet_MASTER.blend"
+
+["derived_from_reagent_cabinet"] = True
+
+For actually reused donor handle/plaque geometry add:
+
+["donor_role"] = <original donor role/name>
+
+Do not claim donor reuse if geometry was recreated.
+
+==================================================
+19. GEOMETRY QUALITY
+==================================================
+
+Realtime asset.
+
+Requirements:
+
+- no z-fighting;
+- no accidental duplicates;
+- no floating panels;
+- no major self-intersections;
+- no geometry below floor beyond tiny tolerance;
+- clean door pivot;
+- clean normals;
+- reasonable bevels;
+- no unnecessary micro-detail.
+
+Preferred triangle count:
+<= 25,000
+
+Warning:
+> 40,000
+
+Preferred material count:
+<= 8
+
+The asset should be lighter because PPE props are NOT included.
+
+==================================================
+20. DETERMINISTIC VALIDATOR
+==================================================
+
+Create/update:
+
+D:\virtugenium-lab\scripts\validate_ppe_cabinet.py
+
+It must evaluate the CURRENT PPE cabinet and write machine-readable
+state to:
+
+D:\virtugenium-lab\overnight\ppe\ppe_state.json
+
+==================================================
+21. DETERMINISTIC CHECKS
+==================================================
+
+Check at minimum:
+
+A. OVERALL BBOX
+
+width:
+0.700 ± 0.015 m
+
+depth:
+0.500 ± 0.015 m
+
+height:
+2.000 ± 0.020 m
+
+B. REQUIRED NODES
+
+all required stable nodes exist.
+
+C. SINGLE DOOR
+
+exactly ONE main PPE door.
+
+D. DOOR HINGE
+
+PPECabinet_DoorPivot_Left is on LEFT side.
+
+E. HANDLE
+
+exactly ONE main door handle.
+
+handle is on RIGHT side.
+
+F. DOOR MOTION
+
+temporary ~100-degree test rotation around PPECabinet_DoorPivot_Left
+opens outward correctly.
+
+Restore closed transform after test.
+
+G. TOP STORAGE
+
+exactly TWO upper compartments.
+
+one central divider.
+
+PPE_GogglesSlot is LEFT.
+
+PPE_GlovesSlot is RIGHT.
+
+H. COAT RAIL
+
+PPE_CoatRail exists.
+
+rail is horizontal.
+
+rail is below upper shelf compartments.
+
+I. PPE PROPS MUST BE ABSENT — CRITICAL
+
+There must be ZERO modeled PPE content.
+
+Fail if scene/export contains objects or collections representing:
+
+- lab coat;
+- coat mesh;
+- goggles mesh;
+- gloves mesh;
+- glove box;
+- hanger;
+- helmet;
+- respirator;
+- shoes;
+- PPE props.
+
+Specifically verify these forbidden nodes do NOT exist:
+
+PPE_LabCoat
+PPE_Goggles
+PPE_Gloves
+
+J. EMPTY INTERIOR
+
+main hanging zone remains free of extra shelves/props.
+
+K. PLINTH
+
+recessed plinth present.
+
+no exposed legs.
+
+L. GEOMETRY HEALTH
+
+triangle count
+material count
+major below-floor geometry
+obvious duplicates
+transform warnings.
+
+==================================================
+22. DETERMINISTIC SCORE — 60 POINTS
+==================================================
+
+Dimensions:
+12
+
+Required hierarchy:
+8
+
+Single left-hinged door + right handle:
+12
+
+Upper two-compartment layout:
+8
+
+Coat rail:
+5
+
+NO PPE PROP GEOMETRY:
+8
+
+Plinth / floor alignment:
+3
+
+Geometry/material budget:
+4
+
+TOTAL:
+60
+
+Any modeled coat/goggles/gloves is a CRITICAL FAILURE
+regardless of total score.
+
+==================================================
+23. FIXED QA CAMERAS
+==================================================
+
+Create fixed QA cameras if not present:
+
+PPE_QA_ClosedFront
+PPE_QA_OpenFront
+PPE_QA_OpenThreeQuarter
+PPE_QA_Interior
+
+Set them once.
+
+After initial framing:
+DO NOT move them between iterations.
+
+Use a neutral studio background.
+
+No lab-room environment.
+No dramatic lighting.
+
+==================================================
+24. QA RENDERS PER ITERATION
+==================================================
+
+Render ONLY:
+
+1. PPE_QA_ClosedFront
+2. PPE_QA_OpenFront
+3. PPE_QA_OpenThreeQuarter
+
+Resolution:
+
+1024 x 1024
+
+Save under:
+
+D:\virtugenium-lab\overnight\ppe\qa\iter_XX\
+
+For open views:
+temporarily rotate PPECabinet_DoorPivot_Left
+approximately 100 degrees.
+
+After renders:
+restore default closed position.
+
+Only on potential FINAL PASS also render:
+
+PPE_QA_Interior
+
+==================================================
+25. VISUAL JUDGE — 40 POINTS
+==================================================
+
+Perform a READ-ONLY visual comparison against:
+
+D:\virtugenium-lab\references\PPECabinet_FINAL_REFERENCE.png
+
+IMPORTANT:
+
+IGNORE all PPE items shown in the reference.
+
+Do NOT deduct points because the final cabinet is empty.
+
+The EMPTY cabinet is the intended result.
+
+Judge only:
+
+Overall narrow silhouette / proportions:
+10
+
+Single solid left-hinged door:
+7
+
+Upper split storage geometry:
+8
+
+Horizontal rail placement:
+5
+
+Reagent-cabinet design-family consistency:
+5
+
+Craftsmanship / clean empty interior:
+5
+
+TOTAL:
+40
+
+DEDUCT if modeled PPE props are visible.
+
+For every deduction record one concrete visible mismatch in ppe_state.json.
+
+==================================================
+26. PASS RULE
+==================================================
+
+FINAL PASS requires ALL:
+
+deterministic score = 60/60
+
+visual score >= 34/40
+
+total score >= 94/100
+
+critical failures = 0
+
+AND:
+
+- cabinet clearly narrow;
+- exactly one solid door;
+- hinges on LEFT;
+- handle on RIGHT;
+- door opens correctly;
+- upper area split into exactly two compartments;
+- goggles slot LEFT;
+- gloves slot RIGHT;
+- coat rail below upper compartments;
+- interior otherwise empty;
+- ZERO modeled coat/goggles/gloves;
+- ZERO extra PPE props;
+- no leftover reagent/shutter/control-panel systems;
+- source saved;
+- GLB exported;
+- required nodes present in GLB;
+- forbidden PPE nodes absent from GLB.
+
+==================================================
+27. ITERATION ALGORITHM
+==================================================
+
+Read ppe_state.json if it exists.
+
+ITERATION 1:
+
+- open PPECabinet_MASTER.blend;
+- derive strongest complete EMPTY PPE cabinet from reagent cabinet;
+- remove irrelevant donor systems;
+- create only storage geometry/anchors;
+- run validator once;
+- render fixed QA views once;
+- perform read-only visual judge;
+- save state;
+- STOP.
+
+ITERATIONS 2–8:
+
+- read previous state;
+- inspect only failed deterministic checks
+  and TOP THREE visual defects;
+- fix only those;
+- run validator once;
+- render fixed QA views once;
+- judge once;
+- update state;
+- save;
+- STOP.
+
+Do not perform unlimited nested loops inside one invocation.
+
+==================================================
+28. REGRESSION CONTROL
+==================================================
+
+Track:
+
+iteration
+deterministic_score
+visual_score
+total_score
+critical_failures
+deterministic_failures
+top_visual_defects
+best_iteration
+best_total_score
+
+Save checkpoints under:
+
+D:\virtugenium-lab\overnight\ppe\checkpoints\
+
+If a new iteration drops more than 3 points below best score,
+restore the best valid checkpoint before the NEXT iteration.
+
+==================================================
+29. FINALIZATION
+==================================================
+
+When PASS criteria are met:
+
+Save:
+
+D:\virtugenium-lab\blender-source\PPECabinet_MASTER.blend
+
+Export ONLY the PPE cabinet hierarchy to:
+
+D:\virtugenium-lab\public\assets\models\PPECabinet.glb
+
+Do NOT export:
+
+- QA cameras;
+- QA lights;
+- helpers not needed at runtime;
+- reference geometry;
+- temporary validation objects;
+- any PPE props.
+
+Verify required GLB nodes.
+
+Verify forbidden PPE prop nodes are absent.
+
+Write:
+
+D:\virtugenium-lab\overnight\ppe\ppe_final_report.md
+
+Report:
+
+dimensions
+triangle count
+material count
+deterministic score
+visual score
+total score
+door hinge side
+handle side
+upper slot layout
+coat rail verification
+PPE modeled-prop count = 0
+required node verification
+remaining minor deviations
+FINAL STATUS
+
+Then create:
+
+D:\virtugenium-lab\overnight\ppe\ppe.done
+
+with:
+
+PASS
+iteration=<n>
+total_score=<score>
+visual_score=<score>
+
+Then STOP.
+
+==================================================
+30. MAX ITERATION FAILURE
+==================================================
+
+If iteration 8 is reached without FINAL PASS:
+
+DO NOT fake PASS.
+
+Do NOT create ppe.done.
+
+Keep/restore best valid checkpoint.
+
+Write:
+
+D:\virtugenium-lab\overnight\ppe\ppe_final_report.md
+
+with:
+
+best iteration
+best score
+remaining deterministic failures
+top remaining visual defects
+FINAL STATUS: NEEDS HUMAN REVIEW
+
+Create:
+
+D:\virtugenium-lab\overnight\ppe\ppe.stop
+
+Then STOP.
+
+==================================================
+31. FINAL CHAT RESPONSE
+==================================================
+
+For a non-final iteration reply ONLY:
+
+ITERATION: <n>
+DETERMINISTIC: <score>/60
+VISUAL: <score>/40
+TOTAL: <score>/100
+CRITICAL FAILURES: <number>
+PPE PROP COUNT: 0
+NEXT: CONTINUE
+STATE SAVED: YES
+
+At PASS reply ONLY:
+
+ITERATION: <n>
+TOTAL: <score>/100
+PPE PROP COUNT: 0
+FINAL STATUS: PASS
+DONE MARKER: YES
+
+At iteration-8 failure reply ONLY:
+
+ITERATION: 8
+BEST TOTAL: <score>/100
+PPE PROP COUNT: <number>
+FINAL STATUS: NEEDS HUMAN REVIEW
+STOP MARKER: YES
+
+Then STOP.

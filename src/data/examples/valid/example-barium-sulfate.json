@@ -1,0 +1,145 @@
+{
+  "version": "1.0.0",
+  "items": [
+    {
+      "id": "reagent-barium-chloride",
+      "category": "reagent",
+      "name": "Хлорид бария",
+      "description": "Водный раствор хлорида бария",
+      "assetId": "asset-reagent-bottle",
+      "formula": "BaCl2",
+      "state": "aqueous",
+      "color": "colorless",
+      "transparent": true,
+      "hazardIds": ["toxic"]
+    },
+    {
+      "id": "reagent-potassium-sulfate",
+      "category": "reagent",
+      "name": "Сульфат калия",
+      "description": "Водный раствор сульфата калия",
+      "assetId": "asset-reagent-bottle",
+      "formula": "K2SO4",
+      "state": "aqueous",
+      "color": "colorless",
+      "transparent": true,
+      "hazardIds": []
+    },
+    {
+      "id": "glassware-test-tube",
+      "category": "glassware",
+      "name": "Пробирка",
+      "description": "Стеклянная лабораторная пробирка",
+      "assetId": "asset-test-tube",
+      "kind": "test-tube",
+      "capacityMl": 20
+    },
+    {
+      "id": "equipment-holder",
+      "category": "equipment",
+      "name": "Держатель пробирки",
+      "description": "Держатель для безопасной работы с пробиркой",
+      "assetId": "asset-holder",
+      "kind": "holder",
+      "attachmentPointIds": ["grip", "test-tube-slot"]
+    },
+    {
+      "id": "safety-goggles",
+      "category": "safety",
+      "name": "Защитные очки",
+      "description": "Защищают глаза во время эксперимента",
+      "assetId": "asset-safety-goggles",
+      "kind": "goggles"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "experiment-barium-sulfate",
+      "title": "Получение сульфата бария",
+      "description": "Смешивание растворов хлорида бария и сульфата калия",
+      "requiredItemIds": [
+        "reagent-barium-chloride",
+        "reagent-potassium-sulfate",
+        "glassware-test-tube",
+        "safety-goggles"
+      ],
+      "steps": [
+        {
+          "id": "step-select-safety",
+          "title": "Подготовка",
+          "instruction": "Выберите защитные очки",
+          "allowedActions": ["take-item"],
+          "requirements": [
+            {
+              "type": "item-selected",
+              "itemId": "safety-goggles"
+            }
+          ],
+          "successScoreRules": [
+            {
+              "id": "score-safety",
+              "points": 2,
+              "reason": "Средства защиты выбраны"
+            }
+          ],
+          "errorScoreRules": []
+        },
+        {
+          "id": "step-mix-reagents",
+          "title": "Смешивание растворов",
+          "instruction": "Добавьте оба раствора в пробирку и перемешайте",
+          "allowedActions": ["pour", "mix"],
+          "requirements": [
+            {
+              "type": "action-completed",
+              "actionType": "mix"
+            }
+          ],
+          "successScoreRules": [
+            {
+              "id": "score-mixing",
+              "points": 8,
+              "reason": "Растворы смешаны правильно"
+            }
+          ],
+          "errorScoreRules": [
+            {
+              "id": "score-wrong-order",
+              "points": -2,
+              "reason": "Нарушен порядок действий"
+            }
+          ]
+        },
+        {
+          "id": "step-equation",
+          "title": "Уравнение реакции",
+          "instruction": "Введите молекулярное и ионные уравнения",
+          "allowedActions": ["submit-equation"],
+          "requirements": [
+            {
+              "type": "equation-correct",
+              "equationId": "equation-barium-sulfate"
+            }
+          ],
+          "successScoreRules": [
+            {
+              "id": "score-equation",
+              "points": 8,
+              "reason": "Уравнения записаны правильно"
+            }
+          ],
+          "errorScoreRules": []
+        }
+      ],
+      "equations": [
+        {
+          "id": "equation-barium-sulfate",
+          "molecular": "BaCl2 + K2SO4 -> BaSO4 + 2KCl",
+          "completeIonic": "Ba2+ + 2Cl- + 2K+ + SO4^2- -> BaSO4 + 2K+ + 2Cl-",
+          "netIonic": "Ba2+ + SO4^2- -> BaSO4"
+        }
+      ],
+      "maximumScore": 18
+    }
+  ]
+}

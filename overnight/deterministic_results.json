@@ -1,0 +1,41 @@
+{
+  "measured": {
+    "width": 1.6,
+    "depth": 0.863,
+    "height": 2.3,
+    "worktop_top": 0.9,
+    "opening_width": 1.3,
+    "opening_height": 0.94,
+    "sash_thickness": 0.008,
+    "triangle_count": 884,
+    "material_count": 8
+  },
+  "checks": {
+    "width_ok": true,
+    "depth_ok": true,
+    "height_ok": true,
+    "worktop_top_ok": true,
+    "opening_width_ok": true,
+    "opening_height_ok": true,
+    "nodes_ok": true,
+    "sash_separate": true,
+    "sash_inside_opening": true,
+    "sash_thickness_ok": true,
+    "sash_no_floor_pen": true,
+    "controlpanel_exists": true,
+    "pagedisplay_exists": true,
+    "display_on_right": true,
+    "four_doors": true,
+    "plinth_exists": true,
+    "plinth_recessed": true,
+    "plinth_height_ok": true,
+    "root_origin_ok": true,
+    "no_mesh_below_floor": true,
+    "tri_budget_ok": true,
+    "material_count_ok": true
+  },
+  "missing_nodes": [],
+  "deterministic_score": 55.0,
+  "deterministic_max": 55,
+  "failed_checks": []
+}

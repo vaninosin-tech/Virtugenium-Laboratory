@@ -1,0 +1,788 @@
+STRICT OVERNIGHT AUTONOMOUS FUME HOOD BUILD
+PROJECT: Virtugenium Laboratory
+MODE: Blender MCP / Blender asset creation only
+
+AUTHORITATIVE REFERENCE IMAGE:
+references/FumeHood_reference.png
+
+TARGET SOURCE:
+blender-source/FumeHood_Modern_MASTER.blend
+
+TARGET EXPORT:
+public/assets/models/FumeHood_Modern.glb
+
+STATE:
+overnight/fumehood_state.json
+
+PASS MARKER:
+overnight/fumehood.done
+
+STOP-WITHOUT-PASS MARKER:
+overnight/fumehood.stop
+
+FINAL REPORT:
+overnight/fumehood_final_report.md
+
+==================================================
+0. NON-NEGOTIABLE EXECUTION RULES
+==================================================
+
+This is an autonomous overnight modeling task.
+
+Use the attached/reference image as the PRIMARY visual target.
+Written constraints in this specification override accidental image-generation artifacts.
+
+DO NOT redesign the fume hood into another style.
+DO NOT make it futuristic, retro, kitchen-like, workshop-like, decorative, or cluttered.
+DO NOT modify the laboratory room, reagent cabinets, workbench, runtime code, lighting system, hover system, or unrelated assets.
+DO NOT integrate this asset into the game during this overnight job.
+
+Allowed project writes are limited to:
+- blender-source/FumeHood_Modern_MASTER.blend
+- public/assets/models/FumeHood_Modern.glb
+- scripts/validate_fumehood.py
+- overnight/*
+- temporary QA renders under overnight/qa/*
+
+Read-only:
+- references/FumeHood_reference.png
+
+If blender-source/FumeHood_Modern_MASTER.blend already exists, create a timestamped backup under:
+overnight/backup_before_overnight/
+BEFORE making destructive changes.
+
+Use Blender MCP with the minimum useful number of calls.
+Do not narrate process.
+Do not write long root-cause essays.
+Do not inspect unrelated project files.
+Do not repeatedly render the same unchanged state.
+
+ONE invocation = ONE modeling/evaluation iteration.
+At the end of every invocation, update overnight/fumehood_state.json and STOP.
+The external runner will invoke the next iteration if required.
+
+MAXIMUM MODELING ITERATIONS: 8
+
+Never create overnight/fumehood.done merely because the result "looks good".
+
+Screenshot/render evidence overrides your own textual claims.
+
+==================================================
+1. TARGET DESIGN
+==================================================
+
+Create a modern floor-standing laboratory fume hood closely matching
+references/FumeHood_reference.png.
+
+Desired visual language:
+- modern technical modular laboratory equipment
+- clean, restrained, professional
+- off-white body panels
+- graphite/anthracite structural framing
+- dark chemical-resistant worktop
+- large clean working chamber
+- vertically movable front glass sash
+- rear extraction baffle with restrained horizontal slots
+- substantial lower storage base
+- compact centered top exhaust module
+- slim integrated interior LED element
+- modern dark vertical display on the RIGHT front column
+- recessed dark plinth
+- subtle bevels, clean manufacturing gaps
+
+The model must feel like real laboratory equipment, not furniture with a glass box attached.
+
+==================================================
+2. FIXED REAL-WORLD DIMENSION TARGET
+==================================================
+
+Model front faces world -Y.
+World Z is up.
+Root origin = floor center.
+1 Blender unit = 1 meter.
+
+Overall target:
+Width: 1.600 m ± 0.020 m
+Depth: 0.850 m ± 0.020 m
+Height: 2.300 m ± 0.030 m
+
+Work surface TOP:
+Z = 0.900 m ± 0.010 m
+
+Main front opening target:
+Width: 1.300 m ± 0.040 m
+Height: 0.940 m ± 0.050 m
+
+Side structural columns:
+approximately 0.120–0.150 m visual width each
+
+Upper hood/front fascia:
+approximately 0.320–0.400 m visual height
+
+Lower recessed plinth:
+height: 0.080–0.100 m
+front recess: 0.050–0.080 m
+
+Sash glass:
+realistic thickness approximately 0.006–0.010 m
+
+These dimensions are deterministic acceptance targets.
+Do not drift outside them merely to make the model easier to build.
+
+==================================================
+3. REQUIRED ASSET STRUCTURE
+==================================================
+
+Use a clean hierarchy under:
+
+FumeHood_Root
+
+Required stable nodes:
+- FumeHood_Root
+- BaseCabinet
+- BaseDoor_01
+- BaseDoor_02
+- BaseDoor_03
+- BaseDoor_04
+- WorkSurface
+- Chamber_Left
+- Chamber_Right
+- Chamber_Back
+- Chamber_Ceiling
+- RearBaffle
+- FumeHood_Sash
+- Sash_Handle
+- Interior_LED
+- UpperHood
+- ExhaustModule
+- ControlPanel
+- Page_Display
+
+Additional logical support nodes are allowed if needed.
+
+The model should use FOUR lower cabinet doors to match the approved reference.
+Keep lower storage visually balanced and substantial.
+
+==================================================
+4. LOWER BASE
+==================================================
+
+Match the reference:
+- four clean lower doors
+- off-white fronts
+- graphite frame/trim
+- dark recessed plinth
+- minimal dark recessed/compact pulls
+- even facade gaps
+- no exposed legs
+- no open shelving
+- no props inside
+- no random vents or decorations
+
+Facade gaps should be subtle and consistent, approximately 3–4 mm visually.
+
+The base must visually support the upper hood.
+It must not look too thin or too lightweight.
+
+==================================================
+5. WORK SURFACE
+==================================================
+
+Create one dark chemical-resistant laboratory work surface:
+- matte/satin dark charcoal
+- approximately 35–45 mm visual thickness
+- subtle edge bevel
+- clean rectangular geometry
+
+KEEP IT EMPTY.
+
+Do NOT add:
+- sink
+- faucet
+- gas taps
+- hoses
+- outlets
+- reagents
+- bottles
+- glassware
+- permanent experiment props
+
+==================================================
+6. WORK CHAMBER
+==================================================
+
+The chamber is a major visual focus.
+
+Required:
+- clean left wall
+- clean right wall
+- clean rear baffle/back wall
+- clean ceiling
+- dark work surface
+- believable structural enclosure
+- no gaps to exterior
+- no floating panels
+- no accidental deep black cavities
+- no missing top/back surfaces
+
+The chamber must read clearly in front and 3/4 views.
+
+==================================================
+7. REAR BAFFLE
+==================================================
+
+Create a restrained laboratory extraction baffle inspired by the reference.
+
+Use a small number of clean horizontal rounded slots.
+Suggested visual pattern:
+two rows of three long horizontal slots.
+
+Do not create a dense perforated grille.
+Do not model internal fan mechanics.
+Do not add unnecessary micro-detail.
+
+==================================================
+8. FRONT SASH
+==================================================
+
+Create one large vertically movable sash as a separate object:
+
+FumeHood_Sash
+
+Requirements:
+- clear glass
+- physically plausible thickness
+- dark/graphite horizontal lower sash bar
+- integrated simple horizontal handle
+- centered in chamber opening
+- positioned plausibly within side guides
+- prepared for future vertical translation
+- no animation required now
+
+The sash may be shown in a partially raised operating position similar to the reference.
+
+Do not merge the sash into the cabinet body.
+
+==================================================
+9. UPPER HOOD + EXHAUST
+==================================================
+
+UpperHood is important to the silhouette.
+
+Match the reference:
+- strong rectangular upper canopy
+- clean off-white main fascia
+- graphite lower reveal/frame
+- clear connection to side structural columns
+- not excessively tall
+- not a decorative sign box
+
+Create one compact centered ExhaustModule on top:
+- simple rectangular extraction connection
+- approximately 0.42–0.50 m wide
+- approximately 0.30–0.40 m deep
+- approximately 0.12–0.18 m high
+- simple dark vent/grille treatment if useful
+- no visible duct network
+
+==================================================
+10. RIGHT DISPLAY
+==================================================
+
+Create one modern integrated display zone on the RIGHT front column.
+
+Required nodes:
+ControlPanel
+Page_Display
+
+Page_Display:
+- vertical
+- dark near-black screen
+- thin clean bezel
+- blank screen surface in Blender
+- no baked UI
+- no icons
+- no text
+- no physical buttons
+- no knobs
+- no emergency stop
+- no thermostat-like styling
+
+It must look like a modern industrial/lab display area ready for runtime UI.
+
+==================================================
+11. INTERIOR LED
+==================================================
+
+Create one slim integrated Interior_LED under the upper chamber structure.
+
+It is geometry only for the asset.
+Use a clean diffuser strip.
+Do not create a complex lighting rig inside the exported asset.
+
+QA studio lights/cameras may exist in the .blend but must not be exported.
+
+==================================================
+12. MATERIAL LANGUAGE
+==================================================
+
+Keep material count efficient.
+
+Target palette:
+Main body off-white: approximately #E4E7E6
+Interior light neutral: approximately #D9DCDA
+Structural graphite: approximately #30363A
+Dark trim/plinth: approximately #252A2E
+Work surface: approximately #2B3034
+Display glass: near-black
+Sash: clear neutral glass
+
+Use plausible PBR roughness/metalness.
+Do not make painted panels chrome.
+Do not make all white surfaces pure #FFFFFF.
+Do not add decorative colored accents except extremely restrained display/status treatment if required by the reference; blank display is preferred.
+
+==================================================
+13. MODELING QUALITY
+==================================================
+
+Realtime asset requirements:
+- clean topology
+- subtle bevels where they materially improve silhouette
+- consistent panel thickness
+- smooth shading / weighted normals where useful
+- no z-fighting
+- no accidental duplicate surfaces
+- no floating structural components
+- no major self-intersections
+- no inverted normals on opaque parts
+- no unapplied non-uniform object scale on final structural meshes unless technically justified
+- no unnecessary subdivisions
+- no tiny modeled screws
+- no dense vents
+- no hidden micro-detail
+
+Triangle target:
+preferred <= 50,000
+hard warning > 70,000
+
+Material slots:
+preferred <= 8
+
+Do not sacrifice the approved silhouette to chase an artificially low triangle count.
+
+==================================================
+14. DETERMINISTIC VALIDATOR
+==================================================
+
+Create/update:
+
+scripts/validate_fumehood.py
+
+It must evaluate the current fume hood and write machine-readable results into:
+overnight/fumehood_state.json
+
+The validator must check at minimum:
+
+A. Overall bbox:
+- width tolerance
+- depth tolerance
+- height tolerance
+
+B. Worktop:
+- top height tolerance
+
+C. Opening:
+- opening width tolerance
+- opening height tolerance
+
+D. Required nodes:
+- every required stable node exists
+
+E. Sash:
+- separate object
+- inside opening bounds
+- plausible glass thickness
+- no floor penetration
+
+F. Base:
+- exactly four required base door nodes
+- recessed plinth exists
+
+G. Display:
+- ControlPanel exists
+- Page_Display exists
+- display is on right front side
+
+H. Transform/floor:
+- root origin approximately floor center
+- no major structural mesh below Z = -0.002 m
+- no extreme/unapplied non-uniform scale on final structural meshes
+
+I. Geometry health:
+- no obvious duplicate structural meshes
+- no zero-area structural mesh if detectable
+- outward/consistent normals on opaque shell where practical
+- triangle count
+- material count
+
+Deterministic score: 55 points total.
+
+Suggested weighting:
+Overall dimensions: 15
+Worktop + opening: 8
+Hierarchy/names: 8
+Sash + display: 8
+Base/plinth/doors: 6
+Transform/floor alignment: 5
+Geometry health/budget: 5
+
+A deterministic criterion either passes from measured data or fails.
+Do NOT subjectively mark measured failures as acceptable.
+
+==================================================
+15. FIXED QA CAMERAS
+==================================================
+
+Create fixed QA cameras in the .blend:
+
+QA_Front
+QA_Left45
+QA_Right45
+QA_Chamber
+QA_Display
+
+Do not move these cameras between iterations after initial setup.
+
+Model front faces -Y.
+
+Use approximately:
+QA_Front:
+position near (0, -5.0, 1.30)
+lens around 50 mm
+
+QA_Left45:
+position near (-3.2, -3.2, 1.45)
+lens around 55 mm
+
+QA_Right45:
+position near (3.2, -3.2, 1.45)
+lens around 55 mm
+
+QA_Chamber:
+close view centered on chamber/sash
+
+QA_Display:
+close view centered on right display
+
+Exact camera distance may be adjusted ONCE during initial setup so the whole asset is framed properly.
+After that, freeze camera transforms.
+
+QA studio:
+- neutral light gray background
+- simple soft studio lighting
+- no dramatic shadows
+- no HDRI scenery
+- no laboratory room
+- consistent exposure across iterations
+
+These QA cameras/lights must NOT be exported to GLB.
+
+==================================================
+16. QA RENDERS
+==================================================
+
+Per iteration render ONLY:
+- QA_Front
+- QA_Left45
+- QA_Right45
+
+Resolution:
+1024 x 1024
+
+Save to:
+overnight/qa/iter_XX/
+
+Only on a potential FINAL PASS also render:
+- QA_Chamber
+- QA_Display
+
+Do not produce extra exploratory renders.
+
+==================================================
+17. VISUAL JUDGE — SEPARATE PHASE
+==================================================
+
+After modeling + deterministic validation, enter a READ-ONLY JUDGE PHASE.
+
+During Judge Phase:
+DO NOT edit Blender.
+DO NOT move cameras.
+DO NOT change materials.
+DO NOT "fix while judging".
+
+Compare the three fixed QA renders against:
+references/FumeHood_reference.png
+
+Judge the evidence, not your intent.
+
+The reference image is authoritative for:
+- overall silhouette
+- width/height feeling
+- upper hood proportion
+- chamber opening proportion
+- side-column proportion
+- lower base proportion
+- sash placement
+- rear baffle visual language
+- top exhaust module
+- right display placement
+- light/dark material distribution
+- modern technical modular character
+
+Ignore obvious AI/reference artifacts if they conflict with written requirements.
+
+VISUAL SCORE: 45 points total.
+
+Weighting:
+Overall silhouette + reference similarity: 15
+Upper hood + side-column proportions: 7
+Chamber + baffle + sash: 7
+Lower base + plinth proportions: 5
+Material distribution + display/exhaust placement: 5
+Craftsmanship / no visible artifacts: 6
+
+For every deducted point, state a concrete visible mismatch in fumehood_state.json.
+
+Do NOT award points because "the intent is clear".
+Do NOT award points for parts hidden from all QA cameras.
+Do NOT self-congratulate.
+Do NOT use vague statements such as "looks professional" as evidence.
+
+==================================================
+18. PASS / FAIL RULE
+==================================================
+
+FINAL PASS requires ALL of the following:
+
+1. deterministic validator has no critical failures
+2. deterministic score = 55/55
+3. visual score >= 40/45
+4. total score >= 93/100
+5. no critical visual mismatch
+6. no visible floating major geometry
+7. no visible major intersection
+8. no missing chamber wall/ceiling/back
+9. sash is separate and correctly placed
+10. display is correctly on the right side
+11. model clearly matches the approved reference family
+12. final source saves successfully
+13. final GLB exports successfully
+14. exported GLB contains required stable nodes
+15. final QA renders exist
+
+Critical visual mismatch examples:
+- wrong overall silhouette
+- upper hood obviously too tall/short
+- chamber opening obviously too small/large
+- lower base obviously too weak/tall
+- wrong number of lower doors
+- sash visually broken
+- missing side column
+- display on wrong side
+- major unintended gap/cavity
+- model no longer resembles the reference
+
+Never create the DONE marker with a critical visual mismatch.
+
+==================================================
+19. ITERATION ALGORITHM
+==================================================
+
+Read overnight/fumehood_state.json if it exists.
+
+If no state exists:
+ITERATION 1:
+- initialize state
+- create/fix dedicated fume hood source asset
+- build the strongest complete version possible from the specification
+- run deterministic validator
+- render fixed QA_Front / QA_Left45 / QA_Right45
+- perform read-only visual judge
+- record scores and top defects
+- save source
+- update state
+- STOP
+
+For ITERATIONS 2–8:
+- read previous state
+- inspect ONLY failed deterministic criteria and the TOP THREE highest-impact visual defects
+- fix ONLY those items
+- do not remodel already-passing components without a specific reason
+- run validator once
+- render the three fixed QA views once
+- perform read-only judge
+- update score/state
+- save source
+- STOP
+
+Do not perform nested endless improvement loops inside one invocation.
+
+Maximum visual fixes per iteration:
+3
+
+Maximum deterministic correction batch:
+all currently failed deterministic checks, but preserve already-passing geometry where possible.
+
+==================================================
+20. REGRESSION CONTROL
+==================================================
+
+State must track:
+- iteration
+- deterministic_score
+- visual_score
+- total_score
+- critical_failures
+- top_visual_defects
+- deterministic_failures
+- best_total_score
+- best_iteration
+
+Save a checkpoint copy after every iteration under:
+overnight/checkpoints/
+
+If a new iteration drops total score by more than 3 points compared with the best iteration,
+restore the best checkpoint before starting the NEXT iteration unless the regression is required to fix a critical deterministic failure.
+
+Do not oscillate between designs.
+
+==================================================
+21. FINALIZATION
+==================================================
+
+When PASS criteria are met:
+
+1. save:
+blender-source/FumeHood_Modern_MASTER.blend
+
+2. export ONLY the fume hood asset hierarchy to:
+public/assets/models/FumeHood_Modern.glb
+
+Do not export:
+- QA cameras
+- QA lights
+- reference planes
+- temporary helpers
+- validators
+- hidden construction junk
+
+3. verify required stable GLB nodes:
+FumeHood_Root
+FumeHood_Sash
+ControlPanel
+Page_Display
+
+4. render final:
+QA_Front
+QA_Left45
+QA_Right45
+QA_Chamber
+QA_Display
+
+5. write:
+overnight/fumehood_final_report.md
+
+Report only:
+- final dimensions
+- triangle count
+- material count
+- deterministic score
+- visual score
+- total score
+- required node verification
+- source path
+- GLB path
+- any remaining minor deviations
+- FINAL STATUS: PASS
+
+6. create:
+overnight/fumehood.done
+
+The DONE marker content must include:
+PASS
+iteration=<n>
+total_score=<score>
+visual_score=<score>
+
+Then STOP.
+
+==================================================
+22. MAX ITERATION FAILURE
+==================================================
+
+If iteration 8 is reached without FINAL PASS:
+
+DO NOT fake PASS.
+DO NOT create overnight/fumehood.done.
+
+Keep the best-scoring checkpoint as the master source if it is valid and non-destructive.
+
+Write:
+overnight/fumehood_final_report.md
+
+with:
+- best iteration
+- best score
+- remaining deterministic failures
+- remaining top visual defects
+- FINAL STATUS: NEEDS HUMAN REVIEW
+
+Create:
+overnight/fumehood.stop
+
+Then STOP.
+
+==================================================
+23. TOKEN / TOOL BUDGET
+==================================================
+
+STRICT LOW-TOKEN BEHAVIOR:
+
+- minimum MCP calls
+- no narration
+- no long reasoning text
+- no unrelated project inspection
+- no repeated render loops
+- exactly one QA render set per iteration
+- use existing successful geometry instead of rebuilding it
+- do not repeatedly audit already-passing items
+- do not explain basic Blender operations
+- write detailed state to file, not chat
+- final chat response for each iteration must be extremely short
+
+At the end of a non-final iteration reply ONLY:
+
+ITERATION: <n>
+DETERMINISTIC: <score>/55
+VISUAL: <score>/45
+TOTAL: <score>/100
+CRITICAL FAILURES: <number>
+NEXT: CONTINUE
+STATE SAVED: YES
+
+At PASS reply ONLY:
+
+ITERATION: <n>
+TOTAL: <score>/100
+FINAL STATUS: PASS
+DONE MARKER: YES
+
+At iteration-8 failure reply ONLY:
+
+ITERATION: 8
+BEST TOTAL: <score>/100
+FINAL STATUS: NEEDS HUMAN REVIEW
+STOP MARKER: YES
+
+Then STOP.

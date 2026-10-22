@@ -1,0 +1,346 @@
+/* Top-left hologram — fixed footprint for all status states */
+
+@keyframes tablet-holo-pulse {
+  0%,
+  100% {
+    opacity: 0.92;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes tablet-holo-scan {
+  0% {
+    top: -35%;
+  }
+  100% {
+    top: 100%;
+  }
+}
+
+@keyframes tablet-holo-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.tablet-holo-root {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  left: max(16px, env(safe-area-inset-left));
+  z-index: 20;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 300px;
+  max-width: min(300px, calc(100vw - 32px));
+}
+
+.tablet-holo-root:disabled {
+  cursor: default;
+}
+
+@keyframes tablet-holo-dissolve {
+  0% {
+    opacity: 1;
+    filter: brightness(1) contrast(1) blur(0);
+    transform: translateY(0) scale(1);
+  }
+  12% {
+    opacity: 0.92;
+    filter: brightness(1.35) contrast(1.15) blur(0);
+    transform: translateY(-1px) scale(1.01);
+  }
+  24% {
+    opacity: 0.35;
+    filter: brightness(1.8) contrast(1.35) blur(0.5px);
+  }
+  32% {
+    opacity: 0.78;
+    filter: brightness(1.45) contrast(1.2) blur(0.5px);
+  }
+  48% {
+    opacity: 0.22;
+    filter: brightness(2) contrast(1.4) blur(1.5px);
+    transform: translateY(-4px) scale(1.03);
+  }
+  58% {
+    opacity: 0.55;
+    filter: brightness(1.7) contrast(1.3) blur(2px);
+  }
+  72% {
+    opacity: 0.12;
+    filter: brightness(2.2) contrast(1.5) blur(4px);
+    transform: translateY(-8px) scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    filter: brightness(2.6) contrast(1.6) blur(10px);
+    transform: translateY(-14px) scale(1.08);
+  }
+}
+
+@keyframes tablet-holo-shards {
+  0% {
+    opacity: 0;
+    transform: scaleY(1);
+  }
+  18% {
+    opacity: 0.55;
+  }
+  100% {
+    opacity: 0;
+    transform: scaleY(1.15);
+  }
+}
+
+.tablet-holo-root.is-exiting {
+  pointer-events: none;
+  animation: tablet-holo-dissolve 0.32s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.tablet-holo-root.is-exiting .tablet-holo {
+  animation: none;
+}
+
+.tablet-holo-root.is-exiting .tablet-holo::after {
+  animation: none;
+  opacity: 0;
+}
+
+.tablet-holo-root.is-exiting .tablet-holo::before {
+  animation: tablet-holo-shards 0.32s ease-out both;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 3px,
+    rgba(34, 211, 238, 0.22) 3px 4px,
+    transparent 4px 7px,
+    rgba(255, 255, 255, 0.12) 7px 8px
+  );
+}
+
+@keyframes tablet-holo-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.tablet-holo-root.is-entering {
+  pointer-events: none;
+  opacity: 0;
+  animation: tablet-holo-appear 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Keep scan / pulse / float running during appear — no second “layer-on” pass */
+
+.tablet-holo-root:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.55);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.tablet-holo {
+  position: relative;
+  width: 100%;
+  height: 168px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(
+    155deg,
+    rgba(10, 16, 30, 0.94) 0%,
+    rgba(6, 11, 24, 0.97) 55%,
+    rgba(4, 8, 18, 0.98) 100%
+  );
+  border: none;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.14),
+    0 12px 32px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 0 56px rgba(34, 211, 238, 0.22);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  overflow: hidden;
+  animation:
+    tablet-holo-pulse 3.2s ease-in-out infinite,
+    tablet-holo-float 5s ease-in-out infinite;
+  color: #f1f5f9;
+  z-index: 1;
+}
+
+.tablet-holo-inner {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 0;
+}
+
+.tablet-holo::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(34, 211, 238, 0.035) 2px,
+    rgba(34, 211, 238, 0.035) 3px
+  );
+  pointer-events: none;
+}
+
+.tablet-holo::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -35%;
+  height: 35%;
+  background: linear-gradient(180deg, transparent, rgba(34, 211, 238, 0.12), transparent);
+  animation: tablet-holo-scan 4.5s linear infinite;
+  pointer-events: none;
+}
+
+.tablet-holo-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 26px;
+}
+
+.tablet-holo-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: rgba(34, 211, 238, 0.14);
+  flex-shrink: 0;
+}
+
+.tablet-holo-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  line-height: 1.1;
+}
+
+.tablet-holo-brand {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #f8fafc;
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.35);
+}
+
+.tablet-holo-brand-sub {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+.tablet-holo-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.2);
+}
+
+.tablet-holo-experiment {
+  flex-shrink: 0;
+  min-height: 15px;
+  font-size: 11px;
+  color: #94a3b8;
+  letter-spacing: 0.2px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tablet-holo-experiment.is-empty {
+  color: rgba(148, 163, 184, 0.55);
+}
+
+@keyframes tablet-holo-goal-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tablet-holo-goal {
+  flex: 0 0 auto;
+  min-height: 28px;
+  max-height: 28px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #f1f5f9;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-clamp: 2;
+  animation: tablet-holo-goal-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.tablet-holo-counter {
+  flex-shrink: 0;
+  display: block;
+  width: 100%;
+  min-height: 18px;
+  text-align: center;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: #e2e8f0;
+  line-height: 1.3;
+}
+
+.tablet-holo-counter.is-empty {
+  visibility: hidden;
+}
+
+/* Same height as header ScoreProgressBar — keeps hologram footprint fixed */
+.tablet-holo-score-slot {
+  flex-shrink: 0;
+  min-height: 34px;
+  margin-top: auto;
+  width: 100%;
+}

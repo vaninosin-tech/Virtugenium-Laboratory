@@ -1,0 +1,32 @@
+{
+  "_comment": "Стадии сравнения «игра | эталон». ref: видео в tmp/reference/videos и время в нём (с); game: имя кадра без .png в папке игровых снимков (ищется <game>-tube.png, затем <game>.png). fps — частота раскадровки tmp/reference/frames/<видео>.",
+  "fps": {
+    "exp1dil-qA7iJcHqiTc": 0.25, "exp1dil-SNXW0WetyiI": 0.5, "exp1-el-JHVoXoYY": 0.5,
+    "exp2-Fz8zYQW4Ts4": 1, "exp2-54x6WkujoyQ": 1,
+    "exp3-KpPvVc8nV70": 1, "exp3-EZH58Ggfi3I": 1,
+    "exp4-L-fIkM1d63A": 1
+  },
+  "exp1": [
+    { "label": "начало: пузырьки на меди", "ref": ["exp1dil-qA7iJcHqiTc", 96], "game": "copper-p0p3" },
+    { "label": "середина: бледно-бирюзовый", "ref": ["exp1dil-qA7iJcHqiTc", 140], "game": "copper-p0p6" },
+    { "label": "открытая пробирка", "ref": ["exp1dil-SNXW0WetyiI", 70], "game": "copper-p0p6" },
+    { "label": "конец: насыщенный голубой", "ref": ["exp1dil-qA7iJcHqiTc", 216], "game": "copper-p1" }
+  ],
+  "exp2": [
+    { "label": "сразу после приливания", "ref": ["exp2-Fz8zYQW4Ts4", 36], "game": "nacl-agno3-1s" },
+    { "label": "творожистые хлопья", "ref": ["exp2-Fz8zYQW4Ts4", 38], "game": "nacl-agno3-3s" },
+    { "label": "оседание", "ref": ["exp2-Fz8zYQW4Ts4", 41], "game": "nacl-agno3-12s" }
+  ],
+  "exp3": [
+    { "label": "клубы от струи", "ref": ["exp3-KpPvVc8nV70", 6], "game": "baso4-0p5s" },
+    { "label": "сплошная муть", "ref": ["exp3-KpPvVc8nV70", 9], "game": "baso4-2s" },
+    { "label": "молоко в пробирке", "ref": ["exp3-EZH58Ggfi3I", 23], "game": "baso4-8s" },
+    { "label": "держится", "ref": ["exp3-EZH58Ggfi3I", 27], "game": "baso4-20s" }
+  ],
+  "exp4": [
+    { "label": "плотный KMnO4", "ref": ["exp4-L-fIkM1d63A", 38], "game": "kmno4-redox-2s" },
+    { "label": "начало обесцвечивания", "ref": ["exp4-L-fIkM1d63A", 46], "game": "kmno4-redox-5s" },
+    { "label": "градиент сверху вниз", "ref": ["exp4-L-fIkM1d63A", 50], "game": "kmno4-redox-8s" },
+    { "label": "почти бесцветно сверху", "ref": ["exp4-L-fIkM1d63A", 56], "game": "kmno4-redox-12s" }
+  ]
+}

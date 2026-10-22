@@ -1,0 +1,106 @@
+@keyframes tablet-score-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.tablet-score-bar-fill {
+  background-size: 200% 100%;
+  animation: tablet-score-shimmer 2.4s linear infinite;
+}
+
+@keyframes equation-caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.equation-caret {
+  display: inline-block;
+  margin: 0 1px;
+  color: #cbd5e1;
+  font-weight: 700;
+  animation: equation-caret-blink 1s step-end infinite;
+}
+
+@keyframes equation-char-pulse {
+  0%,
+  49% {
+    outline-color: #22d3ee;
+    background-color: rgba(34, 211, 238, 0.35);
+  }
+  50%,
+  100% {
+    outline-color: transparent;
+    background-color: rgba(34, 211, 238, 0.12);
+  }
+}
+
+.equation-char-selected {
+  display: inline-block;
+  padding: 0 1px;
+  border-radius: 3px;
+  outline: 2px solid #22d3ee;
+  outline-offset: 1px;
+  animation: equation-char-pulse 1s step-end infinite;
+}
+
+/* Shared tablet scrollbars — dark slate track, muted thumb (palette-aligned).
+   Do not set scrollbar-width/color on Chromium: they override ::-webkit-* and restore arrows. */
+
+.tablet-ui *::-webkit-scrollbar,
+.equation-desc-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.tablet-ui *::-webkit-scrollbar-button,
+.equation-desc-scroll::-webkit-scrollbar-button {
+  display: block;
+  height: 0;
+  width: 0;
+}
+
+.tablet-ui *::-webkit-scrollbar-track,
+.equation-desc-scroll::-webkit-scrollbar-track {
+  background: #020617;
+  border-radius: 999px;
+}
+
+.tablet-ui *::-webkit-scrollbar-thumb,
+.equation-desc-scroll::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.95);
+  border-radius: 999px;
+  border: 2px solid #020617;
+  background-clip: padding-box;
+  min-height: 32px;
+}
+
+.tablet-ui *::-webkit-scrollbar-thumb:hover,
+.equation-desc-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.95);
+  border: 2px solid #020617;
+  background-clip: padding-box;
+}
+
+.tablet-ui *::-webkit-scrollbar-corner,
+.equation-desc-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .tablet-ui,
+  .tablet-ui *,
+  .equation-desc-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(71, 85, 105, 0.95) #020617;
+  }
+}

@@ -1,0 +1,38 @@
+TubeCase.glb — sealed storage case for 32 test tubes (source: blender-source/TubeCase_Sealed_V2.blend)
+Footprint 300 x 220 mm, 230 mm tall closed. Origin: centre of the base. Unit: metres, Y up in the glb.
+
+THREE MECHANISMS (all driven by the model's own animation clips, one shared 5 s timeline, 120 frames @ 24 fps)
+
+1) FLAT FOLDING HANDLE  (Lid_Handle + Lid_Handle_B; Handle_Pivot / Handle_Pivot_B; frames 1..55)
+   Two flat halves (together the shape of the whole lid recess, 130 x 80 mm) on ONE steel axis (Handle_Pin) that runs along
+   the centre line of the lid, so the raised handle stands over the middle of the case (balanced carry). Folded, each half
+   lies flush in its half of the recess; raised, they stand side by side as a double flat grip with aligned finger windows.
+   The halves hang below the axis and fold away from each other, so they never pass through one another.
+   Hardware: two brackets standing on the recess floor (Handle_Brackets, bored for the axis), a torsion spring on each
+   side of the axis (Handle_Springs: it is what lifts the halves a little when released and holds them against the stop —
+   modelled as geometry only, the game plays the motion), hinge knuckles interleaved (A: centre, B: ends).
+   Handle_Pivot rotates about its local X:   +90deg (folded, towards -Y) -> 0 (raised, f20) ... 0 (f40) -> +90deg (f55).
+   Handle_Pivot_B is the mirror: -90deg -> 0 -> -90deg.  Handle_GripPoint = centre of the finger window (hand anchor).
+
+2) OVER-CENTRE DRAW LATCHES  (Latch_Pivot_1/2 + Latch_Bail_1/2; frames 60..90)
+   Per latch: base on the body (Latch_Base), a lever hanging from an axis just under the seam (Latch_Lever on
+   Latch_Pivot), a steel bail hinged to the lever 16 mm below that axis (Latch_Bail_Mesh on Latch_Bail), and a catch pin
+   on the lid (Latch_Catches). Closed: the bail hook sits over the catch pin and the bail pivot lies 3 mm on the wall side
+   of the line axis->catch (over-centre), so the pull holds the lever against the wall and presses the lid down.
+   Opening: the lever swings outward about 85 deg; the bail first follows (the lid recovers 1.8 mm, f60..70), at about
+   50 deg the hook lets go of the pin and the bail drops free. Frames are keyed every frame from the linkage geometry.
+   Latch_Pivot_k rotates about -X (negative = outward).
+
+3) HERMETIC LID SEAL  (Lid_Seat, Lid_Gasket; Lid_Rim, Body_Ledge)
+   The lid has an inward flange (Lid_Rim) with a groove; the EPDM gasket (Lid_Gasket) sits in the groove and stands
+   1.8 mm proud. The body has a matching ledge (Body_Ledge). Latched, the lid sits 1.8 mm lower and the gasket is
+   squeezed against the ledge (scale Z 0.69); released, the lid rises 1.8 mm (Lid_Seat translation) and the gasket
+   returns to full height (scale Z 1.0). Only then does the lid open (Lid_Pivot, 0 -> -110 deg, f79..120).
+
+ORDER OF USE: unfold handle -> carry -> fold -> release both latches (lid rises off the gasket) -> open lid. Reverse to close.
+
+ANCHORS: TubeSlot_01..32 (seat of each tube bottom, 8 x 4, pitch 32 x 40 mm), Tube_01..32, TubeGrid_Origin,
+Handle_GripPoint, Latch_Pivot_1/2, Lid_Pivot.
+MATERIALS: Case_HDPE, Latch_Yellow (latches, handle, brackets base), Gasket_EPDM, Hinge_Steel (pins, bails, springs, hinges),
+Rubber_Grip, Tray_PP, Label_Area, LabGlass_Material.
+TubeCase_animation.gif is a preview render of the full sequence.

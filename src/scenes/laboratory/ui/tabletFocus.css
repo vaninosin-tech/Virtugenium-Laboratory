@@ -1,0 +1,15 @@
+/*
+ * While the tablet is open the focus is on it: everything laid over the lab
+ * (arrows, «Назад», hints, PPE chips, the inspection buttons…) blurs along
+ * with the 3D scene behind it — see `InspectionDepthOfField`, which blurs the
+ * scene and toggles `.lab-tablet-focus` on the lab's root element. The
+ * canvas (first child; blurred in 3D), the tablet itself and the loading
+ * screen stay sharp.
+ */
+.lab-focus-root > :not(:first-child):not(.tablet-overlay-shell):not(.lab-boot-screen) {
+  transition: filter 0.25s ease;
+}
+.lab-focus-root.lab-tablet-focus > :not(:first-child):not(.tablet-overlay-shell):not(.lab-boot-screen) {
+  filter: blur(5px);
+  pointer-events: none;
+}

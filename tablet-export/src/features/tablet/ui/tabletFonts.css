@@ -1,0 +1,21 @@
+/*
+ * Self-hosted via @fontsource (not a Google Fonts CDN link) — this is a
+ * Tauri desktop build, and the shipped app may have no network access at
+ * runtime. Each file below bundles every Unicode subset (Latin, Cyrillic,
+ * etc.) as separate @font-face rules keyed by `unicode-range`, so the
+ * browser still only actually downloads whichever subset a given page uses
+ * — using the combined file isn't an unconditional "download everything"
+ * cost, just future-proofing against DOM text that mixes scripts (this
+ * tablet's Russian UI copy alongside Latin chemical formulas/model names).
+ *
+ * Unlike the reagent-cabinet CanvasTexture labels, this is real DOM text —
+ * `font-display: swap` (the @fontsource default) already handles the
+ * loading race natively: the browser shows a fallback font immediately and
+ * swaps in place once the real font arrives, with no manual JS gate needed.
+ */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
